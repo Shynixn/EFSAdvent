@@ -4,75 +4,25 @@
     <p class="text-slate-400">Worlds you have assembled from your stages.</p>
   </header>
 
-  <div class="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
-    <!-- Worlds -->
-    @for (world of worlds(); track world.id) {
-      <app-card
-        [title]="world.name"
-        [author]="world.author"
-        [uuid]="world.uuid"
-        [imageUrl]="worldmapUrl()"
-        [badge]="isDefault(world) ? 'Cannot be changed' : null"
-        [variant]="isDefault(world) ? 'danger' : 'default'"
-        (cardClick)="openWorld(world)"
-      />
-    }
-
-    <!-- Add world card -->
-    <button
-      type="button"
-      (click)="openCreate()"
-      class="flex min-h-[12rem] cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-slate-700 bg-slate-800/40 text-slate-400 transition hover:border-indigo-400 hover:text-indigo-300"
-    >
-      <svg class="h-10 w-10" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-        <path
-          fill-rule="evenodd"
-          d="M10 3a.75.75 0 01.75.75v5.5h5.5a.75.75 0 010 1.5h-5.5v5.5a.75.75 0 01-1.5 0v-5.5h-5.5a.75.75 0 010-1.5h5.5v-5.5A.75.75 0 0110 3z"
-          clip-rule="evenodd"
+  @if (worlds().length > 0) {
+    <div class="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
+      @for (world of worlds(); track world.id) {
+        <app-card
+          [title]="world.name"
+          [author]="world.author"
+          [uuid]="world.id"
+          [imageUrl]="worldmapUrl()"
+          [badge]="isDefault(world) ? 'Cannot be changed' : null"
+          [variant]="isDefault(world) ? 'danger' : 'default'"
+          (cardClick)="openWorld(world)"
         />
-      </svg>
-      <span class="text-sm font-medium">New World</span>
-    </button>
-  </div>
-</div>
-
-<!-- Create world modal -->
-<app-modal title="Create New World" [open]="isModalOpen()" (closed)="closeCreate()">
-  <div class="space-y-4">
-    <label class="block space-y-2">
-      <span class="text-sm text-slate-300">World name</span>
-      <input
-        type="text"
-        [value]="newWorldName()"
-        (input)="onNameInput($event)"
-        [attr.minlength]="minNameLength"
-        placeholder="e.g. Hyrule Fields"
-        autofocus
-        class="w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-slate-100 placeholder-slate-500 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/30"
-      />
-      <span class="block text-xs text-slate-500"> Minimum {{ minNameLength }} characters. </span>
-    </label>
-
-    <label class="block space-y-2">
-      <span class="text-sm text-slate-300">Author</span>
-      <input
-        type="text"
-        [value]="newWorldAuthor()"
-        (input)="onAuthorInput($event)"
-        placeholder="Your name"
-        class="w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-slate-100 placeholder-slate-500 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/30"
-      />
-    </label>
-
-    @if (nameError()) {
-      <p class="text-sm font-medium text-red-400">{{ nameError() }}</p>
-    }
-
-    <div class="flex justify-end gap-2 pt-1">
-      <app-button variant="outline" color="slate" (clicked)="closeCreate()">Cancel</app-button>
-      <app-button variant="primary" [disabled]="isSaving()" (clicked)="confirmCreate()">
-        {{ isSaving() ? 'Creating…' : 'Create' }}
-      </app-button>
+      }
     </div>
-  </div>
-</app-modal>
+  } @else {
+    <p
+      class="rounded-xl border border-dashed border-slate-700 bg-slate-800/40 p-8 text-center text-slate-400"
+    >
+      No worlds yet. Import your game files in Settings to create the default world.
+    </p>
+  }
+</div>

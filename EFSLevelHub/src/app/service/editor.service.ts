@@ -162,6 +162,18 @@ export class EditorService {
     return this.hasEditorFile(WORLDMAP_FILE);
   }
 
+  /** Removes the entire `/editor` folder and all of its contents. */
+  async clearEditor(): Promise<void> {
+    this.userData = null;
+    const root = await navigator.storage.getDirectory();
+    try {
+      await root.removeEntry(EDITOR_ROOT, { recursive: true });
+      this.logger.info('Editor: cleared /editor.');
+    } catch {
+      // Folder didn't exist — nothing to clear.
+    }
+  }
+
   /**
    * Whether a file exists under `/editor`.
    *

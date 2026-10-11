@@ -3,7 +3,8 @@ import { IsoExtractorService } from '../../service/iso-extractor.service';
 import { OpfsCacheService } from '../../service/opfs-cache.service';
 import { GameStateService } from '../../service/game-state.service';
 import { EditorService, WORLDMAP_FILE } from '../../service/editor.service';
-import { StageService } from '../../service/stage.service';
+import { StageService, DEFAULT_WORLD_STAGE_COUNT } from '../../service/stage.service';
+import { WorldService } from '../../service/world.service';
 import { FSALibService } from '../../service/fsalib.service';
 import { LoggingService } from '../../service/logging.service';
 import { ButtonComponent } from '../button/button.component';
@@ -32,6 +33,7 @@ export class IsoExtractorComponent implements OnInit {
   private readonly fsaLib = inject(FSALibService);
   private readonly editor = inject(EditorService);
   private readonly stageService = inject(StageService);
+  private readonly worldService = inject(WorldService);
   private readonly logger = inject(LoggingService);
 
   readonly selectedFileName = signal('');
@@ -126,6 +128,8 @@ export class IsoExtractorComponent implements OnInit {
     this.errorMessage.set('');
     try {
       await this.opfs.clearExtractedGame();
+      // Also wipe the entire editor cache (worlds, stages, worldmap, …).
+      await this.editor.clearEditor();
       await this.refreshStorage();
       await this.refreshCachedFileCount();
       // Re-run the ISO/import check so the shell and settings banner reflect
@@ -159,6 +163,7 @@ export class IsoExtractorComponent implements OnInit {
   private async generateEditorFiles(): Promise<void> {
     await this.generateWorldmap();
     await this.importDefaultStages();
+    await this.dumpEditorStore();
   }
 
   /** Decodes the overworld map texture into `/editor/cache/image/worldmap.png`. */
@@ -181,16 +186,54 @@ export class IsoExtractorComponent implements OnInit {
     }
   }
 
-  /** Registers the game's default stages (metadata only). */
+  /** Registers the game's default stages and seeds the default world. */
   private async importDefaultStages(): Promise<void> {
     try {
-      this.statusMessage.set('Registering default stages…');
-      await this.stageService.registerDefaultStages((done, total, name) => {
-        this.statusMessage.set(`Registering stages… ${done}/${total} ${name}`);
+      this.statusMessage.set('Creating stage files…');
+      const stageRefs = await this.stageService.registerDefaultStages((done, total, name) => {
+        this.statusMessage.set(`Creating stage files… ${done}/${total} ${name}`);
       });
+
+      this.statusMessage.set('Creating default world…');
+      const defaultStages = stageRefs.slice(0, DEFAULT_WORLD_STAGE_COUNT);
+      await this.worldService.seedDefaultWorld(defaultStages);
     } catch (error) {
-      this.logger.warn('UI: failed to register default stages (non-fatal)', error);
+      this.logger.warn('UI: failed to create default stages/world (non-fatal)', error);
     }
+  }
+
+  /**
+   * Dumps the entire editor store (`userdata.json`, every world and stage file)
+   * as a single JSON log message.
+   */
+  private async dumpEditorStore(): Promise<void> {
+    try {
+      const userdata = await this.editor.loadUserData();
+
+      const worldIds = (userdata['worlds'] as { id: string }[] | undefined) ?? [];
+      const stageIds = (userdata['stages'] as { id: string }[] | undefined) ?? [];
+
+      const worlds: unknown[] = [];
+      for (const ref of worldIds) {
+        worlds.push(await this.readEditorJson(`world/${ref.id}.json`));
+      }
+
+      const stages: unknown[] = [];
+      for (const ref of stageIds) {
+        stages.push(await this.readEditorJson(`stage/${ref.id}.json`));
+      }
+
+      const dump = { userdata, worlds, stages };
+      this.logger.info('=== EDITOR STORE DUMP ===\n' + JSON.stringify(dump, null, 2));
+    } catch (error) {
+      this.logger.warn('UI: failed to dump editor store (non-fatal)', error);
+    }
+  }
+
+  /** Reads and parses a JSON file from `/editor`, or null when missing. */
+  private async readEditorJson(relativePath: string): Promise<unknown> {
+    const bytes = await this.editor.readEditorFile(relativePath);
+    return bytes ? JSON.parse(new TextDecoder().decode(bytes)) : null;
   }
 
   /** Decodes a `data:...;base64,` URL into raw bytes. */

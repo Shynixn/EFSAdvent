@@ -7,15 +7,7 @@
   @if (stages().length > 0) {
     <div class="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
       @for (stage of stages(); track stage.id) {
-        <app-card
-          [title]="stage.name"
-          [author]="stage.author"
-          [uuid]="stage.uuid"
-          [imageUrl]="worldmapUrl()"
-          [badge]="stage.locked ? 'Cannot be changed' : null"
-          [variant]="stage.locked ? 'danger' : 'default'"
-          [disabled]="stage.locked"
-        />
+        <app-card [title]="stage.name" [uuid]="stage.id" [imageUrl]="worldmapUrl()" />
       }
     </div>
   } @else {
