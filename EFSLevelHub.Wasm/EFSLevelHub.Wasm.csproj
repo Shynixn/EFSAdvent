@@ -18,6 +18,16 @@
     <ProjectReference Include="..\FSALib\FSALib.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- FSALib's `assets/` folder is copied to its own output directory, which
+         the browser-wasm virtual filesystem does not expose. Link the files in
+         as embedded resources so they can be materialized into the VFS at
+         startup, letting FSALib's own `Assets` loader read them normally. -->
+    <EmbeddedResource Include="..\FSALib\assets\**\*.json"
+                      Link="assets\%(RecursiveDir)%(Filename)%(Extension)"
+                      LogicalName="assets/%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
   <!-- Copy the browser-wasm runtime into the Angular app's public folder so the
        dev server serves it at /fsalib/... without an extra copy step. -->
   <Target Name="CopyWasmToAngular" AfterTargets="Publish" Condition="'$(PublishDir)' != ''">

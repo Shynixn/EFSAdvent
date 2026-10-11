@@ -103,6 +103,116 @@
           <span class="text-slate-500"> (green ring = start room)</span>
         </p>
       }
+
+      <!-- Rendered room (StageRenderer port) -->
+      @if (selectedRoom() !== null) {
+        <div class="space-y-2">
+          <h3 class="text-sm font-semibold text-slate-300">Rendered room {{ selectedRoom() }}</h3>
+          @if (renderError()) {
+            <p class="rounded-lg bg-red-500/10 p-3 text-sm text-red-400">{{ renderError() }}</p>
+          }
+          @if (isRenderingRoom()) {
+            <p class="text-sm text-indigo-300">Rendering room…</p>
+          } @else if (roomRenderUrl(); as url) {
+            <div class="overflow-auto rounded-lg bg-slate-900/60 p-2">
+              <img
+                [src]="url"
+                [alt]="'Room ' + selectedRoom()"
+                class="max-h-[32rem] max-w-full"
+                [style.image-rendering]="'pixelated'"
+              />
+            </div>
+          }
+        </div>
+      }
+    </div>
+  }
+</section>
+
+<!-- Texture browser: names only, decoded on click to spare the GPU -->
+<section class="mx-auto mt-6 max-w-5xl space-y-4 rounded-2xl bg-slate-800 p-8 shadow-xl">
+  <header class="space-y-1">
+    <h2 class="text-2xl font-semibold text-white">Textures (BTI → PNG)</h2>
+    <p class="text-sm text-slate-400">
+      All <code class="font-mono text-slate-300">.bti</code> textures in
+      <code class="font-mono text-slate-300">{{ dataArcPath }}</code
+      >, listed by size with the largest first. Click a name to decode and render it — nothing is
+      decoded until you do.
+    </p>
+  </header>
+
+  @if (isListingTextures()) {
+    <p class="text-sm text-indigo-300">Reading archive and listing textures…</p>
+  }
+
+  @if (textureError()) {
+    <p class="rounded-lg bg-red-500/10 p-3 text-sm text-red-400">{{ textureError() }}</p>
+  }
+
+  @if (textures().length) {
+    <div class="grid gap-4 lg:grid-cols-[24rem_1fr]">
+      <!-- Name list -->
+      <div class="flex max-h-96 flex-col rounded-lg bg-slate-900/60">
+        <div class="flex items-center justify-between gap-2 border-b border-slate-700/60 px-3 py-2">
+          <span class="text-xs text-slate-500">{{ textures().length }} texture(s)</span>
+          <button
+            type="button"
+            (click)="toggleTextureSort()"
+            class="rounded px-2 py-0.5 text-[11px] text-slate-300 transition hover:bg-slate-700/60"
+            title="Toggle sort order"
+          >
+            {{ sortBySizeDesc() ? 'Largest first' : 'A → Z' }}
+          </button>
+        </div>
+        <ul class="flex-1 overflow-auto p-2">
+          @for (tex of sortedTextures(); track tex.Path) {
+            <li>
+              <button
+                type="button"
+                (click)="toggleTexture(tex.Path)"
+                [class]="
+                  'flex w-full items-baseline gap-2 rounded px-2 py-1 text-left font-mono text-[11px] transition ' +
+                  (selectedTexturePath() === tex.Path
+                    ? 'bg-indigo-500/20 text-indigo-200'
+                    : 'text-slate-300 hover:bg-slate-700/60')
+                "
+                [title]="tex.Path"
+              >
+                <span class="min-w-0 flex-1 truncate">{{ tex.Path }}</span>
+                <span class="shrink-0 text-[10px] text-slate-500">{{ formatBytes(tex.Size) }}</span>
+              </button>
+            </li>
+          }
+        </ul>
+      </div>
+
+      <!-- Preview (only the selected texture is ever decoded) -->
+      <div class="rounded-lg bg-slate-900/60 p-4">
+        @if (!selectedTexturePath()) {
+          <p class="text-sm text-slate-500">Select a texture to preview it here.</p>
+        } @else if (isDecodingImage()) {
+          <p class="text-sm text-indigo-300">Decoding {{ selectedTexturePath() }}…</p>
+        } @else if (selectedImage(); as img) {
+          <figure class="space-y-3">
+            <div
+              class="flex max-h-96 items-center justify-center overflow-auto rounded bg-[repeating-conic-gradient(#334155_0%_25%,#1e293b_0%_50%)] bg-[length:16px_16px] p-2"
+            >
+              <img
+                [src]="img.pngDataUrl"
+                [alt]="img.path"
+                class="max-h-80 max-w-full"
+                [style.image-rendering]="'pixelated'"
+              />
+            </div>
+            <figcaption class="space-y-0.5">
+              <div class="font-mono text-xs text-slate-300">{{ img.path }}</div>
+              <div class="font-mono text-[10px] text-slate-500">
+                {{ img.width }} × {{ img.height }}
+              </div>
+            </figcaption>
+          </figure>
+        }
+      </div>
     </div>
   }
 </section>

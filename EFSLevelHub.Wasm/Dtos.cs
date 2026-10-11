@@ -53,6 +53,7 @@ public sealed class ActorDto
     public byte Layer { get; set; }
     public byte X { get; set; }
     public byte Y { get; set; }
+    public uint Variable { get; set; }
 }
 
 /// <summary>JSON-serializable projection of a FSALib <c>Rarc.DirectoryNode</c>.</summary>
@@ -61,4 +62,25 @@ public sealed class RarcDirectoryDto
     public string Name { get; set; } = string.Empty;
     public List<string> Files { get; set; } = new();
     public Dictionary<string, RarcDirectoryDto> Directories { get; set; } = new();
+}
+
+/// <summary>A single file entry inside a RARC archive.</summary>
+public sealed class ArchiveFileDto
+{
+    /// <summary>Full path relative to the archive root, e.g. `timg/foo.bti`.</summary>
+    public string Path { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public int Size { get; set; }
+}
+
+/// <summary>JSON-serializable projection of a FSALib <c>TilesetDefinition</c>.</summary>
+public sealed class TilesetDto
+{
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>Internal tileset id used by the game's file naming convention.</summary>
+    public string ID { get; set; } = string.Empty;
+
+    /// <summary>Alternative id for the GBA-specific tileset files, if any.</summary>
+    public string? GbaID { get; set; }
 }

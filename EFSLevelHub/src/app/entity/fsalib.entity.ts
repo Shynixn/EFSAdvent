@@ -54,6 +54,7 @@ export interface ActorData {
   Layer: number;
   X: number;
   Y: number;
+  Variable: number;
 }
 
 /** A directory node within a RARC archive. */

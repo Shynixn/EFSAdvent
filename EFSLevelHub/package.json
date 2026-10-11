@@ -19,13 +19,15 @@
     "@angular/platform-browser": "^22.2.0",
     "@angular/router": "^22.2.0",
     "rxjs": "~7.8.0",
-    "tslib": "^2.3.0"
+    "tslib": "^2.3.0",
+    "upng-js": "^2.1.0"
   },
   "devDependencies": {
     "@angular/build": "^22.2.2",
     "@angular/cli": "^22.2.2",
     "@angular/compiler-cli": "^22.2.0",
     "@tailwindcss/postcss": "^4.3.3",
+    "@types/upng-js": "^2.1.5",
     "jsdom": "^30.0.0",
     "postcss": "^8.5.29",
     "prettier": "^3.8.1",
