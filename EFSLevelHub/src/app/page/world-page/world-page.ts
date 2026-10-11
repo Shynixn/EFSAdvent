@@ -11,10 +11,18 @@ import {
 import { ActivatedRoute, Router } from '@angular/router';
 import { ButtonComponent } from '../../component/button/button.component';
 import { StagePickerComponent } from '../../component/stage-picker/stage-picker.component';
+import { ModalComponent } from '../../component/modal/modal.component';
 import { WorldService } from '../../service/world.service';
-import { StageService, StageFile } from '../../service/stage.service';
+import { StageService, StageFile, DEFAULT_STAGE_ARC_ORDER } from '../../service/stage.service';
 import { WorldTabsService } from '../../service/world-tabs.service';
 import { EditorService, WORLDMAP_FILE } from '../../service/editor.service';
+import {
+  IsoBuilderService,
+  BlobIsoWriter,
+  FileStreamIsoWriter,
+  IsoWriter,
+} from '../../service/iso-builder.service';
+import { IsoSourceService } from '../../service/iso-source.service';
 import { LoggingService } from '../../service/logging.service';
 
 /**
@@ -46,13 +54,15 @@ export interface MapPoint {
  */
 @Component({
   selector: 'app-world-page',
-  imports: [ButtonComponent, StagePickerComponent],
+  imports: [ButtonComponent, StagePickerComponent, ModalComponent],
   templateUrl: './world-page.html',
   styleUrl: './world-page.css',
 })
 export class WorldPage implements OnInit, OnDestroy {
   private readonly worldService = inject(WorldService);
   private readonly stageService = inject(StageService);
+  private readonly isoBuilder = inject(IsoBuilderService);
+  private readonly isoSource = inject(IsoSourceService);
   private readonly tabs = inject(WorldTabsService);
   private readonly editor = inject(EditorService);
   private readonly route = inject(ActivatedRoute);
@@ -135,6 +145,19 @@ export class WorldPage implements OnInit, OnDestroy {
   /** The marker currently being re-pointed (null when the picker is closed). */
   readonly activePoint = signal<MapPoint | null>(null);
 
+  /** Whether the export-to-ISO progress modal is open. */
+  readonly exportOpen = signal(false);
+  /** Export progress percentage (0–100). */
+  readonly exportPercent = signal(0);
+  /** Export progress status message. */
+  readonly exportMessage = signal('');
+  /** Whether the export finished successfully. */
+  readonly exportDone = signal(false);
+  /** Export error message, if any. */
+  readonly exportError = signal('');
+  /** Whether a source ISO is available for export. */
+  readonly canExport = signal(false);
+
   ngOnInit(): void {
     const id = this.route.snapshot.paramMap.get('worldId') ?? '';
     this.worldId.set(id);
@@ -152,6 +175,7 @@ export class WorldPage implements OnInit, OnDestroy {
     });
 
     void this.loadWorldmap();
+    void this.isoSource.exists().then((has) => this.canExport.set(has));
     this.observeArea();
   }
 
@@ -211,16 +235,119 @@ export class WorldPage implements OnInit, OnDestroy {
       return;
     }
 
-    // Re-point the slot at the chosen stage. `arcFileName` is display metadata
-    // only; stage files no longer carry it, so leave it blank here.
+    // Re-point the slot at the chosen stage. The slot's target arc name is
+    // fixed by its position (slot 0 → boss010.arc, …), independent of which
+    // stage the slot now references, so keep it in sync here.
+    const arcId = DEFAULT_STAGE_ARC_ORDER[point.slot];
     const updated = await this.worldService.setWorldStage(worldId, point.slot, {
       id: stageId,
-      arcFileName: '',
+      arcFileName: arcId ? `${arcId}.arc` : '',
     });
     if (updated) {
       void this.buildPoints(updated.stages.map((s) => s.id));
     }
     this.closePicker();
+  }
+
+  /**
+   * Builds a patched ISO from the world's stages and prompts the user to save
+   * it, showing progress in a modal.
+   *
+   * Uses the File System Access API's save picker when available (Chrome/Edge);
+   * otherwise falls back to a standard blob download, which any browser handles
+   * through its own save dialog.
+   */
+  async exportToIso(): Promise<void> {
+    const worldId = this.worldId();
+
+    const suggestedName = `${(this.worldName() || 'world').replace(/[^\w.-]+/g, '_')}.iso`;
+
+    // Prefer the native save picker so we can stream straight to disk.
+    const picker = (window as unknown as { showSaveFilePicker?: SaveFilePickerFn })
+      .showSaveFilePicker;
+    let writer: IsoWriter;
+    if (picker) {
+      let handle: FileSystemFileHandle;
+      try {
+        handle = await picker({
+          suggestedName,
+          types: [
+            { description: 'GameCube ISO', accept: { 'application/octet-stream': ['.iso'] } },
+          ],
+        });
+      } catch {
+        // User cancelled the save dialog — do nothing.
+        return;
+      }
+      writer = new FileStreamIsoWriter(await handle.createWritable());
+    } else {
+      // Firefox/Safari: build in memory and download when finished.
+      writer = new BlobIsoWriter();
+    }
+
+    const blobWriter = writer instanceof BlobIsoWriter ? writer : null;
+
+    this.exportError.set('');
+    this.exportDone.set(false);
+    this.exportPercent.set(0);
+    this.exportMessage.set('Preparing export…');
+    this.exportOpen.set(true);
+
+    try {
+      const result = await this.isoBuilder.exportWorld(worldId, writer, (progress) => {
+        this.exportPercent.set(progress.percent);
+        this.exportMessage.set(progress.message);
+      });
+
+      if (blobWriter) {
+        this.exportMessage.set('Preparing download…');
+        this.downloadBlob(blobWriter.toBlob(), suggestedName);
+      }
+
+      this.exportPercent.set(100);
+      this.exportDone.set(true);
+      const retargetedNote =
+        result.retargetedArcs > 0
+          ? ` ${result.retargetedArcs} re-indexed into a different slot — verify those stages in-game.`
+          : '';
+      this.exportMessage.set(
+        `Done — ${result.replacedArcs} stage arc(s) replaced.${retargetedNote} ${
+          blobWriter ? 'Downloaded' : 'Saved'
+        } ${this.formatBytes(result.outputSize)}.`,
+      );
+    } catch (error) {
+      this.exportError.set(error instanceof Error ? error.message : 'Export failed.');
+      this.logger.error('WorldPage: ISO export failed', error);
+    }
+  }
+
+  /** Triggers a browser download of the given blob via a temporary link. */
+  private downloadBlob(blob: Blob, fileName: string): void {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    // Revoke shortly after, so the download has time to start.
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  }
+
+  /** Dismisses the export modal. */
+  closeExport(): void {
+    this.exportOpen.set(false);
+  }
+
+  /** Formats a byte count for display. */
+  formatBytes(bytes: number): string {
+    if (bytes < 1024) {
+      return `${bytes} B`;
+    }
+    if (bytes < 1024 * 1024) {
+      return `${(bytes / 1024).toFixed(1)} KB`;
+    }
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   }
 
   /** Captures the image's natural aspect ratio once it has loaded. */
@@ -268,3 +395,9 @@ export class WorldPage implements OnInit, OnDestroy {
     }
   }
 }
+
+/** Minimal typing for `window.showSaveFilePicker`. */
+type SaveFilePickerFn = (options?: {
+  suggestedName?: string;
+  types?: { description?: string; accept: Record<string, string[]> }[];
+}) => Promise<FileSystemFileHandle>;

@@ -18,6 +18,7 @@ FSALib/Directory.Build.targets
 *.sln.docstates
 .devcontainer/
 temp/*
+emulator/*
 
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs

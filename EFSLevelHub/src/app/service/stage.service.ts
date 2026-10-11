@@ -3,6 +3,7 @@ import { EditorService } from './editor.service';
 import { FSALibService } from './fsalib.service';
 import { LoggingService } from './logging.service';
 import { OpfsCacheService } from './opfs-cache.service';
+import { sha256Hex } from './hash.util';
 
 /** Key under which stage ids are stored in the editor's `userdata.json`. */
 const STAGES_KEY = 'stages';
@@ -121,6 +122,16 @@ export interface StageFile {
   name: string;
   /** Author shown in the stage picker; falls back to "Nintendo" when absent. */
   author?: string;
+  /**
+   * SHA-256 (hex) of the archive copied at import time. Used at export to skip
+   * stages that have not been modified (`/editor/stage/<uuid>.arc` unchanged).
+   */
+  originalHash?: string;
+  /**
+   * Original map index of the source archive (e.g. 10 for `boss010`). Lets the
+   * export skip re-indexing/merging when the stage stays in its own slot.
+   */
+  originalIndex?: number;
 }
 
 /**
@@ -206,15 +217,22 @@ export class StageService {
       const name = definition?.Name ?? id;
       onProgress?.(i, total, name);
 
-      const file: StageFile = { id: uuid, name, author: DEFAULT_STAGE_AUTHOR };
+      // Copy the stage's source archive next to its JSON so the stage is
+      // self-contained in the editor store (`/editor/stage/<uuid>.arc`).
+      const arcBytes = await this.copyStageArc(id, uuid);
+
+      const file: StageFile = {
+        id: uuid,
+        name,
+        author: DEFAULT_STAGE_AUTHOR,
+        originalIndex: Number.parseInt(id.replace(/\D/g, ''), 10),
+        // Hash the archive as imported, so export can skip unmodified stages.
+        originalHash: arcBytes ? await sha256Hex(arcBytes) : undefined,
+      };
       await this.editor.writeEditorFile(
         stageFilePath(uuid),
         new TextEncoder().encode(JSON.stringify(file, null, 2)),
       );
-
-      // Also store the stage's source archive next to its JSON, so the stage
-      // is self-contained in the editor store (`/editor/stage/<uuid>.arc`).
-      await this.copyStageArc(id, uuid);
 
       created.push(file);
       refs.push({ id: uuid, arcFileName: `${id}.arc` });
@@ -252,17 +270,19 @@ export class StageService {
    * anywhere under `/extracted_game`. Failures are non-fatal (the stage JSON
    * and world file are already usable).
    */
-  private async copyStageArc(arcId: string, uuid: string): Promise<void> {
+  private async copyStageArc(arcId: string, uuid: string): Promise<Uint8Array | null> {
     try {
       const sourcePath = await this.opfs.findFileByName(`${arcId}.arc`);
       if (!sourcePath) {
         this.logger.warn(`StageService: arc "${arcId}.arc" not found in extracted game.`);
-        return;
+        return null;
       }
       const bytes = await this.opfs.readExtractedFile(sourcePath);
       await this.editor.writeEditorFile(stageArcFilePath(uuid), bytes);
+      return bytes;
     } catch (error) {
       this.logger.warn(`StageService: failed to copy arc "${arcId}.arc" (non-fatal)`, error);
+      return null;
     }
   }
 }

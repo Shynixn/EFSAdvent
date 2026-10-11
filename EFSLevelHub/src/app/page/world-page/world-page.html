@@ -7,14 +7,29 @@
       <h1 class="truncate text-lg font-semibold text-white">{{ worldName() }}</h1>
       <p class="text-xs text-slate-400">World</p>
     </div>
-    <app-button
-      variant="outline"
-      color="slate"
-      [icon]="'M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z'"
-      (clicked)="close()"
-    >
-      Close
-    </app-button>
+    <div class="flex items-center gap-2">
+      <app-button
+        variant="primary"
+        color="indigo"
+        [disabled]="!canExport()"
+        [title]="
+          canExport()
+            ? 'Rebuild and export an ISO with your stage arcs'
+            : 'Re-import the disc image to enable export'
+        "
+        (clicked)="exportToIso()"
+      >
+        Export to ISO
+      </app-button>
+      <app-button
+        variant="outline"
+        color="slate"
+        [icon]="'M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z'"
+        (clicked)="close()"
+      >
+        Close
+      </app-button>
+    </div>
   </header>
 
   <!-- World map (fills the available area) -->
@@ -78,3 +93,60 @@
   (picked)="onStagePicked($event)"
   (closed)="closePicker()"
 />
+
+<!-- Export progress modal -->
+<app-modal [open]="exportOpen()" title="Exporting ISO" maxWidth="max-w-sm" (closed)="closeExport()">
+  <div class="flex flex-col items-center gap-4 py-2 text-center">
+    @if (exportError()) {
+      <p class="text-sm text-red-400">{{ exportError() }}</p>
+    } @else if (exportDone()) {
+      <svg
+        class="h-12 w-12 text-emerald-400"
+        viewBox="0 0 20 20"
+        fill="currentColor"
+        aria-hidden="true"
+      >
+        <path
+          fill-rule="evenodd"
+          d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.7-9.3a1 1 0 00-1.4-1.4L9 10.6 7.7 9.3a1 1 0 00-1.4 1.4l2 2a1 1 0 001.4 0l4-4z"
+          clip-rule="evenodd"
+        />
+      </svg>
+      <p class="text-sm text-slate-300">{{ exportMessage() }}</p>
+      <app-button variant="primary" color="indigo" (clicked)="closeExport()">Close</app-button>
+    } @else {
+      <!-- Progress circle -->
+      <div class="relative h-20 w-20">
+        <svg class="h-20 w-20 -rotate-90" viewBox="0 0 36 36" aria-hidden="true">
+          <circle
+            cx="18"
+            cy="18"
+            r="16"
+            fill="none"
+            stroke="currentColor"
+            class="text-slate-700"
+            stroke-width="4"
+          />
+          <circle
+            cx="18"
+            cy="18"
+            r="16"
+            fill="none"
+            stroke="currentColor"
+            class="text-indigo-500 transition-[stroke-dashoffset] duration-200"
+            stroke-width="4"
+            stroke-linecap="round"
+            [attr.stroke-dasharray]="100.53"
+            [attr.stroke-dashoffset]="100.53 - (100.53 * exportPercent()) / 100"
+          />
+        </svg>
+        <span
+          class="absolute inset-0 flex items-center justify-center text-sm font-semibold text-white"
+        >
+          {{ exportPercent() }}%
+        </span>
+      </div>
+      <p class="min-h-5 text-sm text-slate-300">{{ exportMessage() }}</p>
+    }
+  </div>
+</app-modal>

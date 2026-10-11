@@ -1,6 +1,8 @@
 using System.Runtime.InteropServices.JavaScript;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using AuroraLib.Compression;
+using AuroraLib.Core.IO;
 using FSALib;
 using FSALib.Structs;
 
@@ -38,10 +40,201 @@ public static partial class FsaInterop
         }
     }
 
+    /// <summary>
+    /// Re-indexes a stage archive so it can occupy a different stage slot.
+    /// </summary>
+    /// <remarks>
+    /// Each <c>bossNNN.arc</c> is internally bound to its own map index: its
+    /// RARC holds <c>B0NN</c>/<c>M0NN</c> folders and <c>0NN_…</c> files, and the
+    /// game resolves stage resources by that index. Placing the archive in a
+    /// different slot therefore requires rewriting those names/data to the
+    /// destination index. This loads the stage, sets its
+    /// <see cref="Stage.Index"/> (which drives every internal rename) and
+    /// re-serializes it.
+    /// </remarks>
+    /// <param name="arcData">Raw bytes of the source <c>bossNNN.arc</c>.</param>
+    /// <param name="targetIndex">Destination stage index (e.g. 10 for boss010).</param>
+    /// <returns>The re-indexed archive bytes, or an empty array on failure.</returns>
+    [JSExport]
+    public static byte[] RetargetStageIndex(byte[] arcData, int targetIndex)
+    {
+        try
+        {
+            using var stream = new MemoryStream(arcData, writable: false);
+            using var rarc = new Rarc(stream);
+            using var stage = new Stage(rarc)
+            {
+                Index = targetIndex,
+            };
+
+            return SerializeStage(stage);
+        }
+        catch
+        {
+            return Array.Empty<byte>();
+        }
+    }
+
+    /// <summary>
+    /// Serializes a stage and normalizes its map CSV files to the exact format
+    /// the game expects.
+    /// </summary>
+    /// <remarks>
+    /// FSALib's <see cref="MapLayout.WriteToStream"/> uses <c>StreamWriter</c>,
+    /// which on non-Windows runtimes writes <c>\n</c> line endings and a UTF-8
+    /// BOM. The game's CSV parser requires <c>\r\n</c> with no BOM, so a plain
+    /// round-trip would otherwise produce an archive the game crashes on. This
+    /// writes the stage, re-opens the produced RARC and rewrites each
+    /// <c>map*.csv</c> file with CRLF endings and no BOM.
+    /// </remarks>
+    private static byte[] SerializeStage(Stage stage)
+    {
+        // Phase 1: serialize normally.
+        using var first = new MemoryStream();
+        stage.WriteToStream(first);
+        first.Position = 0;
+
+        // Phase 2: re-open, fix the CSVs, re-serialize.
+        using var rarc = new Rarc(first);
+        NormalizeCsvFiles(rarc.Root);
+
+        using var final = new MemoryStream();
+        rarc.WriteToStream(final, CompressionSettings.Maximum);
+        final.WriteAlign(0x10);
+        return final.ToArray();
+    }
+
+    /// <summary>Rewrites every <c>.csv</c> under the tree with CRLF and no BOM.</summary>
+    private static void NormalizeCsvFiles(Rarc.DirectoryNode node)
+    {
+        foreach (var file in node.Files)
+        {
+            if (!file.Name.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var source = file.Data;
+            source.Position = 0;
+            using var reader = new StreamReader(source, System.Text.Encoding.UTF8, true, 1024, true);
+            string text = reader.ReadToEnd();
+
+            // Strip a UTF-8 BOM if present and normalize to CRLF.
+            text = text.TrimStart('\uFEFF');
+            text = text.Replace("\r\n", "\n").Replace("\r", "\n").Replace("\n", "\r\n");
+
+            var bytes = System.Text.Encoding.ASCII.GetBytes(text);
+            file.Data = new MemoryStream(bytes);
+        }
+
+        foreach (var dir in node.Directorys.Values)
+            NormalizeCsvFiles(dir);
+    }
+
     /// <summary>Liveness probe returning the FSALib version.</summary>
     [JSExport]
     public static string GetVersion()
         => typeof(Stage).Assembly.GetName().Version?.ToString() ?? "unknown";
+
+    /// <summary>
+    /// Merges one stage's *content* (map layout, rooms, actors and layers) into
+    /// another stage's archive, keeping the destination's slot structure.
+    /// </summary>
+    /// <remarks>
+    /// Swapping whole archives between slots crashes the game, because each
+    /// archive is structurally bound to its own slot. This instead loads the
+    /// <paramref name="targetArcData"/> (the slot's own stage, so all of its
+    /// slot-specific resources stay valid), overwrites its map layout and every
+    /// room's actors/layers with the corresponding data from
+    /// <paramref name="sourceArcData"/>, and re-serializes it. The result is a
+    /// correctly-shaped <c>bossNNN.arc</c> whose gameplay content comes from the
+    /// source stage.
+    /// </remarks>
+    /// <param name="targetArcData">Archive of the slot to write into.</param>
+    /// <param name="sourceArcData">Archive whose content should be copied in.</param>
+    /// <returns>The merged archive bytes, or an empty array on failure.</returns>
+    [JSExport]
+    public static byte[] MergeStageContent(byte[] targetArcData, byte[] sourceArcData)
+    {
+        try
+        {
+            using var targetStream = new MemoryStream(targetArcData, writable: false);
+            using var targetRarc = new Rarc(targetStream);
+            using var target = new Stage(targetRarc);
+
+            using var sourceStream = new MemoryStream(sourceArcData, writable: false);
+            using var sourceRarc = new Rarc(sourceStream);
+            using var source = new Stage(sourceRarc);
+
+            // Remember the destination slot index; copying the source map below
+            // would otherwise drag the source's index along with it.
+            int targetIndex = target.Index;
+
+            // --- Map layout(s) -------------------------------------------------
+            CopyMapLayout(source.Map, target.Map);
+            if (source.MapSingleplayer is not null && target.MapSingleplayer is not null)
+                CopyMapLayout(source.MapSingleplayer, target.MapSingleplayer);
+
+            // Re-assert the destination index so every subsequent rename/save
+            // writes slot-correct names (B0NN/M0NN, 0NN_…).
+            target.Index = targetIndex;
+
+            // --- Rooms (actors + layers) ---------------------------------------
+            var targetRooms = target.Rooms;
+            var sourceRooms = source.Rooms;
+            int count = Math.Min(targetRooms.Length, sourceRooms.Length);
+            for (int i = 0; i < count; i++)
+            {
+                var src = sourceRooms[i];
+                if (src is null)
+                {
+                    targetRooms[i] = null;
+                    continue;
+                }
+
+                var dst = targetRooms[i] ?? new Room();
+                targetRooms[i] = dst;
+                CopyRoomContent(src, dst);
+            }
+
+            return SerializeStage(target);
+        }
+        catch
+        {
+            return Array.Empty<byte>();
+        }
+    }
+
+    /// <summary>Copies a map layout's serializable state into another instance.</summary>
+    private static void CopyMapLayout(MapLayout from, MapLayout to)
+    {
+        using var buffer = new MemoryStream();
+        from.WriteToStream(buffer);
+        buffer.Position = 0;
+        to.ReadFromStream(buffer);
+    }
+
+    /// <summary>Copies a room's actors and every layer into another instance.</summary>
+    private static void CopyRoomContent(Room from, Room to)
+    {
+        // Actors.
+        using (var actorBuffer = new MemoryStream())
+        {
+            from.Actors.WriteToStream(actorBuffer);
+            actorBuffer.Position = 0;
+            to.Actors.ReadFromStream(actorBuffer);
+        }
+
+        // Layers (base + top).
+        var fromLayers = from.Layers;
+        var toLayers = to.Layers;
+        int layerCount = Math.Min(fromLayers.Length, toLayers.Length);
+        for (int i = 0; i < layerCount; i++)
+        {
+            using var layerBuffer = new MemoryStream();
+            fromLayers[i].WriteToStream(layerBuffer);
+            layerBuffer.Position = 0;
+            toLayers[i].ReadFromStream(layerBuffer);
+        }
+    }
 
     /// <summary>
     /// Returns the tileset definitions loaded by FSALib (<c>Assets.Tilesets</c>)

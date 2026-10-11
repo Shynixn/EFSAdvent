@@ -1,5 +1,6 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { IsoExtractorService } from '../../service/iso-extractor.service';
+import { IsoSourceService } from '../../service/iso-source.service';
 import { OpfsCacheService } from '../../service/opfs-cache.service';
 import { GameStateService } from '../../service/game-state.service';
 import { EditorService, WORLDMAP_FILE } from '../../service/editor.service';
@@ -28,6 +29,7 @@ import { ExtractionProgress, StorageEstimate } from '../../entity/iso.entity';
 })
 export class IsoExtractorComponent implements OnInit {
   private readonly isoExtractor = inject(IsoExtractorService);
+  private readonly isoSource = inject(IsoSourceService);
   private readonly opfs = inject(OpfsCacheService);
   private readonly gameState = inject(GameStateService);
   private readonly fsaLib = inject(FSALibService);
@@ -83,6 +85,11 @@ export class IsoExtractorComponent implements OnInit {
       // Generate the editor's derived assets (e.g. `/editor/cache/image/worldmap.png`).
       await this.generateEditorFiles();
 
+      // Persist a copy of the source image so a patched ISO can be exported
+      // later without asking the user to re-select the file.
+      this.statusMessage.set('Saving source image for export…');
+      await this.isoSource.save(file);
+
       this.totalFiles.set(result.totalFiles);
       this.successMessage.set(`Extraction complete — ${result.totalFiles} file(s) cached to OPFS.`);
       this.logger.info(`UI: extraction finished (${result.totalFiles} files).`);
@@ -130,6 +137,8 @@ export class IsoExtractorComponent implements OnInit {
       await this.opfs.clearExtractedGame();
       // Also wipe the entire editor cache (worlds, stages, worldmap, …).
       await this.editor.clearEditor();
+      // And the persisted source image, which is no longer needed.
+      await this.isoSource.clear();
       await this.refreshStorage();
       await this.refreshCachedFileCount();
       // Re-run the ISO/import check so the shell and settings banner reflect

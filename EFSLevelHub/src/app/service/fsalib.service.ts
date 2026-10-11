@@ -20,6 +20,8 @@ interface DotnetExports {
     Wasm: {
       FsaInterop: {
         ParseStage(arcData: Uint8Array): string;
+        RetargetStageIndex(arcData: Uint8Array, targetIndex: number): Uint8Array;
+        MergeStageContent(targetArcData: Uint8Array, sourceArcData: Uint8Array): Uint8Array;
         ListArchiveFiles(arcData: Uint8Array): string;
         ReadArchiveFile(arcData: Uint8Array, path: string): Uint8Array;
         EnsureAssets(): string;
@@ -146,6 +148,47 @@ export class FSALibService {
       throw new Error(`FSALib failed to parse stage: ${result.error}`);
     }
     return result;
+  }
+
+  /**
+   * Re-indexes a stage archive so it can occupy a different stage slot.
+   *
+   * A `bossNNN.arc` is internally bound to its map index (its RARC holds
+   * `B0NN`/`M0NN` folders and `0NN_…` files, and the game resolves resources by
+   * that index). To place it in a different slot the internal names/data must be
+   * rewritten to the destination index, which FSALib does when the stage's
+   * index is changed.
+   *
+   * @param arcData     Raw bytes of the source archive (optionally YAZ0-compressed).
+   * @param targetIndex Destination stage index (e.g. 10 for `boss010`).
+   * @returns The re-indexed archive bytes (YAZ0-compressed), or null on failure.
+   */
+  async retargetStageIndex(arcData: Uint8Array, targetIndex: number): Promise<Uint8Array | null> {
+    const fsa = await this.getFsa();
+    const result = fsa.RetargetStageIndex(arcData, targetIndex);
+    return result && result.byteLength > 0 ? result : null;
+  }
+
+  /**
+   * Merges one stage's content (map layout, rooms, actors and layers) into
+   * another stage's archive, keeping the destination's slot structure.
+   *
+   * Used when a world re-points a slot at a different stage: rather than swapping
+   * whole archives (which crashes because each archive is bound to its own slot),
+   * the destination slot's own archive is kept and its gameplay content is
+   * overwritten with the source stage's.
+   *
+   * @param targetArcData Archive of the slot being written (its own stage).
+   * @param sourceArcData Archive whose content should be copied in.
+   * @returns The merged archive bytes, or null on failure.
+   */
+  async mergeStageContent(
+    targetArcData: Uint8Array,
+    sourceArcData: Uint8Array,
+  ): Promise<Uint8Array | null> {
+    const fsa = await this.getFsa();
+    const result = fsa.MergeStageContent(targetArcData, sourceArcData);
+    return result && result.byteLength > 0 ? result : null;
   }
 
   /**
