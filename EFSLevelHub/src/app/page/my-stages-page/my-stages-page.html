@@ -3,4 +3,26 @@
     <h1 class="text-3xl font-bold tracking-tight text-white">My Stages</h1>
     <p class="text-slate-400">Stages you have created and saved.</p>
   </header>
+
+  @if (stages().length > 0) {
+    <div class="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
+      @for (stage of stages(); track stage.id) {
+        <app-card
+          [title]="stage.name"
+          [author]="stage.author"
+          [uuid]="stage.uuid"
+          [imageUrl]="worldmapUrl()"
+          [badge]="stage.locked ? 'Cannot be changed' : null"
+          [variant]="stage.locked ? 'danger' : 'default'"
+          [disabled]="stage.locked"
+        />
+      }
+    </div>
+  } @else {
+    <p
+      class="rounded-xl border border-dashed border-slate-700 bg-slate-800/40 p-8 text-center text-slate-400"
+    >
+      No stages yet. Import your game files in Settings to load the default stages.
+    </p>
+  }
 </div>

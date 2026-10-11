@@ -224,6 +224,33 @@ export class OpfsCacheService {
   }
 
   /**
+   * Lists the file names directly inside a folder under `/extracted_game`.
+   *
+   * @param relativeDir Path relative to `/extracted_game`, e.g. `GC4swords/Boss`.
+   */
+  async listFilesIn(relativeDir: string): Promise<string[]> {
+    const segments = this.normalizePath(relativeDir);
+    const root = await navigator.storage.getDirectory();
+    let dir: FileSystemDirectoryHandle;
+    try {
+      dir = await root.getDirectoryHandle(OpfsCacheService.ROOT_FOLDER);
+      for (const segment of segments) {
+        dir = await dir.getDirectoryHandle(segment);
+      }
+    } catch {
+      return [];
+    }
+
+    const files: string[] = [];
+    for await (const handle of (dir as any).values()) {
+      if (handle.kind === 'file') {
+        files.push(handle.name);
+      }
+    }
+    return files;
+  }
+
+  /**
    * Recursively searches `/extracted_game` for a file with the given name and
    * returns the first path (relative to `/extracted_game`) that matches.
    *

@@ -3,6 +3,7 @@ import { IsoExtractorService } from '../../service/iso-extractor.service';
 import { OpfsCacheService } from '../../service/opfs-cache.service';
 import { GameStateService } from '../../service/game-state.service';
 import { EditorService, WORLDMAP_FILE } from '../../service/editor.service';
+import { StageService } from '../../service/stage.service';
 import { FSALibService } from '../../service/fsalib.service';
 import { LoggingService } from '../../service/logging.service';
 import { ButtonComponent } from '../button/button.component';
@@ -30,6 +31,7 @@ export class IsoExtractorComponent implements OnInit {
   private readonly gameState = inject(GameStateService);
   private readonly fsaLib = inject(FSALibService);
   private readonly editor = inject(EditorService);
+  private readonly stageService = inject(StageService);
   private readonly logger = inject(LoggingService);
 
   readonly selectedFileName = signal('');
@@ -150,11 +152,17 @@ export class IsoExtractorComponent implements OnInit {
   /**
    * Generates the editor's derived files after a successful extraction.
    *
-   * Currently produces `/editor/cache/image/worldmap.png` by decoding the overworld map
-   * texture out of `map1.arc`. Failures here are non-fatal: extraction itself
-   * has already succeeded, so we only log a warning.
+   * Produces `/editor/cache/image/worldmap.png` (the overworld texture) and the
+   * default stage previews under `/editor/cache/<zero-guid>/`. Failures here are
+   * non-fatal: extraction itself has already succeeded, so we only log a warning.
    */
   private async generateEditorFiles(): Promise<void> {
+    await this.generateWorldmap();
+    await this.importDefaultStages();
+  }
+
+  /** Decodes the overworld map texture into `/editor/cache/image/worldmap.png`. */
+  private async generateWorldmap(): Promise<void> {
     try {
       const arcPath = 'GC4swords/map1.arc';
       const texturePath = 'TIMG/kk_worldmap_01.bti';
@@ -170,6 +178,18 @@ export class IsoExtractorComponent implements OnInit {
       );
     } catch (error) {
       this.logger.warn('UI: failed to generate editor world map (non-fatal)', error);
+    }
+  }
+
+  /** Registers the game's default stages (metadata only). */
+  private async importDefaultStages(): Promise<void> {
+    try {
+      this.statusMessage.set('Registering default stages…');
+      await this.stageService.registerDefaultStages((done, total, name) => {
+        this.statusMessage.set(`Registering stages… ${done}/${total} ${name}`);
+      });
+    } catch (error) {
+      this.logger.warn('UI: failed to register default stages (non-fatal)', error);
     }
   }
 

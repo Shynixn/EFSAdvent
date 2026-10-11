@@ -159,8 +159,33 @@ export class EditorService {
 
   /** Whether the world map image (`/{@link WORLDMAP_FILE}`) already exists. */
   async hasWorldmap(): Promise<boolean> {
-    const existing = await this.readEditorFile(WORLDMAP_FILE);
-    return existing !== null && existing.byteLength > 0;
+    return this.hasEditorFile(WORLDMAP_FILE);
+  }
+
+  /**
+   * Whether a file exists under `/editor`.
+   *
+   * Uses `getFileHandle` (no byte read) so existence checks are cheap.
+   *
+   * @param relativePath Path relative to `/editor`, e.g. `cache/.../map_boss010.png`.
+   */
+  async hasEditorFile(relativePath: string): Promise<boolean> {
+    const segments = this.normalize(relativePath);
+    if (segments.length === 0) {
+      return false;
+    }
+
+    try {
+      const root = await navigator.storage.getDirectory();
+      let dir = await root.getDirectoryHandle(EDITOR_ROOT);
+      for (let i = 0; i < segments.length - 1; i++) {
+        dir = await dir.getDirectoryHandle(segments[i]);
+      }
+      await dir.getFileHandle(segments[segments.length - 1]);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /** Normalizes a path into non-empty, traversal-safe segments. */

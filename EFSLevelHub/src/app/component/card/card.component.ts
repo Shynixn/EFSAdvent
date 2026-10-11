@@ -26,6 +26,10 @@ export class CardComponent {
   @Input() uuid = '';
   /** Optional image URL rendered in the header banner. */
   @Input() imageUrl: string | null = null;
+  /** When true, the header shows a spinner instead of the image. */
+  @Input() loading = false;
+  /** Text shown next to the spinner in the loading state. */
+  @Input() loadingText = 'Generating…';
   /** Optional text for a corner badge over the image (e.g. "Cannot be changed"). */
   @Input() badge: string | null = null;
   /** Visual variant; `danger` adds a red border/badge accent. */

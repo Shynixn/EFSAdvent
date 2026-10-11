@@ -6,7 +6,13 @@ import { StageData } from '../entity/fsalib.entity';
 import { parseBti } from './render/bti-texture';
 import { decodeTexture } from './render/bti-image';
 import { ImageBuffer } from './render/gba-tile-renderer';
-import { ArchivePathResolver, StageRenderer, TilesetInfo } from './render/stage-renderer';
+import {
+  ArchivePathResolver,
+  RenderOptions,
+  ROOM_PIXELS,
+  StageRenderer,
+  TilesetInfo,
+} from './render/stage-renderer';
 
 /** Shape of the .NET JSExport host created by dotnet.js. */
 interface DotnetExports {
@@ -78,6 +84,15 @@ export class FSALibService {
 
   /** Cached stage definitions promise. */
   private stagesPromise: Promise<Record<string, StageInfo>> | null = null;
+
+  /**
+   * Cached `data.arc` bytes. The archive is tens of MB and is needed by every
+   * stage render, so it is read from OPFS once and reused.
+   */
+  private dataArcPromise: Promise<Uint8Array | null> | null = null;
+
+  /** Cached list of every file path inside `data.arc`. */
+  private dataArcPaths: string[] = [];
 
   /** The FSALib version reported by the loaded module. */
   version: string | null = null;
@@ -221,22 +236,20 @@ export class FSALibService {
     tilesets?: Record<string, TilesetInfo>,
   ): Promise<StageRenderer> {
     const stageFiles = await this.listArchiveFiles(arcData);
+    const stagePathSet = new Set(stageFiles.map((f) => f.Path));
     let resolver = new ArchivePathResolver(stageFiles.map((f) => f.Path));
 
     // Boss archives don't carry tileset/sprite resources; fall back to data.arc.
+    // `data.arc` bytes + its file list are cached, so this is a one-time cost.
     const dataArc = await this.readDataArc();
     if (dataArc) {
-      const dataFiles = await this.listArchiveFiles(dataArc);
-      resolver = new ArchivePathResolver([
-        ...stageFiles.map((f) => f.Path),
-        ...dataFiles.map((f) => f.Path),
-      ]);
+      resolver = new ArchivePathResolver([...stageFiles.map((f) => f.Path), ...this.dataArcPaths]);
     }
 
     const renderer = new StageRenderer(
       stage,
       async (path) => {
-        if (stageFiles.some((f) => f.Path === path)) {
+        if (stagePathSet.has(path)) {
           return this.readArchiveFile(arcData, path);
         }
         if (!dataArc) {
@@ -251,14 +264,34 @@ export class FSALibService {
     return renderer;
   }
 
-  /** Reads the game's shared `data.arc` from OPFS, or null if not extracted. */
+  /**
+   * Reads the game's shared `data.arc` from OPFS, or null if not extracted.
+   *
+   * The bytes and their file-path list are cached for the session so that
+   * rendering many stages does not re-read/re-parse the archive each time.
+   */
   private async readDataArc(): Promise<Uint8Array | null> {
-    try {
-      const bytes = await this.opfs.readExtractedFile(FSALibService.DATA_ARC_PATH);
-      return bytes.byteLength > 0 ? bytes : null;
-    } catch {
-      return null;
+    if (this.dataArcPromise) {
+      return this.dataArcPromise;
     }
+
+    this.dataArcPromise = (async () => {
+      try {
+        const bytes = await this.opfs.readExtractedFile(FSALibService.DATA_ARC_PATH);
+        if (bytes.byteLength === 0) {
+          return null;
+        }
+
+        const files = await this.listArchiveFiles(bytes);
+        this.dataArcPaths = files.map((f) => f.Path);
+        this.logger.info(`FSALib: cached data.arc (${files.length} file(s)).`);
+        return bytes;
+      } catch {
+        return null;
+      }
+    })();
+
+    return this.dataArcPromise;
   }
 
   /**
@@ -350,6 +383,47 @@ export class FSALibService {
         });
     }
     return this.stagesPromise;
+  }
+
+  /**
+   * Renders every room of a stage into a single map-layout PNG.
+   *
+   * The stage's `Map` grid is walked row-major; each non-empty room is rendered
+   * (base + top layers) into its own 512×512 buffer and composited into the
+   * resulting grid image at the cell's position.
+   *
+   * @param arcData Raw bytes of a `bossXXX.arc` archive.
+   * @returns A wide PNG data URL of the full stage layout.
+   */
+  async renderStageMap(arcData: Uint8Array): Promise<string> {
+    const stage = await this.parseStage(arcData);
+    const layout = stage.Map;
+    const cols = layout.XDimension;
+    const rows = layout.YDimension;
+
+    const renderer = await this.createStageRenderer(stage, arcData);
+    const target = new ImageBuffer(cols * ROOM_PIXELS, rows * ROOM_PIXELS);
+    target.fill(0, 0, 0, 255);
+
+    // A single scratch buffer is reused for every room; `fill` clears it between
+    // draws, avoiding a ~1 MB allocation per room.
+    const room = new ImageBuffer(ROOM_PIXELS, ROOM_PIXELS);
+
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++) {
+        const roomIndex = layout.Rooms[x + y * cols];
+        if (roomIndex == null || roomIndex === layout.EmptyRoomValue) {
+          continue;
+        }
+
+        room.fill(0, 0, 0, 255);
+        await renderer.draw(room, roomIndex, 0, RenderOptions.Layers);
+        target.blendFrom(room, x * ROOM_PIXELS, y * ROOM_PIXELS);
+      }
+    }
+
+    this.logger.info(`FSALib: rendered stage map (${cols}x${rows} rooms, ${target.width}px wide).`);
+    return this.encodePng(target);
   }
 
   /** Chunked ArrayBuffer -> base64 (avoids call-stack overflow on large images). */
