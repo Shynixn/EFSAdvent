@@ -169,7 +169,7 @@ export class OpfsCacheService {
   /**
    * Reads a previously extracted file from OPFS as a byte array.
    *
-   * @param path Path relative to `/extracted_game`, e.g. `GC4Sword_pal/Boss/boss010.arc`.
+   * @param path Path relative to `/extracted_game`, e.g. `GC4swords/Boss/boss010.arc`.
    */
   async readExtractedFile(path: string): Promise<Uint8Array> {
     const segments = this.normalizePath(path);
@@ -197,6 +197,72 @@ export class OpfsCacheService {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Lists the top-level directory names directly under `/extracted_game`.
+   *
+   * GameCube FST roots vary between disc revisions (e.g. `GC4swords`), so the
+   * app resolves the active root by scanning rather than hard-coding a name.
+   */
+  async listRootFolders(): Promise<string[]> {
+    const root = await navigator.storage.getDirectory();
+    let gameRoot: FileSystemDirectoryHandle;
+    try {
+      gameRoot = await root.getDirectoryHandle(OpfsCacheService.ROOT_FOLDER);
+    } catch {
+      return [];
+    }
+
+    const folders: string[] = [];
+    for await (const handle of (gameRoot as any).values()) {
+      if (handle.kind === 'directory') {
+        folders.push(handle.name);
+      }
+    }
+    return folders;
+  }
+
+  /**
+   * Recursively searches `/extracted_game` for a file with the given name and
+   * returns the first path (relative to `/extracted_game`) that matches.
+   *
+   * @param fileName File name to look for, e.g. `boss010.arc` (case-insensitive).
+   */
+  async findFileByName(fileName: string): Promise<string | null> {
+    const root = await navigator.storage.getDirectory();
+    let gameRoot: FileSystemDirectoryHandle;
+    try {
+      gameRoot = await root.getDirectoryHandle(OpfsCacheService.ROOT_FOLDER);
+    } catch {
+      return null;
+    }
+
+    const target = fileName.toLowerCase();
+    let found: string | null = null;
+
+    const walk = async (dir: FileSystemDirectoryHandle, prefix: string): Promise<void> => {
+      for await (const handle of (dir as any).values()) {
+        if (found) {
+          return;
+        }
+        const path = prefix ? `${prefix}/${handle.name}` : handle.name;
+        if (handle.kind === 'file') {
+          if (handle.name.toLowerCase() === target) {
+            found = path;
+            return;
+          }
+        } else {
+          await walk(handle as FileSystemDirectoryHandle, path);
+        }
+      }
+    };
+    await walk(gameRoot, '');
+
+    if (found) {
+      this.logger.info(`OPFS: found "${fileName}" at ${found}`);
+    }
+    return found;
   }
 
   /** Normalizes a path into non-empty, traversal-safe segments. */

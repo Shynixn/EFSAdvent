@@ -1,0 +1,46 @@
+<div class="mx-auto max-w-3xl space-y-8 p-6 lg:p-8">
+  <header class="space-y-1">
+    <h1 class="text-3xl font-bold tracking-tight text-white">Settings</h1>
+    <p class="text-slate-400">Configure game assets and application options.</p>
+  </header>
+
+  <!-- ISO import status / instructions -->
+  @if (isChecking()) {
+    <p class="rounded-xl border border-slate-700 bg-slate-800/60 p-4 text-sm text-slate-400">
+      Checking for imported game files…
+    </p>
+  } @else if (!isReady()) {
+    <section
+      class="space-y-3 rounded-2xl border border-amber-500/40 bg-amber-500/10 p-6 text-amber-100"
+    >
+      <h2 class="text-lg font-semibold text-amber-200">Game files required</h2>
+      <p class="text-sm text-amber-100/90">
+        No <code class="rounded bg-amber-500/20 px-1.5 py-0.5">FSA.iso</code> has been imported yet.
+        Import your own legally-obtained GameCube disc image below to unlock the editor and level
+        browser.
+      </p>
+      <ol class="list-decimal space-y-1 pl-5 text-sm text-amber-100/90">
+        <li>Click the file picker in the extractor below.</li>
+        <li>
+          Select your <code class="rounded bg-amber-500/20 px-1.5 py-0.5">FSA.iso</code> disc image.
+        </li>
+        <li>Wait for extraction to finish — this is cached in your browser.</li>
+      </ol>
+    </section>
+  } @else {
+    <section
+      class="flex items-center justify-between gap-4 rounded-2xl border border-emerald-500/40 bg-emerald-500/10 p-4 text-emerald-100"
+    >
+      <p class="font-medium text-emerald-200">Game files imported</p>
+      <a
+        routerLink="/my-stages"
+        class="rounded-md border border-emerald-400/60 px-3 py-1.5 text-xs font-medium text-emerald-100 transition hover:border-emerald-300 hover:text-white"
+      >
+        Go to My Stages
+      </a>
+    </section>
+  }
+
+  <!-- Extractor -->
+  <app-iso-extractor />
+</div>

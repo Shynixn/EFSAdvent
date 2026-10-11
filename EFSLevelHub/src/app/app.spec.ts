@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { App } from './app';
-import { HomePage } from './page/home-page/home-page';
+import { LevelExplorerPage } from './page/level-explorer-page/level-explorer-page';
 import { routes } from './app.routes';
 
 describe('App', () => {
@@ -19,17 +19,25 @@ describe('App', () => {
   });
 });
 
-describe('HomePage', () => {
-  it('should render the home page title', async () => {
+describe('LevelExplorerPage', () => {
+  beforeEach(async () => {
     await TestBed.configureTestingModule({
-      imports: [HomePage],
+      imports: [LevelExplorerPage],
       providers: [provideRouter(routes)],
     }).compileComponents();
+  });
 
-    const fixture = TestBed.createComponent(HomePage);
+  it('should render the page title', () => {
+    const fixture = TestBed.createComponent(LevelExplorerPage);
     fixture.detectChanges();
-    await fixture.whenStable();
     const compiled = fixture.nativeElement as HTMLElement;
-    expect(compiled.querySelector('h1')?.textContent).toContain('EFS Level Hub');
+    expect(compiled.querySelector('h1')?.textContent).toContain('Level Explorer');
+  });
+
+  it('should render example level cards', () => {
+    const fixture = TestBed.createComponent(LevelExplorerPage);
+    fixture.detectChanges();
+    const compiled = fixture.nativeElement as HTMLElement;
+    expect(compiled.querySelectorAll('article').length).toBeGreaterThan(0);
   });
 });

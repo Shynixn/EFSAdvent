@@ -17,7 +17,7 @@ import { RenderOptions, ROOM_PIXELS, StageRenderer } from '../../service/render/
  * It also (for testing) decodes every `.bti` texture in the archive to PNG and
  * lists them below the map.
  *
- * Default path: `GC4Sword_pal/Boss/boss010.arc`; override with the `?path=` query.
+ * Default path: `GC4swords/Boss/boss010.arc`; override with the `?path=` query.
  */
 @Component({
   selector: 'app-map-viewer',
@@ -31,19 +31,19 @@ export class MapViewerComponent implements OnInit {
   private readonly route = inject(ActivatedRoute);
 
   /** Default archive to inspect. */
-  static readonly DEFAULT_PATH = 'GC4Sword_pal/Boss/boss010.arc';
+  static readonly DEFAULT_PATH = 'GC4swords/Boss/boss010.arc';
 
   /** Archive that holds the game's shared textures. */
-  static readonly DATA_ARC_PATH = 'GC4Sword_pal/data.arc';
+  static readonly DATA_ARC_PATH = 'GC4swords/data.arc';
 
   /** Archive that holds the overworld map screen. */
-  static readonly OVERWORLD_ARC_PATH = 'GC4Sword_pal/map1.arc';
+  static readonly OVERWORLD_ARC_PATH = 'GC4swords/map1.arc';
 
   /** The overworld map texture inside {@link OVERWORLD_ARC_PATH}. */
   static readonly OVERWORLD_TEXTURE = 'TIMG/kk_worldmap_01.bti';
 
   /** Archive that holds the battle stage-select screen. */
-  static readonly BATTLE_ARC_PATH = 'GC4Sword_pal/map2.arc';
+  static readonly BATTLE_ARC_PATH = 'GC4swords/map2.arc';
 
   /** Template-visible copy of {@link DATA_ARC_PATH}. */
   readonly dataArcPath = MapViewerComponent.DATA_ARC_PATH;

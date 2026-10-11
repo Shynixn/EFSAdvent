@@ -31,6 +31,12 @@ export class IsoExtractorService {
   private static readonly FST_ENTRY_SIZE = 12;
 
   /**
+   * Stable root folder that every extracted path is re-rooted under, replacing
+   * the disc's own FST root name (which varies by region, e.g. `GC4Sword_pal`).
+   */
+  static readonly ROOT_FOLDER = 'GC4swords';
+
+  /**
    * Extracts every file from a GameCube ISO into OPFS.
    *
    * @param file             The user-selected `.iso` / `.gcm` file.
@@ -251,7 +257,15 @@ export class IsoExtractorService {
 
     // Root entry is index 0; its subtree spans all parsed entries.
     walk(1, entries.length, '');
-    return files;
+
+    // The disc nests everything inside its own region-specific root folder
+    // (e.g. `GC4Sword_pal` on PAL). Strip that top segment and re-root every
+    // path under a single stable folder so paths become `GC4swords/...`.
+    const root = IsoExtractorService.ROOT_FOLDER;
+    return files.map((file) => ({
+      ...file,
+      path: `${root}/${file.path.replace(/^GC4Sword[^/]*\//i, '')}`,
+    }));
   }
 
   /** Reads a null-terminated UTF-8 string from a byte buffer. */

@@ -1,7 +1,7 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
-import { RouterLink } from '@angular/router';
 import { IsoExtractorService } from '../../service/iso-extractor.service';
 import { OpfsCacheService } from '../../service/opfs-cache.service';
+import { GameStateService } from '../../service/game-state.service';
 import { LoggingService } from '../../service/logging.service';
 import { ExtractionProgress, StorageEstimate } from '../../entity/iso.entity';
 
@@ -17,13 +17,13 @@ import { ExtractionProgress, StorageEstimate } from '../../entity/iso.entity';
  */
 @Component({
   selector: 'app-iso-extractor',
-  imports: [RouterLink],
   templateUrl: './iso-extractor.component.html',
   styleUrl: './iso-extractor.component.css',
 })
 export class IsoExtractorComponent implements OnInit {
   private readonly isoExtractor = inject(IsoExtractorService);
   private readonly opfs = inject(OpfsCacheService);
+  private readonly gameState = inject(GameStateService);
   private readonly logger = inject(LoggingService);
 
   readonly selectedFileName = signal('');
@@ -81,6 +81,8 @@ export class IsoExtractorComponent implements OnInit {
       this.currentFileName.set('');
       await this.refreshStorage();
       await this.refreshCachedFileCount();
+      // Re-scan for the marker file so the shell/nav reflect the new state.
+      await this.gameState.refresh();
     }
   }
 
@@ -115,6 +117,9 @@ export class IsoExtractorComponent implements OnInit {
       await this.opfs.clearExtractedGame();
       await this.refreshStorage();
       await this.refreshCachedFileCount();
+      // Re-run the ISO/import check so the shell and settings banner reflect
+      // that the game files are no longer available.
+      await this.gameState.refresh();
       this.successMessage.set('Cache cleared.');
     } catch (error) {
       this.errorMessage.set(error instanceof Error ? error.message : 'Failed to clear cache.');

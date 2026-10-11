@@ -69,7 +69,7 @@ export class FSALibService {
   /** Assembly that carries the [JSExport] interop. */
   private static readonly ASSEMBLY = 'EFSLevelHub.Wasm';
   /** Archive holding the game's shared tileset/sprite/palette resources. */
-  private static readonly DATA_ARC_PATH = 'GC4Sword_pal/data.arc';
+  private static readonly DATA_ARC_PATH = 'GC4swords/data.arc';
 
   private loadPromise: Promise<DotnetExports> | null = null;
 
