@@ -166,6 +166,39 @@ export class OpfsCacheService {
     });
   }
 
+  /**
+   * Reads a previously extracted file from OPFS as a byte array.
+   *
+   * @param path Path relative to `/extracted_game`, e.g. `GC4Sword_pal/Boss/boss010.arc`.
+   */
+  async readExtractedFile(path: string): Promise<Uint8Array> {
+    const segments = this.normalizePath(path);
+    if (segments.length === 0) {
+      throw new Error('Cannot read an empty path.');
+    }
+
+    const root = await navigator.storage.getDirectory();
+    let dirHandle = await root.getDirectoryHandle(OpfsCacheService.ROOT_FOLDER);
+
+    for (let i = 0; i < segments.length - 1; i++) {
+      dirHandle = await dirHandle.getDirectoryHandle(segments[i]);
+    }
+
+    const fileHandle = await dirHandle.getFileHandle(segments[segments.length - 1]);
+    const file = await fileHandle.getFile();
+    return new Uint8Array(await file.arrayBuffer());
+  }
+
+  /** Checks whether a specific extracted file exists in OPFS. */
+  async extractedFileExists(path: string): Promise<boolean> {
+    try {
+      await this.readExtractedFile(path);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   /** Normalizes a path into non-empty, traversal-safe segments. */
   private normalizePath(path: string): string[] {
     return path

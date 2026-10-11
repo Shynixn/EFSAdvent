@@ -1,0 +1,108 @@
+<section class="mx-auto max-w-3xl space-y-6 rounded-2xl bg-slate-800 p-8 shadow-xl">
+  <header class="space-y-1">
+    <h2 class="text-2xl font-semibold text-white">Map Viewer (FSALib WASM)</h2>
+    <p class="text-sm text-slate-400">
+      Parses a stage archive from OPFS via the FSALib browser-wasm module.
+    </p>
+  </header>
+
+  <!-- Path + reload -->
+  <div class="flex items-center gap-3">
+    <input
+      type="text"
+      [value]="arcPath()"
+      (input)="arcPath.set($any($event.target).value)"
+      class="min-w-0 flex-1 rounded-md border border-slate-600 bg-slate-900 px-3 py-2 font-mono text-xs text-slate-200"
+    />
+    <button
+      type="button"
+      (click)="loadMap()"
+      [disabled]="isLoading()"
+      class="rounded-md bg-indigo-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-400 disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      {{ isLoading() ? 'Loading…' : 'Load' }}
+    </button>
+  </div>
+
+  @if (errorMessage()) {
+    <p class="rounded-lg bg-red-500/10 p-3 text-sm text-red-400">{{ errorMessage() }}</p>
+  }
+
+  @if (isLoading()) {
+    <p class="text-sm text-indigo-300">Loading archive and parsing…</p>
+  }
+
+  @if (map(); as m) {
+    <div class="space-y-4">
+      <!-- Metadata -->
+      <dl class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-3">
+        <div>
+          <dt class="text-slate-500">Stage index</dt>
+          <dd class="font-mono text-slate-200">{{ stageData()?.Index }}</dd>
+        </div>
+        <div>
+          <dt class="text-slate-500">Map index</dt>
+          <dd class="font-mono text-slate-200">{{ m.Index }}</dd>
+        </div>
+        <div>
+          <dt class="text-slate-500">Size</dt>
+          <dd class="font-mono text-slate-200">{{ mapWidth() }} x {{ mapHeight() }}</dd>
+        </div>
+        <div>
+          <dt class="text-slate-500">Start</dt>
+          <dd class="font-mono text-slate-200">{{ m.StartX }}, {{ m.StartY }}</dd>
+        </div>
+        <div>
+          <dt class="text-slate-500">BGM</dt>
+          <dd class="font-mono text-slate-200">{{ m.BackgroundMusicId }}</dd>
+        </div>
+        <div>
+          <dt class="text-slate-500">Tilesheet</dt>
+          <dd class="font-mono text-slate-200">{{ m.TileSheetId }}</dd>
+        </div>
+      </dl>
+
+      <!-- Grid -->
+      <div class="overflow-auto rounded-lg bg-slate-900/60 p-3">
+        <div
+          class="inline-grid grid-flow-row gap-1"
+          [style.gridTemplateColumns]="'repeat(' + mapWidth() + ', 3.5rem)'"
+        >
+          @for (y of range(mapHeight()); track y) {
+            @for (x of range(mapWidth()); track x) {
+              <button
+                type="button"
+                (click)="selectRoom(roomAt(x, y))"
+                [disabled]="isEmpty(x, y)"
+                [class]="
+                  'flex h-14 w-14 flex-col items-center justify-center rounded border text-xs font-mono transition ' +
+                  (isEmpty(x, y)
+                    ? 'cursor-default border-slate-700 bg-slate-800/40 text-slate-600'
+                    : 'border-slate-500 bg-slate-700 text-slate-100 hover:border-indigo-400 hover:bg-slate-600') +
+                  (isStart(x, y) ? ' ring-2 ring-emerald-400' : '') +
+                  (selectedRoom() === roomAt(x, y) && !isEmpty(x, y)
+                    ? ' ring-2 ring-indigo-400'
+                    : '')
+                "
+              >
+                @if (!isEmpty(x, y)) {
+                  <span>{{ roomAt(x, y) }}</span>
+                  <span class="text-[10px] text-slate-500">{{ x }},{{ y }}</span>
+                } @else {
+                  <span>—</span>
+                }
+              </button>
+            }
+          }
+        </div>
+      </div>
+
+      @if (selectedRoom() !== null) {
+        <p class="text-sm text-slate-300">
+          Selected room: <span class="font-mono text-indigo-300">{{ selectedRoom() }}</span>
+          <span class="text-slate-500"> (green ring = start room)</span>
+        </p>
+      }
+    </div>
+  }
+</section>

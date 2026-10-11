@@ -3,8 +3,9 @@
   "version": "0.0.0",
   "scripts": {
     "ng": "ng",
-    "start": "ng serve --host 0.0.0.0 --port 4200",
-    "build": "ng build",
+    "build:wasm": "pwsh -NoProfile -ExecutionPolicy Bypass -File build-wasm.ps1",
+    "start": "npm run build:wasm && ng serve --host 0.0.0.0 --port 4200",
+    "build": "npm run build:wasm && ng build",
     "watch": "ng build --watch --configuration development",
     "test": "ng test"
   },

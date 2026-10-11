@@ -5,6 +5,11 @@
 
 # Custom files
 
+# Generated FSALib wasm runtime output, plus the transient build props file the
+# wrapper writes into FSALib (see EFSLevelHub/build-wasm.ps1).
+EFSLevelHub/public/fsalib/
+FSALib/Directory.Build.targets
+
 # User-specific files
 *.rsuser
 *.suo

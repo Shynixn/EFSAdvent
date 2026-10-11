@@ -1,4 +1,5 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
+import { RouterLink } from '@angular/router';
 import { IsoExtractorService } from '../../service/iso-extractor.service';
 import { OpfsCacheService } from '../../service/opfs-cache.service';
 import { LoggingService } from '../../service/logging.service';
@@ -16,6 +17,7 @@ import { ExtractionProgress, StorageEstimate } from '../../entity/iso.entity';
  */
 @Component({
   selector: 'app-iso-extractor',
+  imports: [RouterLink],
   templateUrl: './iso-extractor.component.html',
   styleUrl: './iso-extractor.component.css',
 })

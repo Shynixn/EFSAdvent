@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RuntimeIdentifier>browser-wasm</RuntimeIdentifier>
+    <OutputType>Exe</OutputType>
+    <PublishTrimmed>false</PublishTrimmed>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <AssemblyName>EFSLevelHub.Wasm</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- FSALib multi-targets; Directory.Build.props restricts it to net8.0 when
+         EFSLEVELHUB_WASM_BUILD=1 is set by the npm build:wasm script. -->
+    <ProjectReference Include="..\FSALib\FSALib.csproj" />
+  </ItemGroup>
+
+  <!-- Copy the browser-wasm runtime into the Angular app's public folder so the
+       dev server serves it at /fsalib/... without an extra copy step. -->
+  <Target Name="CopyWasmToAngular" AfterTargets="Publish" Condition="'$(PublishDir)' != ''">
+    <PropertyGroup>
+      <AngularWasmDir>$(MSBuildThisFileDirectory)..\EFSLevelHub\public\fsalib\</AngularWasmDir>
+      <WasmFrameworkDir>$(PublishDir)AppBundle\_framework\</WasmFrameworkDir>
+    </PropertyGroup>
+    <ItemGroup>
+      <WasmOutput Include="$(WasmFrameworkDir)**\*" />
+    </ItemGroup>
+    <RemoveDir Directories="$(AngularWasmDir)" />
+    <MakeDir Directories="$(AngularWasmDir)" />
+    <Copy SourceFiles="@(WasmOutput)"
+          DestinationFiles="@(WasmOutput->'$(AngularWasmDir)%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>

@@ -86,4 +86,13 @@
       </button>
     </div>
   </div>
+
+  <!-- Test: open the parsed map of an extracted stage -->
+  <a
+    routerLink="/map-viewer"
+    [queryParams]="{ path: 'GC4Sword_pal/Boss/boss010.arc' }"
+    class="block rounded-xl bg-indigo-500 px-4 py-3 text-center text-sm font-medium text-white shadow transition hover:bg-indigo-400"
+  >
+    View boss010 map (FSALib WASM test)
+  </a>
 </section>

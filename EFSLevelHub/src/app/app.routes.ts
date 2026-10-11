@@ -11,5 +11,11 @@ export const routes: Routes = [
       ),
     title: 'ISO Extractor',
   },
+  {
+    path: 'map-viewer',
+    loadComponent: () =>
+      import('./component/map-viewer/map-viewer.component').then((m) => m.MapViewerComponent),
+    title: 'Map Viewer',
+  },
   { path: '**', redirectTo: '' },
 ];
