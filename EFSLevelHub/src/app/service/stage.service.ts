@@ -190,7 +190,7 @@ export class StageService {
       const name = definition?.Name ?? id;
       onProgress?.(i, total, name);
 
-      const file: StageFile = { id: uuid, name, author: DEFAULT_STAGE_AUTHOR };                                                                                                          
+      const file: StageFile = { id: uuid, name, author: DEFAULT_STAGE_AUTHOR };
       await this.editor.writeEditorFile(
         stageFilePath(uuid),
         new TextEncoder().encode(JSON.stringify(file, null, 2)),
