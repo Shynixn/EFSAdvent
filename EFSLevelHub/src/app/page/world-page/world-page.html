@@ -17,15 +17,52 @@
     </app-button>
   </header>
 
-  <!-- World map (very large, centered) -->
-  <div class="flex flex-1 items-center justify-center overflow-auto bg-slate-950 p-6">
+  <!-- World map (fills the available area) -->
+  <div
+    #mapArea
+    class="relative flex flex-1 items-center justify-center overflow-hidden bg-slate-950"
+  >
     @if (worldmapUrl()) {
       <img
         [src]="worldmapUrl()"
         alt="World map"
-        class="max-h-full max-w-full object-contain shadow-2xl"
+        (load)="onImageLoad($event)"
+        class="h-full w-full object-contain shadow-2xl"
         style="image-rendering: pixelated"
       />
+
+      <!-- Overlay sized/positioned to the image's displayed (contain-fitted)
+           box, so markers stay anchored to the map at any size. -->
+      @if (mapBox(); as box) {
+        <div class="pointer-events-none absolute inset-0 flex items-center justify-center">
+          <div class="relative" [style.width.px]="box.width" [style.height.px]="box.height">
+            @for (point of points; track point.id) {
+              <!-- Single clickable element anchored at the point: the dot stays
+                   centered on the coordinate while the label sits beside it. -->
+              <button
+                type="button"
+                (click)="onPointClick(point)"
+                [attr.title]="point.label || point.id"
+                [attr.aria-label]="point.label || point.id"
+                class="pointer-events-auto absolute flex -translate-y-1/2 cursor-pointer items-center gap-1.5 rounded focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                [style.left.%]="point.x"
+                [style.top.%]="point.y"
+              >
+                <span
+                  class="h-3 w-3 shrink-0 -translate-x-1/2 rounded-full border-2 border-white bg-indigo-500 shadow-md transition group-hover:scale-125"
+                ></span>
+                @if (point.label) {
+                  <span
+                    class="whitespace-nowrap rounded bg-slate-900/70 px-1.5 py-0.5 text-xs font-medium text-white transition hover:bg-slate-900/90"
+                  >
+                    {{ point.label }}
+                  </span>
+                }
+              </button>
+            }
+          </div>
+        </div>
+      }
     } @else {
       <p class="text-slate-500">World map image not available yet.</p>
     }
