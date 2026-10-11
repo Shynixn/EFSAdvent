@@ -211,10 +211,11 @@ export class WorldPage implements OnInit, OnDestroy {
       return;
     }
 
-    const stage = this.stageService.getById(stageId);
+    // Re-point the slot at the chosen stage. `arcFileName` is display metadata
+    // only; stage files no longer carry it, so leave it blank here.
     const updated = await this.worldService.setWorldStage(worldId, point.slot, {
       id: stageId,
-      arcFileName: stage ? `${stage.name}.arc` : '',
+      arcFileName: '',
     });
     if (updated) {
       void this.buildPoints(updated.stages.map((s) => s.id));

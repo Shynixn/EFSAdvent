@@ -53,5 +53,10 @@ export const routes: Routes = [
     title: 'Map Viewer',
     canActivate: [requiresGameFilesGuard],
   },
+  {
+    path: 'debug',
+    loadComponent: () => import('./page/debug-page/debug-page').then((m) => m.DebugPage),
+    title: 'Debug',
+  },
   { path: '**', redirectTo: '' },
 ];

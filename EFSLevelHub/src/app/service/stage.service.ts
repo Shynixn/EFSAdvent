@@ -2,6 +2,7 @@ import { Injectable, inject, signal } from '@angular/core';
 import { EditorService } from './editor.service';
 import { FSALibService } from './fsalib.service';
 import { LoggingService } from './logging.service';
+import { OpfsCacheService } from './opfs-cache.service';
 
 /** Key under which stage ids are stored in the editor's `userdata.json`. */
 const STAGES_KEY = 'stages';
@@ -106,6 +107,11 @@ export function stageFilePath(uuid: string): string {
   return `stage/${uuid}.json`;
 }
 
+/** Builds the relative `/editor` path of a stage's archived source (`<uuid>.arc`). */
+export function stageArcFilePath(uuid: string): string {
+  return `stage/${uuid}.arc`;
+}
+
 /** Author attributed to stages that don't declare one (i.e. the game's own). */
 export const DEFAULT_STAGE_AUTHOR = 'Nintendo';
 
@@ -125,12 +131,18 @@ export interface StageFile {
  * order, and records the stage ids in `userdata.json`. Stage GUIDs are
  * sequential and stable (`00000000-0000-0000-0000-000000000001`, `…0002`, …).
  *
+ * Each stage's source archive is copied next to its JSON as
+ * `/editor/stage/<uuid>.arc`, so a stage is fully self-contained. The archive's
+ * original name (`boss010.arc`, …) is kept only in the world file — it is not
+ * derived from the GUID and is not stored in the stage file.
+ *
  * A stage's map preview PNG is generated lazily, only when the stage is opened.
  */
 @Injectable({ providedIn: 'root' })
 export class StageService {
   private readonly editor = inject(EditorService);
   private readonly fsaLib = inject(FSALibService);
+  private readonly opfs = inject(OpfsCacheService);
   private readonly logger = inject(LoggingService);
 
   /** Stage definitions loaded from the editor store. */
@@ -164,13 +176,16 @@ export class StageService {
   }
 
   /**
-   * Creates a stage definition file for every default stage (once) and records
-   * their ids in `userdata.json`.
+   * Creates a stage definition file and copies the source archive for every
+   * default stage (once), then records their ids in `userdata.json`.
+   *
+   * For each stage this writes `/editor/stage/<uuid>.json` and
+   * `/editor/stage/<uuid>.arc` (the latter copied from the extracted game).
    *
    * @param onProgress Optional callback reporting `(done, total, name)`.
-   * @returns The created/looked-up stage references with their arc file names,
-   *          in the fixed order (first {@link DEFAULT_WORLD_STAGE_COUNT} are the
-   *          default-world stages).
+   * @returns The created/looked-up stage references with their (original) arc
+   *          file names, in the fixed order (first
+   *          {@link DEFAULT_WORLD_STAGE_COUNT} are the default-world stages).
    */
   async registerDefaultStages(
     onProgress?: (done: number, total: number, name: string) => void,
@@ -181,6 +196,7 @@ export class StageService {
     );
 
     const refs: { id: string; arcFileName: string }[] = [];
+    const created: StageFile[] = [];
     const total = DEFAULT_STAGE_ARC_ORDER.length;
 
     for (let i = 0; i < total; i++) {
@@ -196,6 +212,11 @@ export class StageService {
         new TextEncoder().encode(JSON.stringify(file, null, 2)),
       );
 
+      // Also store the stage's source archive next to its JSON, so the stage
+      // is self-contained in the editor store (`/editor/stage/<uuid>.arc`).
+      await this.copyStageArc(id, uuid);
+
+      created.push(file);
       refs.push({ id: uuid, arcFileName: `${id}.arc` });
     }
 
@@ -204,7 +225,7 @@ export class StageService {
       STAGES_KEY,
       refs.map((r) => ({ id: r.id })),
     );
-    this.stageList.set(refs.map((r, i) => ({ id: r.id, name: '' })));
+    this.stageList.set(created);
     onProgress?.(total, total, '');
     this.logger.info(`StageService: created ${refs.length} stage file(s).`);
     return refs;
@@ -220,6 +241,28 @@ export class StageService {
       return JSON.parse(new TextDecoder().decode(bytes)) as StageFile;
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * Copies a stage's source archive (`<arcId>.arc`) from the extracted game
+   * into the editor store at `/editor/stage/<uuid>.arc`.
+   *
+   * The extracted layout isn't fixed, so the archive is located by name
+   * anywhere under `/extracted_game`. Failures are non-fatal (the stage JSON
+   * and world file are already usable).
+   */
+  private async copyStageArc(arcId: string, uuid: string): Promise<void> {
+    try {
+      const sourcePath = await this.opfs.findFileByName(`${arcId}.arc`);
+      if (!sourcePath) {
+        this.logger.warn(`StageService: arc "${arcId}.arc" not found in extracted game.`);
+        return;
+      }
+      const bytes = await this.opfs.readExtractedFile(sourcePath);
+      await this.editor.writeEditorFile(stageArcFilePath(uuid), bytes);
+    } catch (error) {
+      this.logger.warn(`StageService: failed to copy arc "${arcId}.arc" (non-fatal)`, error);
     }
   }
 }
