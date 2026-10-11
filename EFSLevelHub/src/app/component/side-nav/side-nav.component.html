@@ -79,7 +79,7 @@
           <a
             [routerLink]="item.route"
             routerLinkActive="bg-indigo-500/15 text-white ring-1 ring-inset ring-indigo-400/40"
-            [routerLinkActiveOptions]="{ exact: false }"
+            [routerLinkActiveOptions]="{ exact: item.route === '/my-worlds' }"
             [title]="collapsed() ? item.label : ''"
             class="group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-slate-300 transition hover:bg-slate-800 hover:text-white"
             [class.justify-center]="collapsed()"
@@ -102,6 +102,24 @@
               }
             }
           </a>
+
+          <!-- Open world tabs, nested under My Worlds -->
+          @if (item.route === '/my-worlds' && !collapsed() && worldTabsList().length > 0) {
+            <ul class="mt-1 space-y-0.5 pl-6">
+              @for (world of worldTabsList(); track world.id) {
+                <li>
+                  <a
+                    [routerLink]="['/my-worlds', world.id]"
+                    routerLinkActive="bg-indigo-500/15 text-white"
+                    class="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm text-slate-400 transition hover:bg-slate-800 hover:text-white"
+                  >
+                    <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-slate-500"></span>
+                    <span class="flex-1 truncate">{{ world.name }}</span>
+                  </a>
+                </li>
+              }
+            </ul>
+          }
         }
       </li>
     }

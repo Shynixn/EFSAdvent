@@ -1,0 +1,38 @@
+@if (routerLink) {
+  <a
+    [routerLink]="routerLink"
+    [class]="classes"
+    [class.pointer-events-none]="disabled"
+    [attr.aria-disabled]="disabled"
+    [attr.title]="title || null"
+    (click)="onClick($event)"
+  >
+    <ng-container *ngTemplateOutlet="iconTpl" />
+    <ng-container *ngTemplateOutlet="contentTpl" />
+  </a>
+} @else {
+  <button
+    [type]="type"
+    [class]="classes"
+    [disabled]="disabled"
+    [attr.title]="title || null"
+    (click)="onClick($event)"
+  >
+    <ng-container *ngTemplateOutlet="iconTpl" />
+    <ng-container *ngTemplateOutlet="contentTpl" />
+  </button>
+}
+
+<!--
+  Content and the optional icon are captured in templates so they can be
+  projected into whichever root element (anchor or button) is rendered.
+  `ng-content` cannot be placed directly inside a control-flow block.
+-->
+<ng-template #contentTpl><ng-content /></ng-template>
+<ng-template #iconTpl>
+  @if (icon) {
+    <svg class="h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+      <path [attr.d]="icon" />
+    </svg>
+  }
+</ng-template>

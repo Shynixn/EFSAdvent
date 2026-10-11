@@ -1,6 +1,6 @@
 import { Component, OnInit, inject } from '@angular/core';
-import { RouterLink } from '@angular/router';
 import { IsoExtractorComponent } from '../../component/iso-extractor/iso-extractor.component';
+import { ButtonComponent } from '../../component/button/button.component';
 import { GameStateService } from '../../service/game-state.service';
 
 /**
@@ -12,7 +12,7 @@ import { GameStateService } from '../../service/game-state.service';
  */
 @Component({
   selector: 'app-settings-page',
-  imports: [IsoExtractorComponent, RouterLink],
+  imports: [IsoExtractorComponent, ButtonComponent],
   templateUrl: './settings-page.html',
   styleUrl: './settings-page.css',
 })

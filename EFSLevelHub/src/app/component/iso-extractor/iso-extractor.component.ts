@@ -5,6 +5,7 @@ import { GameStateService } from '../../service/game-state.service';
 import { EditorService, WORLDMAP_FILE } from '../../service/editor.service';
 import { FSALibService } from '../../service/fsalib.service';
 import { LoggingService } from '../../service/logging.service';
+import { ButtonComponent } from '../button/button.component';
 import { ExtractionProgress, StorageEstimate } from '../../entity/iso.entity';
 
 /**
@@ -19,6 +20,7 @@ import { ExtractionProgress, StorageEstimate } from '../../entity/iso.entity';
  */
 @Component({
   selector: 'app-iso-extractor',
+  imports: [ButtonComponent],
   templateUrl: './iso-extractor.component.html',
   styleUrl: './iso-extractor.component.css',
 })

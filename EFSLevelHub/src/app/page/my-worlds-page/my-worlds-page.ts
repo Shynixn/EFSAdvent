@@ -1,8 +1,11 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
+import { Router } from '@angular/router';
 import { ModalComponent } from '../../component/modal/modal.component';
 import { CardComponent } from '../../component/card/card.component';
+import { ButtonComponent } from '../../component/button/button.component';
 import { WorldData } from '../../entity/editor.entity';
 import { DEFAULT_WORLD, MIN_WORLD_NAME_LENGTH, WorldService } from '../../service/world.service';
+import { WorldTabsService } from '../../service/world-tabs.service';
 import { EditorService, WORLDMAP_FILE } from '../../service/editor.service';
 import { LoggingService } from '../../service/logging.service';
 
@@ -15,13 +18,15 @@ import { LoggingService } from '../../service/logging.service';
  */
 @Component({
   selector: 'app-my-worlds-page',
-  imports: [ModalComponent, CardComponent],
+  imports: [ModalComponent, CardComponent, ButtonComponent],
   templateUrl: './my-worlds-page.html',
   styleUrl: './my-worlds-page.css',
 })
 export class MyWorldsPage implements OnInit {
   private readonly worldService = inject(WorldService);
+  private readonly tabs = inject(WorldTabsService);
   private readonly editor = inject(EditorService);
+  private readonly router = inject(Router);
   private readonly logger = inject(LoggingService);
 
   /** Minimum characters enforced by the name input. */
@@ -83,10 +88,7 @@ export class MyWorldsPage implements OnInit {
 
     this.isSaving.set(true);
     try {
-      const world = await this.worldService.createWorld(
-        this.newWorldName(),
-        this.newWorldAuthor(),
-      );
+      const world = await this.worldService.createWorld(this.newWorldName(), this.newWorldAuthor());
       this.logger.info(`MyWorlds: created world "${world.name}".`);
       this.closeCreate();
     } catch (err) {
@@ -99,6 +101,12 @@ export class MyWorldsPage implements OnInit {
   /** Whether the given world is the immutable default world. */
   isDefault(world: WorldData): boolean {
     return world.id === DEFAULT_WORLD.id;
+  }
+
+  /** Opens a world in a new tab and navigates to its page. */
+  openWorld(world: WorldData): void {
+    this.tabs.open(world.id);
+    void this.router.navigate(['/my-worlds', world.id]);
   }
 
   /**

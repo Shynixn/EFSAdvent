@@ -10,10 +10,11 @@
       <app-card
         [title]="world.name"
         [author]="world.author"
+        [uuid]="world.uuid"
         [imageUrl]="worldmapUrl()"
         [badge]="isDefault(world) ? 'Cannot be changed' : null"
         [variant]="isDefault(world) ? 'danger' : 'default'"
-        [disabled]="isDefault(world)"
+        (cardClick)="openWorld(world)"
       />
     }
 
@@ -68,21 +69,10 @@
     }
 
     <div class="flex justify-end gap-2 pt-1">
-      <button
-        type="button"
-        (click)="closeCreate()"
-        class="rounded-md border border-slate-600 px-4 py-2 text-sm font-medium text-slate-200 transition hover:border-slate-400 hover:text-white"
-      >
-        Cancel
-      </button>
-      <button
-        type="button"
-        (click)="confirmCreate()"
-        [disabled]="isSaving()"
-        class="rounded-md bg-indigo-500 px-4 py-2 text-sm font-medium text-white shadow transition hover:bg-indigo-400 disabled:cursor-not-allowed disabled:opacity-50"
-      >
+      <app-button variant="outline" color="slate" (clicked)="closeCreate()">Cancel</app-button>
+      <app-button variant="primary" [disabled]="isSaving()" (clicked)="confirmCreate()">
         {{ isSaving() ? 'Creating…' : 'Create' }}
-      </button>
+      </app-button>
     </div>
   </div>
 </app-modal>

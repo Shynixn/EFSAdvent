@@ -28,6 +28,12 @@ export const routes: Routes = [
     canActivate: [requiresGameFilesGuard],
   },
   {
+    path: 'my-worlds/:worldId',
+    loadComponent: () => import('./page/world-page/world-page').then((m) => m.WorldPage),
+    title: 'World',
+    canActivate: [requiresGameFilesGuard],
+  },
+  {
     path: 'settings',
     loadComponent: () => import('./page/settings-page/settings-page').then((m) => m.SettingsPage),
     title: 'Settings',

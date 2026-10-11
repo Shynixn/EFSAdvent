@@ -1,4 +1,5 @@
 import { Component, EventEmitter, Input, Output } from '@angular/core';
+import { ButtonComponent } from '../button/button.component';
 
 /**
  * ModalComponent
@@ -9,6 +10,7 @@ import { Component, EventEmitter, Input, Output } from '@angular/core';
  */
 @Component({
   selector: 'app-modal',
+  imports: [ButtonComponent],
   templateUrl: './modal.component.html',
   styleUrl: './modal.component.css',
 })

@@ -22,6 +22,8 @@ export class CardComponent {
   @Input() subtitle = '';
   /** Optional author name, shown with an avatar icon under the title. */
   @Input() author = '';
+  /** Optional unique id, shown very small at the bottom of the card. */
+  @Input() uuid = '';
   /** Optional image URL rendered in the header banner. */
   @Input() imageUrl: string | null = null;
   /** Optional text for a corner badge over the image (e.g. "Cannot be changed"). */

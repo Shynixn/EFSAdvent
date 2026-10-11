@@ -18,6 +18,7 @@ const WORLDS_KEY = 'worlds';
  */
 export const DEFAULT_WORLD: WorldData = {
   id: '__default__',
+  uuid: '00000000-0000-0000-0000-000000000000',
   name: 'Default World',
   author: 'Nintendo',
   mapImage: WORLDMAP_FILE,
@@ -50,10 +51,18 @@ export class WorldService {
 
   /** Loads persisted worlds from the editor's user-data document. */
   async load(): Promise<void> {
-    const worlds = await this.editor.get<WorldData[]>(WORLDS_KEY, []);
-    this.userWorlds.set(Array.isArray(worlds) ? worlds : []);
+    const stored = await this.editor.get<WorldData[]>(WORLDS_KEY, []);
+    const worlds = (Array.isArray(stored) ? stored : []).map((world) => ({
+      ...world,
+      uuid: world.uuid || this.generateUuid(),
+    }));
+    // Persist back any backfilled ids so they stay stable across sessions.
+    if (worlds.some((world, i) => world.uuid !== stored?.[i]?.uuid)) {
+      await this.editor.set(WORLDS_KEY, worlds);
+    }
+    this.userWorlds.set(worlds);
     this.loaded.set(true);
-    this.logger.info(`WorldService: loaded ${this.userWorlds().length} user world(s).`);
+    this.logger.info(`WorldService: loaded ${worlds.length} user world(s).`);
   }
 
   /**
@@ -86,6 +95,7 @@ export class WorldService {
 
     const world: WorldData = {
       id: this.slugify(name),
+      uuid: this.generateUuid(),
       name: name.trim(),
       author: author.trim() || DEFAULT_AUTHOR,
       mapImage: WORLDMAP_FILE,
@@ -118,5 +128,14 @@ export class WorldService {
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '');
     return slug || `world-${Date.now()}`;
+  }
+
+  /** Generates a fresh unique id for a world. */
+  private generateUuid(): string {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+    // Fallback for environments without crypto.randomUUID.
+    return `${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 10)}`;
   }
 }

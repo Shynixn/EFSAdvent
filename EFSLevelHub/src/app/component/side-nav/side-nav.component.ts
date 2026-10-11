@@ -1,6 +1,7 @@
 import { Component, inject, signal } from '@angular/core';
 import { RouterLink, RouterLinkActive } from '@angular/router';
 import { GameStateService } from '../../service/game-state.service';
+import { WorldTabsService } from '../../service/world-tabs.service';
 
 /** A single entry in the application's side navigation. */
 export interface NavItem {
@@ -26,12 +27,16 @@ export interface NavItem {
 })
 export class SideNavComponent {
   private readonly gameState = inject(GameStateService);
+  private readonly worldTabs = inject(WorldTabsService);
 
   /** Whether the rail is collapsed to icons only. */
   readonly collapsed = signal(false);
 
   /** Whether the ISO has been imported (drives the settings warning badge). */
   readonly isoReady = this.gameState.isReady;
+
+  /** Open world tabs, shown nested under "My Worlds". */
+  readonly worldTabsList = this.worldTabs.tabs;
 
   /** Navigation entries rendered top-to-bottom. */
   readonly items: NavItem[] = [
