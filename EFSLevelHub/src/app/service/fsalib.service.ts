@@ -265,11 +265,19 @@ export class FSALibService {
     }
   }
 
-  /** Encodes an {@link ImageBuffer} as a PNG data URL. */
+  /**
+   * Encodes an {@link ImageBuffer} as a PNG data URL.
+   *
+   * `cnum` (the 4th argument) is UPNG's *maximum colour count*. Passing a
+   * small value makes UPNG quantize the image, which visibly collapses
+   * near-identical GX colours (e.g. 243 distinct C8 palette entries rendering
+   * as ~189). Passing 0 means "auto", which is equally lossy. We always ask
+   * for the full 256 so UPNG emits lossless RGBA8888.
+   */
   encodePng(image: ImageBuffer): string {
     // ImageBuffer stores RGBA8888 already, which is what UPNG.encode expects.
     const pixels = new Uint8Array(image.pixels);
-    const png = UPNG.encode([pixels.buffer], image.width, image.height, 0);
+    const png = UPNG.encode([pixels.buffer], image.width, image.height, 256);
     return `data:image/png;base64,${this.toBase64(png)}`;
   }
 

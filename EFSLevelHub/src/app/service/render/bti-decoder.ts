@@ -50,7 +50,9 @@ export function decodeBti(data: Uint8Array): DecodedImage {
   let palette: Uint8ClampedArray | null = null;
   let dataOffset = 0x20;
 
-  // Paletted formats store palette metadata starting at 0x08.
+  // Paletted formats store palette metadata starting at 0x08. The palette
+  // itself lives at the end of the file (`paletteOffset`); the texel data
+  // always begins right after the 0x20-byte header.
   if (
     textureFormat === GxFormat.C4 ||
     textureFormat === GxFormat.C8 ||
@@ -60,7 +62,6 @@ export function decodeBti(data: Uint8Array): DecodedImage {
     const paletteCount = view.getUint16(10, false);
     const paletteOffset = view.getUint32(12, false);
     palette = decodePalette(data, paletteFormat, paletteCount, paletteOffset);
-    dataOffset = paletteOffset;
   }
 
   const rgba = new Uint8ClampedArray(width * height * 4);

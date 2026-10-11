@@ -25,6 +25,18 @@ export enum GxFormat {
   CMPR = 0xe,
 }
 
+/**
+ * GX palette format ids.
+ *
+ * This is a *separate* enum from {@link GxFormat}: the same byte value means a
+ * different thing in each context. Mirrors AuroraLib's `GXPaletteFormat`.
+ */
+export enum PaletteFormat {
+  IA8 = 0x0,
+  RGB565 = 0x1,
+  RGB5A3 = 0x2,
+}
+
 /** Human-readable name for a format, for logging/UI. */
 export const GX_FORMAT_NAMES: Record<number, string> = {
   [GxFormat.I4]: 'I4',
@@ -51,7 +63,7 @@ export interface BtiTexture {
   width: number;
   height: number;
   /** Palette format id for paletted textures (C4/C8/C14X2), else null. */
-  paletteFormat: GxFormat | null;
+  paletteFormat: PaletteFormat | null;
   /** Embedded palette colours as RGBA8888 (length = count * 4), if present. */
   palette: Uint8ClampedArray | null;
   /** Number of entries in the embedded palette. */
@@ -99,17 +111,18 @@ export function parseBti(data: Uint8Array): BtiTexture {
     throw new Error(`BTI has invalid dimensions ${width}x${height}`);
   }
 
-  let paletteFormat: GxFormat | null = null;
+  let paletteFormat: PaletteFormat | null = null;
   let palette: Uint8ClampedArray | null = null;
   let paletteCount = 0;
+  // Texture data always starts right after the 0x20-byte header. Paletted
+  // formats store their palette *after* the texel data, at `paletteOffset`.
   let dataOffset = 0x20;
 
   if (format === GxFormat.C4 || format === GxFormat.C8 || format === GxFormat.C14X2) {
-    paletteFormat = data[9] as GxFormat;
+    paletteFormat = data[9] as PaletteFormat;
     paletteCount = view.getUint16(10, false);
     const paletteOffset = view.getUint32(12, false);
     palette = decodePaletteBytes(data, paletteFormat, paletteCount, paletteOffset);
-    dataOffset = paletteOffset;
   }
 
   return {
@@ -123,23 +136,65 @@ export function parseBti(data: Uint8Array): BtiTexture {
   };
 }
 
-/** Decodes an embedded RGB565 / RGB5A3 palette to RGBA8888. */
+/**
+ * Decodes an embedded palette to RGBA8888.
+ *
+ * IMPORTANT: the palette format byte uses `GXPaletteFormat`, which is a
+ * *different* enum from the texture's `GXImageFormat`:
+ *
+ * | byte | GXImageFormat | GXPaletteFormat |
+ * |------|---------------|-----------------|
+ * | 0x00 | I4            | IA8             |
+ * | 0x01 | I8            | RGB565          |
+ * | 0x02 | IA4           | RGB5A3          |
+ *
+ * Reading it with the image-format meaning (as this code originally did)
+ * silently mis-decodes every paletted texture.
+ *
+ * Mirrors AuroraLib's `ImageEX.DecodeImage`, which decodes the palette with
+ * `IA8Block` / `RGB565Block` / `RGB5A3Block`.
+ */
 function decodePaletteBytes(
   data: Uint8Array,
-  format: GxFormat,
+  format: number,
   count: number,
   offset: number,
 ): Uint8ClampedArray {
   const out = new Uint8ClampedArray(count * 4);
+
   for (let i = 0; i < count; i++) {
     const o = offset + i * 2;
-    const value = (data[o] << 8) | data[o + 1];
-    const [r, g, b, a] = format === GxFormat.RGB5A3 ? rgb5a3ToRgba(value) : rgb565ToRgba(value);
+    const hi = data[o];
+    const lo = data[o + 1];
+    let r: number;
+    let g: number;
+    let b: number;
+    let a: number;
+
+    switch (format) {
+      case PaletteFormat.IA8: {
+        // IA8 as 16bpp: alpha in the high byte, intensity in the low byte.
+        a = hi;
+        r = g = b = lo;
+        break;
+      }
+      case PaletteFormat.RGB5A3: {
+        [r, g, b, a] = rgb5a3ToRgba((hi << 8) | lo);
+        break;
+      }
+      default: {
+        // RGB565.
+        [r, g, b, a] = rgb565ToRgba((hi << 8) | lo);
+        break;
+      }
+    }
+
     out[i * 4] = r;
     out[i * 4 + 1] = g;
     out[i * 4 + 2] = b;
     out[i * 4 + 3] = a;
   }
+
   return out;
 }
 

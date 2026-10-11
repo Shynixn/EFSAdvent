@@ -24,11 +24,6 @@ export function isPaletted(format: GxFormat): boolean {
   return format === GxFormat.C4 || format === GxFormat.C8 || format === GxFormat.C14X2;
 }
 
-/** Bits per palette index for a paletted format. */
-function paletteBits(format: GxFormat): number {
-  return format === GxFormat.C4 ? 4 : format === GxFormat.C8 ? 8 : 16;
-}
-
 /**
  * Decodes a BTI texture to RGBA.
  *
@@ -38,32 +33,44 @@ function paletteBits(format: GxFormat): number {
  */
 export function decodeTexture(texture: BtiTexture, override?: Palette): ImageBuffer {
   const { format, width, height, data } = texture;
-  const image = new ImageBuffer(width, height);
+
+  // GX stores texels in fixed-size blocks, so the *encoded* image is padded up
+  // to a whole number of blocks on both axes. Decoding straight into a
+  // `width x height` buffer is wrong whenever the true size is not a multiple
+  // of the block size (e.g. the 811x597 overworld map, whose 4x4 blocks pad to
+  // 812x600): the padded pitch no longer matches the buffer pitch and the
+  // overflow spills into a seam along the right edge.
+  //
+  // Mirror AuroraLib by decoding into the padded buffer, then cropping.
+  const [blockW, blockH] = blockDimensions(format);
+  const paddedW = Math.ceil(width / blockW) * blockW;
+  const paddedH = Math.ceil(height / blockH) * blockH;
+  const target = new ImageBuffer(paddedW, paddedH);
 
   switch (format) {
     case GxFormat.I4:
-      decodeI4(data, width, height, image);
+      decodeI4(data, width, height, target);
       break;
     case GxFormat.I8:
-      decodeI8(data, width, height, image);
+      decodeI8(data, width, height, target);
       break;
     case GxFormat.IA4:
-      decodeIA4(data, width, height, image);
+      decodeIA4(data, width, height, target);
       break;
     case GxFormat.IA8:
-      decodeIA8(data, width, height, image);
+      decodeIA8(data, width, height, target);
       break;
     case GxFormat.RGB565:
-      decodeRGB565(data, width, height, image);
+      decodeRGB565(data, width, height, target);
       break;
     case GxFormat.RGB5A3:
-      decodeRGB5A3(data, width, height, image);
+      decodeRGB5A3(data, width, height, target);
       break;
     case GxFormat.RGBA8:
-      decodeRGBA8(data, width, height, image);
+      decodeRGBA8(data, width, height, target);
       break;
     case GxFormat.CMPR:
-      decodeCMPR(data, width, height, image);
+      decodeCMPR(data, width, height, target);
       break;
     case GxFormat.C4:
     case GxFormat.C8:
@@ -72,14 +79,46 @@ export function decodeTexture(texture: BtiTexture, override?: Palette): ImageBuf
       if (!palette) {
         throw new Error(`${formatName(format)} texture has no palette`);
       }
-      decodePaletted(data, width, height, format, palette, image);
+      decodePaletted(data, width, height, format, palette, target);
       break;
     }
     default:
       throw new Error(`Unsupported BTI format ${formatName(format)}`);
   }
 
-  return image;
+  return crop(target, width, height);
+}
+
+/**
+ * Block dimensions (width, height) per GX format, matching AuroraLib's
+ * `GXImageFormat_Info` tables. Used to pad the decode buffer.
+ */
+function blockDimensions(format: GxFormat): [number, number] {
+  switch (format) {
+    case GxFormat.I4:
+    case GxFormat.C4:
+    case GxFormat.CMPR:
+      return [8, 8];
+    case GxFormat.I8:
+    case GxFormat.IA4:
+    case GxFormat.C8:
+      return [8, 4];
+    default:
+      return [4, 4];
+  }
+}
+
+/** Crops a padded decode buffer down to its true pixel dimensions. */
+function crop(source: ImageBuffer, width: number, height: number): ImageBuffer {
+  if (source.width === width && source.height === height) {
+    return source;
+  }
+  const out = new ImageBuffer(width, height);
+  for (let y = 0; y < height; y++) {
+    const src = y * source.width * 4;
+    out.pixels.set(source.pixels.subarray(src, src + width * 4), y * width * 4);
+  }
+  return out;
 }
 
 /** Decodes an I4 texture to opaque greyscale (usable as an additive light map). */
@@ -298,7 +337,21 @@ function buildCmprPalette(c0Raw: number, c1Raw: number): [number, number, number
   return pal;
 }
 
-/** Decodes a paletted (C4 / C8 / C14X2) texture through `palette`. */
+/**
+ * Decodes a paletted (C4 / C8 / C14X2) texture through `palette`.
+ *
+ * Block geometry must match AuroraLib's `GXImageFormat_Info` tables, which
+ * differ per format and are *not* all 8×8:
+ *
+ * | format | block | bits/px | bytes/block |
+ * |--------|-------|---------|-------------|
+ * | C4     | 8×8   | 4       | 32          |
+ * | C8     | 8×4   | 8       | 32          |
+ * | C14X2  | 4×4   | 16      | 32          |
+ *
+ * C8 in particular decodes exactly like I8 (8×4 blocks); treating it as 8×8
+ * scrambles the image.
+ */
 function decodePaletted(
   data: Uint8Array,
   w: number,
@@ -307,31 +360,39 @@ function decodePaletted(
   palette: Palette,
   out: ImageBuffer,
 ): void {
-  const bw = Math.ceil(w / 8);
-  const bh = Math.ceil(h / 8);
-  const bits = paletteBits(format);
+  const [blockW, blockH] =
+    format === GxFormat.C4 ? [8, 8] : format === GxFormat.C8 ? [8, 4] : [4, 4];
+  // Derive the grid from the *destination* buffer, which `decodeTexture` has
+  // already padded up to whole blocks. Using the unpadded width here would
+  // make the write pitch disagree with the buffer pitch whenever the true
+  // size is not block-aligned.
+  const bw = out.width / blockW;
+  const bh = out.height / blockH;
 
   for (let by = 0; by < bh; by++) {
     for (let bx = 0; bx < bw; bx++) {
       const blockOff = (by * bw + bx) * 32;
-      for (let py = 0; py < 8; py++) {
-        for (let px = 0; px < 8; px++) {
+      for (let py = 0; py < blockH; py++) {
+        for (let px = 0; px < blockW; px++) {
           let index: number;
-          if (bits === 4) {
-            const o = blockOff + py * 4 + (px >> 1);
+          if (format === GxFormat.C4) {
+            // 4bpp: two indices per byte, high nibble first.
+            const o = blockOff + py * (blockW / 2) + (px >> 1);
             if (o >= data.length) {
               continue;
             }
             const byte = data[o];
             index = px % 2 === 0 ? (byte >> 4) & 0xf : byte & 0xf;
-          } else if (bits === 8) {
-            const o = blockOff + py * 8 + px;
+          } else if (format === GxFormat.C8) {
+            // 8bpp: one index per byte.
+            const o = blockOff + py * blockW + px;
             if (o >= data.length) {
               continue;
             }
             index = data[o];
           } else {
-            const o = blockOff + py * 16 + px * 2;
+            // C14X2: one 16-bit index per pixel, 14 bits significant.
+            const o = blockOff + py * blockW * 2 + px * 2;
             if (o + 1 >= data.length) {
               continue;
             }
@@ -341,8 +402,8 @@ function decodePaletted(
           const po = index * 4;
           if (po + 3 < palette.length) {
             out.set(
-              bx * 8 + px,
-              by * 8 + py,
+              bx * blockW + px,
+              by * blockH + py,
               palette[po],
               palette[po + 1],
               palette[po + 2],
