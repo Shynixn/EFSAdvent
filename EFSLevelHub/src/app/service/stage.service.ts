@@ -106,10 +106,15 @@ export function stageFilePath(uuid: string): string {
   return `stage/${uuid}.json`;
 }
 
+/** Author attributed to stages that don't declare one (i.e. the game's own). */
+export const DEFAULT_STAGE_AUTHOR = 'Nintendo';
+
 /** A minimal stage definition file persisted under `/editor/stage/<uuid>.json`. */
 export interface StageFile {
   id: string;
   name: string;
+  /** Author shown in the stage picker; falls back to "Nintendo" when absent. */
+  author?: string;
 }
 
 /**
@@ -148,6 +153,16 @@ export class StageService {
     this.logger.info(`StageService: loaded ${stages.length} stage(s).`);
   }
 
+  /** Looks up a single stage by id from the already-loaded list. */
+  getById(id: string): StageFile | undefined {
+    return this.stageList().find((stage) => stage.id === id);
+  }
+
+  /** Human-readable author of a stage, applying the default fallback. */
+  authorOf(stage: StageFile | undefined): string {
+    return stage?.author?.trim() || DEFAULT_STAGE_AUTHOR;
+  }
+
   /**
    * Creates a stage definition file for every default stage (once) and records
    * their ids in `userdata.json`.
@@ -175,7 +190,7 @@ export class StageService {
       const name = definition?.Name ?? id;
       onProgress?.(i, total, name);
 
-      const file: StageFile = { id: uuid, name };
+      const file: StageFile = { id: uuid, name, author: DEFAULT_STAGE_AUTHOR };                                                                                                          
       await this.editor.writeEditorFile(
         stageFilePath(uuid),
         new TextEncoder().encode(JSON.stringify(file, null, 2)),

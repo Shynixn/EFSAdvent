@@ -10,6 +10,7 @@ import {
 } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { ButtonComponent } from '../../component/button/button.component';
+import { StagePickerComponent } from '../../component/stage-picker/stage-picker.component';
 import { WorldService } from '../../service/world.service';
 import { StageService, StageFile } from '../../service/stage.service';
 import { WorldTabsService } from '../../service/world-tabs.service';
@@ -30,6 +31,10 @@ export interface MapPoint {
   y: number;
   /** Optional label shown on hover / future tooltips. */
   label?: string;
+  /** Id of the stage currently assigned to this marker. */
+  stageId: string;
+  /** Zero-based slot in the world's `stages` array this marker edits. */
+  slot: number;
 }
 
 /**
@@ -41,7 +46,7 @@ export interface MapPoint {
  */
 @Component({
   selector: 'app-world-page',
-  imports: [ButtonComponent],
+  imports: [ButtonComponent, StagePickerComponent],
   templateUrl: './world-page.html',
   styleUrl: './world-page.css',
 })
@@ -121,6 +126,15 @@ export class WorldPage implements OnInit, OnDestroy {
   /** Markers rendered on the map (label = stage name + number). */
   readonly points = signal<MapPoint[]>([]);
 
+  /** All known stages, offered by the stage picker. */
+  readonly allStages = signal<StageFile[]>([]);
+
+  /** Whether the stage picker modal is open. */
+  readonly pickerOpen = signal(false);
+
+  /** The marker currently being re-pointed (null when the picker is closed). */
+  readonly activePoint = signal<MapPoint | null>(null);
+
   ngOnInit(): void {
     const id = this.route.snapshot.paramMap.get('worldId') ?? '';
     this.worldId.set(id);
@@ -147,18 +161,20 @@ export class WorldPage implements OnInit, OnDestroy {
    */
   private async buildPoints(stageIds: string[]): Promise<void> {
     await this.stageService.load();
-    const namesById = new Map<string, string>(
-      this.stageService.stages().map((s: StageFile) => [s.id, s.name]),
-    );
+    const stages = this.stageService.stages();
+    this.allStages.set(stages);
+    const namesById = new Map<string, string>(stages.map((s: StageFile) => [s.id, s.name]));
 
     const points: MapPoint[] = this.coordinates.map((coord, i) => {
-      const stageId = stageIds[i];
-      const name = (stageId && namesById.get(stageId)) || 'Stage';
+      const stageId = stageIds[i] ?? '';
+      const name = namesById.get(stageId) || 'Stage';
       return {
-        id: stageId ?? `p${i + 1}`,
+        id: stageId || `p${i + 1}`,
         x: coord.x,
         y: coord.y,
         label: `${name} (${i + 1})`,
+        stageId,
+        slot: i,
       };
     });
 
@@ -170,9 +186,40 @@ export class WorldPage implements OnInit, OnDestroy {
     this.resizeObserver = null;
   }
 
-  /** Handles a marker click (no-op for now). */
+  /** Opens the stage picker for the clicked marker. */
   onPointClick(point: MapPoint): void {
-    this.logger.info(`WorldPage: clicked point "${point.id}" (${point.x}%, ${point.y}%)`);
+    this.activePoint.set(point);
+    this.pickerOpen.set(true);
+    this.logger.info(`WorldPage: editing slot ${point.slot} ("${point.id}").`);
+  }
+
+  /** Closes the stage picker without changing the marker. */
+  closePicker(): void {
+    this.pickerOpen.set(false);
+    this.activePoint.set(null);
+  }
+
+  /**
+   * Re-points the active marker at the chosen stage, persists the change to the
+   * world file and refreshes the marker's label.
+   */
+  async onStagePicked(stageId: string): Promise<void> {
+    const point = this.activePoint();
+    const worldId = this.worldId();
+    if (!point || !worldId) {
+      this.closePicker();
+      return;
+    }
+
+    const stage = this.stageService.getById(stageId);
+    const updated = await this.worldService.setWorldStage(worldId, point.slot, {
+      id: stageId,
+      arcFileName: stage ? `${stage.name}.arc` : '',
+    });
+    if (updated) {
+      void this.buildPoints(updated.stages.map((s) => s.id));
+    }
+    this.closePicker();
   }
 
   /** Captures the image's natural aspect ratio once it has loaded. */

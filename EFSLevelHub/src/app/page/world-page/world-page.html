@@ -68,3 +68,13 @@
     }
   </div>
 </div>
+
+<!-- Stage picker: re-points the clicked marker at a different stage. -->
+<app-stage-picker
+  [open]="pickerOpen()"
+  [stages]="allStages()"
+  [selectedId]="activePoint()?.stageId ?? ''"
+  [title]="activePoint()?.label ? 'Re-point ' + activePoint()!.label : 'Select a stage'"
+  (picked)="onStagePicked($event)"
+  (closed)="closePicker()"
+/>

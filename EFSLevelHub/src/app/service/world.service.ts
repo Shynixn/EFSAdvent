@@ -80,6 +80,38 @@ export class WorldService {
     return this.worldList().find((w) => w.id === id);
   }
 
+  /**
+   * Replaces the stage referenced by a world at the given slot index and
+   * persists the world file plus the in-memory world list.
+   *
+   * @param worldId World to update.
+   * @param index   Zero-based slot in `world.stages` (matches the map marker).
+   * @param stage   New stage reference (`{ id, arcFileName }`); pass `null` to
+   *                clear the slot.
+   * @returns The updated world, or `undefined` when the world/slot is unknown.
+   */
+  async setWorldStage(
+    worldId: string,
+    index: number,
+    stage: WorldStageRef | null,
+  ): Promise<WorldData | undefined> {
+    const world = this.getById(worldId);
+    if (!world || index < 0 || index >= world.stages.length) {
+      return undefined;
+    }
+
+    const stages = world.stages.slice();
+    stages[index] = stage ?? { id: '', arcFileName: '' };
+    const updated: WorldData = { ...world, stages };
+
+    await this.writeWorldFile(updated);
+    this.worldList.set(this.worldList().map((w) => (w.id === worldId ? updated : w)));
+    this.logger.info(
+      `WorldService: world "${worldId}" slot ${index} → stage "${stage?.id ?? '(cleared)'}".`,
+    );
+    return updated;
+  }
+
   /** Whether the given id is the built-in default world. */
   isDefault(id: string): boolean {
     return id === ZERO_GUID;

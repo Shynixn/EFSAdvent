@@ -19,6 +19,8 @@ export class ModalComponent {
   @Input() title = '';
   /** When false the dialog is not rendered. */
   @Input() open = false;
+  /** Tailwind max-width class for the dialog panel. */
+  @Input() maxWidth = 'max-w-md';
   /** Emits when the dialog should be dismissed. */
   @Output() closed = new EventEmitter<void>();
 
