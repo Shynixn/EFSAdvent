@@ -36,7 +36,7 @@
       @if (mapBox(); as box) {
         <div class="pointer-events-none absolute inset-0 flex items-center justify-center">
           <div class="relative" [style.width.px]="box.width" [style.height.px]="box.height">
-            @for (point of points; track point.id) {
+            @for (point of points(); track point.id) {
               <!-- Single clickable element anchored at the point: the dot stays
                    centered on the coordinate while the label sits beside it. -->
               <button

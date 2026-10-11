@@ -11,6 +11,7 @@ import {
 import { ActivatedRoute, Router } from '@angular/router';
 import { ButtonComponent } from '../../component/button/button.component';
 import { WorldService } from '../../service/world.service';
+import { StageService, StageFile } from '../../service/stage.service';
 import { WorldTabsService } from '../../service/world-tabs.service';
 import { EditorService, WORLDMAP_FILE } from '../../service/editor.service';
 import { LoggingService } from '../../service/logging.service';
@@ -46,6 +47,7 @@ export interface MapPoint {
 })
 export class WorldPage implements OnInit, OnDestroy {
   private readonly worldService = inject(WorldService);
+  private readonly stageService = inject(StageService);
   private readonly tabs = inject(WorldTabsService);
   private readonly editor = inject(EditorService);
   private readonly route = inject(ActivatedRoute);
@@ -86,35 +88,38 @@ export class WorldPage implements OnInit, OnDestroy {
   });
 
   /**
-   * Hard-coded markers for now — positions are percentages of the map image,
-   * so they track the image as it scales.
+   * Fixed marker coordinates (percentages of the map image), in stage order.
+   * The label is filled in from the world's stages (name + number).
    */
-  readonly points: MapPoint[] = [
-    { id: 'p1', x: 80, y: 43, label: 'Stage 1' },
-    { id: 'p2', x: 65, y: 47, label: 'Stage 2' },
-    { id: 'p3', x: 55, y: 50, label: 'Stage 3' },
-    { id: 'p4', x: 70, y: 95, label: 'Stage 4' },
-    { id: 'p5', x: 80, y: 85, label: 'Stage 5' },
-    { id: 'p6', x: 83, y: 75, label: 'Stage 6' },
-    { id: 'p7', x: 40, y: 35, label: 'Stage 7' },
-    { id: 'p8', x: 48, y: 22, label: 'Stage 8' },
-    { id: 'p9', x: 60, y: 20, label: 'Stage 9' },
-    { id: 'p10', x: 60, y: 90, label: 'Stage 10' },
-    { id: 'p11', x: 65, y: 80, label: 'Stage 11' },
-    { id: 'p12', x: 50, y: 60, label: 'Stage 12' },
-    { id: 'p13', x: 17, y: 50, label: 'Stage 13' },
-    { id: 'p14', x: 20, y: 43, label: 'Stage 14' },
-    { id: 'p15', x: 23, y: 60, label: 'Stage 15' },
-    { id: 'p16', x: 20, y: 90, label: 'Stage 16' },
-    { id: 'p17', x: 13, y: 80, label: 'Stage 17' },
-    { id: 'p18', x: 25, y: 75, label: 'Stage 18' },
-    { id: 'p19', x: 45, y: 90, label: 'Stage 19' },
-    { id: 'p20', x: 45, y: 75, label: 'Stage 20' },
-    { id: 'p21', x: 37, y: 60, label: 'Stage 21' },
-    { id: 'p22', x: 10, y: 27, label: 'Stage 22' },
-    { id: 'p23', x: 20, y: 20, label: 'Stage 23' },
-    { id: 'p24', x: 30, y: 13, label: 'Stage 24' },
+  private readonly coordinates: { x: number; y: number }[] = [
+    { x: 80, y: 43 },
+    { x: 65, y: 47 },
+    { x: 55, y: 50 },
+    { x: 70, y: 95 },
+    { x: 80, y: 85 },
+    { x: 83, y: 75 },
+    { x: 40, y: 35 },
+    { x: 48, y: 22 },
+    { x: 60, y: 20 },
+    { x: 60, y: 90 },
+    { x: 65, y: 80 },
+    { x: 50, y: 60 },
+    { x: 17, y: 50 },
+    { x: 20, y: 43 },
+    { x: 23, y: 60 },
+    { x: 20, y: 90 },
+    { x: 13, y: 80 },
+    { x: 25, y: 75 },
+    { x: 45, y: 90 },
+    { x: 45, y: 75 },
+    { x: 37, y: 60 },
+    { x: 10, y: 27 },
+    { x: 20, y: 20 },
+    { x: 30, y: 13 },
   ];
+
+  /** Markers rendered on the map (label = stage name + number). */
+  readonly points = signal<MapPoint[]>([]);
 
   ngOnInit(): void {
     const id = this.route.snapshot.paramMap.get('worldId') ?? '';
@@ -129,10 +134,35 @@ export class WorldPage implements OnInit, OnDestroy {
       }
       this.worldName.set(world.name);
       this.tabs.open(id);
+      void this.buildPoints(world.stages.map((s) => s.id));
     });
 
     void this.loadWorldmap();
     this.observeArea();
+  }
+
+  /**
+   * Builds the map markers by pairing the fixed coordinates with the stage
+   * names (in order), labelling each with the stage name and its number.
+   */
+  private async buildPoints(stageIds: string[]): Promise<void> {
+    await this.stageService.load();
+    const namesById = new Map<string, string>(
+      this.stageService.stages().map((s: StageFile) => [s.id, s.name]),
+    );
+
+    const points: MapPoint[] = this.coordinates.map((coord, i) => {
+      const stageId = stageIds[i];
+      const name = (stageId && namesById.get(stageId)) || 'Stage';
+      return {
+        id: stageId ?? `p${i + 1}`,
+        x: coord.x,
+        y: coord.y,
+        label: `${name} (${i + 1})`,
+      };
+    });
+
+    this.points.set(points);
   }
 
   ngOnDestroy(): void {
