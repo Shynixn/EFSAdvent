@@ -6,6 +6,9 @@ import { LoggingService } from './logging.service';
 /** Minimum number of characters required for a world name. */
 export const MIN_WORLD_NAME_LENGTH = 3;
 
+/** Author credited for the built-in default world. */
+export const DEFAULT_AUTHOR = 'You';
+
 /** Key under which worlds are stored in the editor's `userdata.json`. */
 const WORLDS_KEY = 'worlds';
 
@@ -16,6 +19,7 @@ const WORLDS_KEY = 'worlds';
 export const DEFAULT_WORLD: WorldData = {
   id: '__default__',
   name: 'Default World',
+  author: 'Nintendo',
   mapImage: WORLDMAP_FILE,
   stageIds: [],
 };
@@ -74,7 +78,7 @@ export class WorldService {
    * @param name Display name for the new world.
    * @throws When the name fails validation.
    */
-  async createWorld(name: string): Promise<WorldData> {
+  async createWorld(name: string, author: string = DEFAULT_AUTHOR): Promise<WorldData> {
     const error = this.validateName(name);
     if (error) {
       throw new Error(error);
@@ -83,6 +87,7 @@ export class WorldService {
     const world: WorldData = {
       id: this.slugify(name),
       name: name.trim(),
+      author: author.trim() || DEFAULT_AUTHOR,
       mapImage: WORLDMAP_FILE,
       stageIds: [],
     };

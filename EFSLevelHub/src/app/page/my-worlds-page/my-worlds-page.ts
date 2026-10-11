@@ -1,5 +1,6 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { ModalComponent } from '../../component/modal/modal.component';
+import { CardComponent } from '../../component/card/card.component';
 import { WorldData } from '../../entity/editor.entity';
 import { DEFAULT_WORLD, MIN_WORLD_NAME_LENGTH, WorldService } from '../../service/world.service';
 import { EditorService, WORLDMAP_FILE } from '../../service/editor.service';
@@ -14,7 +15,7 @@ import { LoggingService } from '../../service/logging.service';
  */
 @Component({
   selector: 'app-my-worlds-page',
-  imports: [ModalComponent],
+  imports: [ModalComponent, CardComponent],
   templateUrl: './my-worlds-page.html',
   styleUrl: './my-worlds-page.css',
 })
@@ -33,6 +34,8 @@ export class MyWorldsPage implements OnInit {
   readonly isModalOpen = signal(false);
   /** Current value of the new-world name input. */
   readonly newWorldName = signal('');
+  /** Current value of the new-world author input. */
+  readonly newWorldAuthor = signal('');
   /** Validation error for the current input, if any. */
   readonly nameError = signal('');
   /** Whether a create request is in flight. */
@@ -49,6 +52,7 @@ export class MyWorldsPage implements OnInit {
   /** Opens the create-world modal with a clean state. */
   openCreate(): void {
     this.newWorldName.set('');
+    this.newWorldAuthor.set('');
     this.nameError.set('');
     this.isModalOpen.set(true);
   }
@@ -64,6 +68,11 @@ export class MyWorldsPage implements OnInit {
     this.nameError.set('');
   }
 
+  /** Updates the author input. */
+  onAuthorInput(event: Event): void {
+    this.newWorldAuthor.set((event.target as HTMLInputElement).value);
+  }
+
   /** Validates and creates the new world, then closes the modal. */
   async confirmCreate(): Promise<void> {
     const error = this.worldService.validateName(this.newWorldName());
@@ -74,7 +83,10 @@ export class MyWorldsPage implements OnInit {
 
     this.isSaving.set(true);
     try {
-      const world = await this.worldService.createWorld(this.newWorldName());
+      const world = await this.worldService.createWorld(
+        this.newWorldName(),
+        this.newWorldAuthor(),
+      );
       this.logger.info(`MyWorlds: created world "${world.name}".`);
       this.closeCreate();
     } catch (err) {

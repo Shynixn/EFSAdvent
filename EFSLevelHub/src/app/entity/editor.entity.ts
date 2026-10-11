@@ -2,6 +2,8 @@
 export interface WorldData {
   id: string;
   name: string;
+  /** Display name of the world's author. */
+  author: string;
   /** Relative path of the world's background image inside `/editor`, e.g. `cache/image/worldmap.png`. */
   mapImage: string;
   /** Ids of stages that belong to this world. */

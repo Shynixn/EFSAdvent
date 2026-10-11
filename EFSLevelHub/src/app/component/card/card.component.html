@@ -1,0 +1,52 @@
+<article
+  (click)="cardClick.emit()"
+  class="group overflow-hidden rounded-2xl bg-slate-800/60 shadow-lg transition"
+  [class.cursor-pointer]="!disabled"
+  [class.hover:-translate-y-0.5]="!disabled"
+  [class.hover:shadow-xl]="!disabled"
+  [class.border-2]="variant === 'danger'"
+  [class.border-red-500]="variant === 'danger'"
+  [class.hover:border-red-400]="variant === 'danger' && !disabled"
+  [class.border]="variant !== 'danger'"
+  [class.border-slate-700]="variant !== 'danger'"
+  [class.hover:border-slate-500]="variant !== 'danger' && !disabled"
+>
+  <!-- Image header -->
+  <div class="relative h-28 overflow-hidden bg-slate-900">
+    @if (imageUrl) {
+      <img [src]="imageUrl" alt="" class="h-full w-full object-cover" />
+    }
+    @if (badge) {
+      <span
+        class="absolute right-3 top-3 rounded-full px-2.5 py-0.5 text-xs font-semibold text-white"
+        [class.bg-red-500/90]="variant === 'danger'"
+        [class.bg-slate-900/80]="variant !== 'danger'"
+      >
+        {{ badge }}
+      </span>
+    }
+  </div>
+
+  <!-- Body -->
+  <div class="p-4">
+    <h3 class="text-lg font-semibold text-white">{{ title }}</h3>
+    @if (author) {
+      <div class="mt-2 flex items-center gap-2">
+        <span
+          class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-700 text-slate-300"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <path
+              fill-rule="evenodd"
+              d="M10 2a4 4 0 100 8 4 4 0 000-8zM4 16.5A5.5 5.5 0 019.5 11h1a5.5 5.5 0 015.5 5.5.5.5 0 01-.5.5H4.5a.5.5 0 01-.5-.5z"
+              clip-rule="evenodd"
+            />
+          </svg>
+        </span>
+        <span class="text-sm text-slate-200">
+          {{ author }}
+        </span>
+      </div>
+    }
+  </div>
+</article>
