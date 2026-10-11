@@ -2,6 +2,8 @@ import { Component, OnInit, inject, signal } from '@angular/core';
 import { IsoExtractorService } from '../../service/iso-extractor.service';
 import { OpfsCacheService } from '../../service/opfs-cache.service';
 import { GameStateService } from '../../service/game-state.service';
+import { EditorService, WORLDMAP_FILE } from '../../service/editor.service';
+import { FSALibService } from '../../service/fsalib.service';
 import { LoggingService } from '../../service/logging.service';
 import { ExtractionProgress, StorageEstimate } from '../../entity/iso.entity';
 
@@ -24,6 +26,8 @@ export class IsoExtractorComponent implements OnInit {
   private readonly isoExtractor = inject(IsoExtractorService);
   private readonly opfs = inject(OpfsCacheService);
   private readonly gameState = inject(GameStateService);
+  private readonly fsaLib = inject(FSALibService);
+  private readonly editor = inject(EditorService);
   private readonly logger = inject(LoggingService);
 
   readonly selectedFileName = signal('');
@@ -69,6 +73,9 @@ export class IsoExtractorComponent implements OnInit {
       const result = await this.isoExtractor.extractAndCacheIso(file, (progress) =>
         this.onProgress(progress),
       );
+
+      // Generate the editor's derived assets (e.g. `/editor/cache/image/worldmap.png`).
+      await this.generateEditorFiles();
 
       this.totalFiles.set(result.totalFiles);
       this.successMessage.set(`Extraction complete — ${result.totalFiles} file(s) cached to OPFS.`);
@@ -136,5 +143,42 @@ export class IsoExtractorComponent implements OnInit {
     this.statusMessage.set('');
     this.errorMessage.set('');
     this.successMessage.set('');
+  }
+
+  /**
+   * Generates the editor's derived files after a successful extraction.
+   *
+   * Currently produces `/editor/cache/image/worldmap.png` by decoding the overworld map
+   * texture out of `map1.arc`. Failures here are non-fatal: extraction itself
+   * has already succeeded, so we only log a warning.
+   */
+  private async generateEditorFiles(): Promise<void> {
+    try {
+      const arcPath = 'GC4swords/map1.arc';
+      const texturePath = 'TIMG/kk_worldmap_01.bti';
+      this.logger.info(`UI: generating /editor/${WORLDMAP_FILE} from ${arcPath}…`);
+
+      const bytes = await this.opfs.readExtractedFile(arcPath);
+      const image = await this.fsaLib.decodeArchiveTexture(bytes, texturePath);
+      const pngBytes = this.dataUrlToBytes(this.fsaLib.encodePng(image));
+      await this.editor.writeEditorFile(WORLDMAP_FILE, pngBytes);
+
+      this.logger.info(
+        `UI: wrote /editor/${WORLDMAP_FILE} (${image.width}x${image.height}, ${pngBytes.byteLength} bytes).`,
+      );
+    } catch (error) {
+      this.logger.warn('UI: failed to generate editor world map (non-fatal)', error);
+    }
+  }
+
+  /** Decodes a `data:...;base64,` URL into raw bytes. */
+  private dataUrlToBytes(dataUrl: string): Uint8Array {
+    const base64 = dataUrl.substring(dataUrl.indexOf(',') + 1);
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes;
   }
 }
