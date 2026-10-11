@@ -3,15 +3,37 @@
   <header
     class="flex items-center justify-between gap-4 border-b border-slate-800 bg-slate-900/80 px-6 py-3"
   >
-    <div class="min-w-0">
-      <h1 class="truncate text-lg font-semibold text-white">{{ worldName() }}</h1>
-      <p class="text-xs text-slate-400">World</p>
+    <div class="flex min-w-0 items-center gap-2">
+      <app-button
+        variant="ghost"
+        color="slate"
+        [iconOnly]="true"
+        title="Close world"
+        [icon]="'M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z'"
+        (clicked)="close()"
+      />
+      <div class="min-w-0">
+        <h1 class="truncate text-lg font-semibold text-white">{{ worldName() }}</h1>
+        <p class="text-xs text-slate-400">World</p>
+      </div>
     </div>
     <div class="flex items-center gap-2">
+      @if (!isDefault()) {
+        <app-button
+          variant="outline"
+          color="red"
+          title="Delete world"
+          [icon]="'M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z'"
+          (clicked)="openDelete()"
+        >
+          Delete
+        </app-button>
+      }
       <app-button
         variant="primary"
         color="indigo"
         [disabled]="!canExport()"
+        [icon]="'M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z'"
         [title]="
           canExport()
             ? 'Rebuild and export an ISO with your stage arcs'
@@ -20,14 +42,6 @@
         (clicked)="exportToIso()"
       >
         Export to ISO
-      </app-button>
-      <app-button
-        variant="outline"
-        color="slate"
-        [icon]="'M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z'"
-        (clicked)="close()"
-      >
-        Close
       </app-button>
     </div>
   </header>
@@ -93,6 +107,27 @@
   (picked)="onStagePicked($event)"
   (closed)="closePicker()"
 />
+
+<!-- Delete-world confirmation modal -->
+<app-modal [open]="deleteOpen()" title="Delete world" maxWidth="max-w-sm" (closed)="closeDelete()">
+  <div class="flex flex-col gap-4">
+    <p class="text-sm text-slate-300">
+      Delete <span class="font-semibold text-white">{{ worldName() }}</span
+      >? This permanently removes the world file and cannot be undone.
+    </p>
+    <p class="rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2 text-xs text-slate-400">
+      Your stages are kept — deleting a world only removes the world itself, not the stages it
+      references.
+    </p>
+    @if (deleteError()) {
+      <p class="text-sm text-red-400">{{ deleteError() }}</p>
+    }
+    <div class="flex justify-end gap-2">
+      <app-button variant="ghost" color="slate" (clicked)="closeDelete()">Cancel</app-button>
+      <app-button variant="danger" color="red" (clicked)="deleteWorld()">Delete</app-button>
+    </div>
+  </div>
+</app-modal>
 
 <!-- Export progress modal -->
 <app-modal [open]="exportOpen()" title="Exporting ISO" maxWidth="max-w-sm" (closed)="closeExport()">

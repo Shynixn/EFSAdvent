@@ -200,6 +200,30 @@ export class EditorService {
     }
   }
 
+  /**
+   * Deletes a file under `/editor`. Missing files are ignored.
+   *
+   * @param relativePath Path relative to `/editor`, e.g. `world/<uuid>.json`.
+   */
+  async deleteEditorFile(relativePath: string): Promise<void> {
+    const segments = this.normalize(relativePath);
+    if (segments.length === 0) {
+      return;
+    }
+
+    try {
+      const root = await navigator.storage.getDirectory();
+      let dir = await root.getDirectoryHandle(EDITOR_ROOT);
+      for (let i = 0; i < segments.length - 1; i++) {
+        dir = await dir.getDirectoryHandle(segments[i]);
+      }
+      await dir.removeEntry(segments[segments.length - 1]);
+      this.logger.info(`Editor: deleted /${EDITOR_ROOT}/${relativePath}`);
+    } catch {
+      // File/dir didn't exist — nothing to delete.
+    }
+  }
+
   /** Normalizes a path into non-empty, traversal-safe segments. */
   private normalize(path: string): string[] {
     return path

@@ -2,6 +2,11 @@ import { Injectable, inject, signal } from '@angular/core';
 import { WorldData, WorldStageRef } from '../entity/editor.entity';
 import { EditorService } from './editor.service';
 import { LoggingService } from './logging.service';
+import {
+  DEFAULT_STAGE_ARC_ORDER,
+  DEFAULT_WORLD_STAGE_COUNT,
+  defaultStageUuid,
+} from './stage.service';
 
 /** Minimum number of characters required for a world name. */
 export const MIN_WORLD_NAME_LENGTH = 3;
@@ -78,6 +83,84 @@ export class WorldService {
   /** Looks up a world by id. */
   getById(id: string): WorldData | undefined {
     return this.worldList().find((w) => w.id === id);
+  }
+
+  /**
+   * Deletes a world: removes its definition file, drops it from `userdata.json`
+   * and refreshes the in-memory list.
+   *
+   * The built-in default world (`{@link ZERO_GUID}`) cannot be deleted.
+   *
+   * @param id World id to delete.
+   * @returns `true` when the world was removed.
+   */
+  async deleteWorld(id: string): Promise<boolean> {
+    if (id === ZERO_GUID) {
+      this.logger.warn('WorldService: refusing to delete the default world.');
+      return false;
+    }
+
+    await this.editor.deleteEditorFile(worldFilePath(id));
+
+    const refs = await this.editor.get<{ id: string }[]>(WORLDS_KEY, []);
+    const nextRefs = (Array.isArray(refs) ? refs : []).filter((r) => r.id !== id);
+    await this.editor.set(WORLDS_KEY, nextRefs);
+
+    this.worldList.set(this.worldList().filter((w) => w.id !== id));
+    this.logger.info(`WorldService: deleted world "${id}".`);
+    return true;
+  }
+
+  /**
+   * Creates a new world seeded with every default stage and persists it.
+   *
+   * The new world gets the same stage slots as the default world: slot `i`
+   * references `defaultStageUuid(i + 1)` and targets `bossNNN.arc` from
+   * {@link DEFAULT_STAGE_ARC_ORDER}. Each slot can then be re-pointed at a
+   * different stage via the stage picker.
+   *
+   * @param name   Display name (trimmed; must be at least
+   *               {@link MIN_WORLD_NAME_LENGTH} characters).
+   * @param author Author shown on the card (defaults to {@link DEFAULT_AUTHOR}).
+   * @returns The created world, or `null` when the name is invalid.
+   */
+  async createWorld(name: string, author = DEFAULT_AUTHOR): Promise<WorldData | null> {
+    const trimmed = name.trim();
+    if (trimmed.length < MIN_WORLD_NAME_LENGTH) {
+      this.logger.warn(`WorldService: world name "${name}" is too short.`);
+      return null;
+    }
+
+    const world: WorldData = {
+      id: crypto.randomUUID(),
+      name: trimmed,
+      author: author.trim() || DEFAULT_AUTHOR,
+      stages: this.buildDefaultStageRefs(),
+    };
+
+    await this.writeWorldFile(world);
+
+    // Record the new id in userdata and refresh the in-memory list.
+    const refs = await this.editor.get<{ id: string }[]>(WORLDS_KEY, []);
+    const nextRefs = [...(Array.isArray(refs) ? refs : []), { id: world.id }];
+    await this.editor.set(WORLDS_KEY, nextRefs);
+
+    this.worldList.set([...this.worldList(), world]);
+    this.logger.info(`WorldService: created world "${world.name}" (${world.id}).`);
+    return world;
+  }
+
+  /**
+   * Builds the default stage references (one per slot) for a new world: slot `i`
+   * points at `defaultStageUuid(i + 1)` and targets `bossNNN.arc`.
+   */
+  private buildDefaultStageRefs(): WorldStageRef[] {
+    const refs: WorldStageRef[] = [];
+    for (let i = 0; i < DEFAULT_WORLD_STAGE_COUNT; i++) {
+      const arcId = DEFAULT_STAGE_ARC_ORDER[i];
+      refs.push({ id: defaultStageUuid(i + 1), arcFileName: arcId ? `${arcId}.arc` : '' });
+    }
+    return refs;
   }
 
   /**

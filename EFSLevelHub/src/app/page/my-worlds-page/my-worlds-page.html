@@ -4,25 +4,69 @@
     <p class="text-slate-400">Worlds you have assembled from your stages.</p>
   </header>
 
-  @if (worlds().length > 0) {
-    <div class="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
-      @for (world of worlds(); track world.id) {
-        <app-card
-          [title]="world.name"
-          [author]="world.author"
-          [uuid]="world.id"
-          [imageUrl]="worldmapUrl()"
-          [badge]="isDefault(world) ? 'Cannot be changed' : null"
-          [variant]="isDefault(world) ? 'danger' : 'default'"
-          (cardClick)="openWorld(world)"
-        />
-      }
-    </div>
-  } @else {
-    <p
-      class="rounded-xl border border-dashed border-slate-700 bg-slate-800/40 p-8 text-center text-slate-400"
+  <div class="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
+    <!-- Create-world card (always first) -->
+    <article
+      (click)="openCreate()"
+      class="group flex min-h-52 cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-slate-700 bg-slate-800/40 p-4 text-slate-400 transition hover:-translate-y-0.5 hover:border-indigo-400 hover:text-white"
     >
-      No worlds yet. Import your game files in Settings to create the default world.
-    </p>
-  }
+      <span
+        class="flex h-12 w-12 items-center justify-center rounded-full bg-slate-700/70 transition group-hover:bg-indigo-500/30"
+      >
+        <svg class="h-6 w-6" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+          <path
+            d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z"
+          />
+        </svg>
+      </span>
+      <span class="text-sm font-medium">New World</span>
+    </article>
+
+    @for (world of worlds(); track world.id) {
+      <app-card
+        [title]="world.name"
+        [author]="world.author"
+        [uuid]="world.id"
+        [imageUrl]="worldmapUrl()"
+        (cardClick)="openWorld(world)"
+      />
+    }
+  </div>
 </div>
+
+<!-- Create world modal -->
+<app-modal [open]="createOpen()" title="New World" maxWidth="max-w-md" (closed)="closeCreate()">
+  <div class="flex flex-col gap-4">
+    <label class="block space-y-1">
+      <span class="text-xs font-medium uppercase tracking-wide text-slate-400">Name</span>
+      <input
+        type="text"
+        [ngModel]="newName()"
+        (ngModelChange)="newName.set($event)"
+        placeholder="My World"
+        class="w-full rounded-xl border border-slate-700 bg-slate-800/70 px-3 py-2.5 text-sm text-slate-100 placeholder-slate-500 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/30"
+      />
+      <span class="block text-xs text-slate-500">At least {{ minNameLength }} characters.</span>
+    </label>
+
+    <label class="block space-y-1">
+      <span class="text-xs font-medium uppercase tracking-wide text-slate-400">Author</span>
+      <input
+        type="text"
+        [ngModel]="newAuthor()"
+        (ngModelChange)="newAuthor.set($event)"
+        placeholder="You"
+        class="w-full rounded-xl border border-slate-700 bg-slate-800/70 px-3 py-2.5 text-sm text-slate-100 placeholder-slate-500 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/30"
+      />
+    </label>
+
+    @if (createError()) {
+      <p class="text-sm text-red-400">{{ createError() }}</p>
+    }
+
+    <div class="flex justify-end gap-2 pt-1">
+      <app-button variant="ghost" color="slate" (clicked)="closeCreate()">Cancel</app-button>
+      <app-button variant="primary" color="indigo" (clicked)="createWorld()">Create</app-button>
+    </div>
+  </div>
+</app-modal>
