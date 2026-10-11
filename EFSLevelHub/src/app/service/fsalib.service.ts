@@ -19,6 +19,7 @@ interface DotnetExports {
         ReadArchiveFile(arcData: Uint8Array, path: string): Uint8Array;
         EnsureAssets(): string;
         GetTilesets(): string;
+        GetStages(): string;
         GetVersion(): string;
       };
     };
@@ -40,6 +41,16 @@ export interface ExtractedImage {
   height: number;
   /** PNG data URL (`data:image/png;base64,...`). */
   pngDataUrl: string;
+}
+
+/** A stage entry from FSALib's `Assets.Stages` (mirrors the C# StageDto). */
+export interface StageInfo {
+  Name: string;
+  /** World this stage belongs to; drives its position on the overview map. */
+  WorldID: number;
+  TextID: number;
+  /** Title card texture, e.g. `w01_03.bti` — encodes world + stage number. */
+  TitleCardGraphic: string;
 }
 
 /**
@@ -65,6 +76,9 @@ export class FSALibService {
 
   /** Cached tileset definitions promise. */
   private tilesetsPromise: Promise<Record<string, TilesetInfo>> | null = null;
+
+  /** Cached stage definitions promise. */
+  private stagesPromise: Promise<Record<string, StageInfo>> | null = null;
 
   /** The FSALib version reported by the loaded module. */
   version: string | null = null;
@@ -279,8 +293,9 @@ export class FSALibService {
           // FSALib reads its definitions from `assets/*.json`, which doesn't
           // exist in the browser-wasm VFS until we materialize it.
           fsa.EnsureAssets();
-          const json = fsa.GetTilesets();
-          const parsed = JSON.parse(json) as Record<string, TilesetInfo> & { error?: string };
+          const parsed = JSON.parse(fsa.GetTilesets()) as Record<string, TilesetInfo> & {
+            error?: string;
+          };
           if (typeof parsed.error === 'string') {
             throw new Error(parsed.error);
           }
@@ -292,6 +307,28 @@ export class FSALibService {
         });
     }
     return this.tilesetsPromise;
+  }
+
+  /** Loads and caches the stage definitions FSALib has loaded from its assets. */
+  async loadStages(): Promise<Record<string, StageInfo>> {
+    if (!this.stagesPromise) {
+      this.stagesPromise = this.getFsa()
+        .then((fsa) => {
+          fsa.EnsureAssets();
+          const parsed = JSON.parse(fsa.GetStages()) as Record<string, StageInfo> & {
+            error?: string;
+          };
+          if (typeof parsed.error === 'string') {
+            throw new Error(parsed.error);
+          }
+          return parsed as Record<string, StageInfo>;
+        })
+        .catch((err) => {
+          this.logger.error('FSALib: failed to read stages from wasm', err);
+          return {} as Record<string, StageInfo>;
+        });
+    }
+    return this.stagesPromise;
   }
 
   /** Chunked ArrayBuffer -> base64 (avoids call-stack overflow on large images). */

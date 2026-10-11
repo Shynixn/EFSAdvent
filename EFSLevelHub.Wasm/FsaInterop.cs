@@ -72,6 +72,37 @@ public static partial class FsaInterop
     }
 
     /// <summary>
+    /// Returns the stage definitions loaded by FSALib (<c>Assets.Stages</c>) as
+    /// JSON, keyed by stage id (e.g. <c>boss010</c>).
+    ///
+    /// The overview map draws a dot per stage; <c>WorldID</c> plus the
+    /// <c>wNN_MM.bti</c> title graphic encode each stage's position on the map.
+    /// </summary>
+    [JSExport]
+    public static string GetStages()
+    {
+        try
+        {
+            var map = new Dictionary<string, StageDefinitionDto>();
+            foreach (var pair in FSALib.Assets.Stages)
+            {
+                map[pair.Key] = new StageDefinitionDto
+                {
+                    Name = pair.Value.Name,
+                    WorldID = pair.Value.WorldID,
+                    TextID = pair.Value.TextID,
+                    TitleCardGraphic = pair.Value.TitleCardGraphic,
+                };
+            }
+            return JsonSerializer.Serialize(map, JsonOptions);
+        }
+        catch (Exception ex)
+        {
+            return JsonSerializer.Serialize(new { error = ex.Message }, JsonOptions);
+        }
+    }
+
+    /// <summary>
     /// Extracts the FSALib asset JSON files embedded in this assembly into the
     /// current working directory, then reloads FSALib's <c>Assets</c> cache.
     ///

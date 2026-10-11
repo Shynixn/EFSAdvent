@@ -42,6 +42,9 @@ export class MapViewerComponent implements OnInit {
   /** The overworld map texture inside {@link OVERWORLD_ARC_PATH}. */
   static readonly OVERWORLD_TEXTURE = 'TIMG/kk_worldmap_01.bti';
 
+  /** Archive that holds the battle stage-select screen. */
+  static readonly BATTLE_ARC_PATH = 'GC4Sword_pal/map2.arc';
+
   /** Template-visible copy of {@link DATA_ARC_PATH}. */
   readonly dataArcPath = MapViewerComponent.DATA_ARC_PATH;
 
@@ -50,6 +53,11 @@ export class MapViewerComponent implements OnInit {
   readonly overworldSize = signal<{ width: number; height: number } | null>(null);
   readonly isDecodingOverworld = signal(false);
   readonly overworldError = signal('');
+
+  /** Battle stage-select icons decoded from map2.arc. */
+  readonly battleIcons = signal<ExtractedImage[]>([]);
+  readonly isDecodingBattleIcons = signal(false);
+  readonly battleError = signal('');
 
   readonly arcPath = signal(MapViewerComponent.DEFAULT_PATH);
   readonly isLoading = signal(false);
@@ -92,6 +100,7 @@ export class MapViewerComponent implements OnInit {
     void this.loadMap();
     void this.loadTextureList();
     void this.loadOverworld();
+    void this.loadBattleIcons();
   }
 
   /** The primary map layout from the parsed stage, if available. */
@@ -240,8 +249,8 @@ export class MapViewerComponent implements OnInit {
         bytes,
         MapViewerComponent.OVERWORLD_TEXTURE,
       );
-      this.overworldUrl.set(this.fsaLib.encodePng(image));
       this.overworldSize.set({ width: image.width, height: image.height });
+      this.overworldUrl.set(this.fsaLib.encodePng(image));
       this.logger.info(`MapViewer: decoded overworld (${image.width}x${image.height})`);
     } catch (error) {
       this.overworldError.set(
@@ -250,6 +259,49 @@ export class MapViewerComponent implements OnInit {
       this.logger.error('MapViewer: failed to decode the overworld map', error);
     } finally {
       this.isDecodingOverworld.set(false);
+    }
+  }
+
+  /**
+   * Loads `map2.arc` and decodes its battle stage-select icons.
+   *
+   * `map2.arc` is the battle stage-select screen (not an overworld): it holds
+   * ten `kk_battlestage_NN.bti` thumbnails plus cursors and a label banner.
+   * Unlike the overworld there's no single full-screen image, so each icon is
+   * decoded individually.
+   */
+  async loadBattleIcons(): Promise<void> {
+    this.isDecodingBattleIcons.set(true);
+    this.battleError.set('');
+    this.battleIcons.set([]);
+
+    try {
+      const bytes = await this.opfs.readExtractedFile(MapViewerComponent.BATTLE_ARC_PATH);
+      const files = await this.fsaLib.listArchiveFiles(bytes);
+      const icons = files
+        .filter((f) => /kk_battlestage_\d+\.bti$/i.test(f.Path))
+        .sort((a, b) => a.Path.localeCompare(b.Path));
+      this.logger.info(`MapViewer: map2.arc has ${icons.length} battle icon(s); decoding…`);
+
+      const decoded: ExtractedImage[] = [];
+      for (const icon of icons) {
+        const image = await this.fsaLib.decodeArchiveTexture(bytes, icon.Path);
+        decoded.push({
+          path: icon.Path,
+          width: image.width,
+          height: image.height,
+          pngDataUrl: this.fsaLib.encodePng(image),
+        });
+      }
+      this.battleIcons.set(decoded);
+      this.logger.info(`MapViewer: decoded ${decoded.length} battle icon(s)`);
+    } catch (error) {
+      this.battleError.set(
+        error instanceof Error ? error.message : 'Failed to decode the battle icons.',
+      );
+      this.logger.error('MapViewer: failed to decode the battle icons', error);
+    } finally {
+      this.isDecodingBattleIcons.set(false);
     }
   }
 
