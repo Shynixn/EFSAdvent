@@ -36,8 +36,20 @@ export class MapViewerComponent implements OnInit {
   /** Archive that holds the game's shared textures. */
   static readonly DATA_ARC_PATH = 'GC4Sword_pal/data.arc';
 
+  /** Archive that holds the overworld map screen. */
+  static readonly OVERWORLD_ARC_PATH = 'GC4Sword_pal/map1.arc';
+
+  /** The overworld map texture inside {@link OVERWORLD_ARC_PATH}. */
+  static readonly OVERWORLD_TEXTURE = 'TIMG/kk_worldmap_01.bti';
+
   /** Template-visible copy of {@link DATA_ARC_PATH}. */
   readonly dataArcPath = MapViewerComponent.DATA_ARC_PATH;
+
+  /** Overworld map image (decoded from map1.arc). */
+  readonly overworldUrl = signal<string | null>(null);
+  readonly overworldSize = signal<{ width: number; height: number } | null>(null);
+  readonly isDecodingOverworld = signal(false);
+  readonly overworldError = signal('');
 
   readonly arcPath = signal(MapViewerComponent.DEFAULT_PATH);
   readonly isLoading = signal(false);
@@ -79,6 +91,7 @@ export class MapViewerComponent implements OnInit {
     }
     void this.loadMap();
     void this.loadTextureList();
+    void this.loadOverworld();
   }
 
   /** The primary map layout from the parsed stage, if available. */
@@ -205,6 +218,39 @@ export class MapViewerComponent implements OnInit {
   /** Row index helper for the template (*ngFor over a computed range). */
   range(count: number): number[] {
     return Array.from({ length: count }, (_, i) => i);
+  }
+
+  /**
+   * Loads `map1.arc` and decodes the overworld map texture.
+   *
+   * The archive is parsed by FSALib (via the wasm `ReadArchiveFile` export) and
+   * the `kk_worldmap_01.bti` texture is decoded with the format-aware pipeline.
+   */
+  async loadOverworld(): Promise<void> {
+    this.isDecodingOverworld.set(true);
+    this.overworldError.set('');
+    this.overworldUrl.set(null);
+    this.overworldSize.set(null);
+
+    try {
+      const bytes = await this.opfs.readExtractedFile(MapViewerComponent.OVERWORLD_ARC_PATH);
+      this.logger.info(`MapViewer: map1.arc is ${bytes.byteLength} bytes; decoding overworld…`);
+
+      const image = await this.fsaLib.decodeArchiveTexture(
+        bytes,
+        MapViewerComponent.OVERWORLD_TEXTURE,
+      );
+      this.overworldUrl.set(this.fsaLib.encodePng(image));
+      this.overworldSize.set({ width: image.width, height: image.height });
+      this.logger.info(`MapViewer: decoded overworld (${image.width}x${image.height})`);
+    } catch (error) {
+      this.overworldError.set(
+        error instanceof Error ? error.message : 'Failed to decode the overworld map.',
+      );
+      this.logger.error('MapViewer: failed to decode the overworld map', error);
+    } finally {
+      this.isDecodingOverworld.set(false);
+    }
   }
 
   /**

@@ -129,6 +129,34 @@
   }
 </section>
 
+<!-- Overworld map, decoded from map1.arc via FSALib -->
+<section class="mx-auto mt-6 max-w-5xl space-y-4 rounded-2xl bg-slate-800 p-8 shadow-xl">
+  <header class="space-y-1">
+    <h2 class="text-2xl font-semibold text-white">Overworld Map</h2>
+    <p class="text-sm text-slate-400">
+      <code class="font-mono text-slate-300">TIMG/kk_worldmap_01.bti</code> read out of
+      <code class="font-mono text-slate-300">map1.arc</code> by FSALib and decoded to PNG.
+    </p>
+  </header>
+
+  @if (overworldError()) {
+    <p class="rounded-lg bg-red-500/10 p-3 text-sm text-red-400">{{ overworldError() }}</p>
+  }
+
+  @if (isDecodingOverworld()) {
+    <p class="text-sm text-indigo-300">Decoding overworld map…</p>
+  } @else if (overworldUrl(); as url) {
+    <div class="space-y-2">
+      @if (overworldSize(); as size) {
+        <p class="font-mono text-xs text-slate-500">{{ size.width }} × {{ size.height }}</p>
+      }
+      <div class="overflow-auto rounded-lg bg-slate-900/60 p-2">
+        <img [src]="url" alt="Overworld map" class="max-w-full" />
+      </div>
+    </div>
+  }
+</section>
+
 <!-- Texture browser: names only, decoded on click to spare the GPU -->
 <section class="mx-auto mt-6 max-w-5xl space-y-4 rounded-2xl bg-slate-800 p-8 shadow-xl">
   <header class="space-y-1">

@@ -4,6 +4,8 @@ import { LoggingService } from './logging.service';
 import { OpfsCacheService } from './opfs-cache.service';
 import { StageData } from '../entity/fsalib.entity';
 import { decodeBti } from './render/bti-decoder';
+import { parseBti } from './render/bti-texture';
+import { decodeTexture } from './render/bti-image';
 import { ImageBuffer } from './render/gba-tile-renderer';
 import { ArchivePathResolver, StageRenderer, TilesetInfo } from './render/stage-renderer';
 
@@ -255,6 +257,18 @@ export class FSALibService {
     const pixels = new Uint8Array(image.pixels);
     const png = UPNG.encode([pixels.buffer], image.width, image.height, 0);
     return `data:image/png;base64,${this.toBase64(png)}`;
+  }
+
+  /**
+   * Reads a `.bti` texture out of an archive and decodes it with the
+   * format-aware pipeline (preserving I4/RGB5A3/CMPR semantics).
+   *
+   * @param arcData Raw bytes of the archive.
+   * @param path    Path of the texture inside the archive.
+   */
+  async decodeArchiveTexture(arcData: Uint8Array, path: string): Promise<ImageBuffer> {
+    const raw = await this.readArchiveFile(arcData, path);
+    return decodeTexture(parseBti(raw));
   }
 
   /** Loads and caches the tileset definitions FSALib has loaded from its assets. */
