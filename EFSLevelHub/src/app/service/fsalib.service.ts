@@ -264,16 +264,33 @@ export class FSALibService {
   /**
    * Encodes an {@link ImageBuffer} as a PNG data URL.
    *
-   * `cnum` (the 4th argument) is UPNG's *maximum colour count*. Passing a
-   * small value makes UPNG quantize the image, which visibly collapses
-   * near-identical GX colours (e.g. 243 distinct C8 palette entries rendering
-   * as ~189). Passing 0 means "auto", which is equally lossy. We always ask
-   * for the full 256 so UPNG emits lossless RGBA8888.
+   * UPNG's signature is `encode(bufs, w, h, ps, dels, forbidPlte)`:
+   *
+   * - `ps` is a *quantization scale*, not a colour count, so any non-zero
+   *   value reduces the colour space.
+   * - Unless `forbidPlte` is set, UPNG emits an **indexed** (colour-type 3)
+   *   PNG whenever the image has 256 or fewer colours. That silently drops
+   *   pixels whose palette entry has alpha 0 and collapses entries that share
+   *   RGB but differ in alpha.
+   *
+   * Passing `forbidPlte = true` forces lossless RGBA8888, which is what the
+   * GX decoders produce and what the tests compare against AuroraLib.
    */
   encodePng(image: ImageBuffer): string {
     // ImageBuffer stores RGBA8888 already, which is what UPNG.encode expects.
     const pixels = new Uint8Array(image.pixels);
-    const png = UPNG.encode([pixels.buffer], image.width, image.height, 256);
+    // The bundled @types/upng-js stub omits the trailing `forbidPlte` flag,
+    // but the runtime supports it (see node_modules/upng-js/UPNG.js line 385).
+    // Without it UPNG emits an indexed PNG and loses alpha-0 pixels.
+    const encode = UPNG.encode as (
+      bufs: ArrayBuffer[],
+      w: number,
+      h: number,
+      ps: number,
+      dels: number[] | undefined,
+      forbidPlte: boolean,
+    ) => ArrayBuffer;
+    const png = encode([pixels.buffer], image.width, image.height, 0, undefined, true);
     return `data:image/png;base64,${this.toBase64(png)}`;
   }
 
