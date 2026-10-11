@@ -1,7 +1,8 @@
 /**
  * Decodes a parsed BTI texture (`BtiTexture`) into an `ImageBuffer`.
  *
- * This is the format-aware counterpart to `bti-decoder.ts`: it keeps the GX
+ * This is the format-aware counterpart to the raw `bti-texture.ts` parser: it
+ * keeps the GX
  * format semantics that `FSALib.Rendering` relies on, most importantly:
  *
  * - **I4 / I8** decode to opaque greyscale so they can be used as additive

@@ -2,9 +2,9 @@
  * GameCube / Wii BTI texture container parser.
  *
  * A BTI file holds a fixed header, optional palette data, and raw texture data.
- * Unlike `bti-decoder.ts`, this module does **not** flatten pixels to RGBA: it
- * keeps the GX texture format, dimensions and raw bytes intact so a renderer can
- * apply its own palettes, blending and format-specific rules — mirroring how
+ * This module does **not** flatten pixels to RGBA: it keeps the GX texture
+ * format, dimensions and raw bytes intact so a renderer can apply its own
+ * palettes, blending and format-specific rules — mirroring how
  * `FSALib.Rendering` uses `AuroraLib.Pixel.Texture.BTI`.
  *
  * All multi-byte values are big-endian.
@@ -198,7 +198,7 @@ function decodePaletteBytes(
   return out;
 }
 
-// --- Color helpers (shared with bti-decoder) -------------------------------
+// --- Color helpers ----------------------------------------------------------
 
 export function rgb565ToRgba(value: number): [number, number, number, number] {
   const r = (value >> 11) & 0x1f;

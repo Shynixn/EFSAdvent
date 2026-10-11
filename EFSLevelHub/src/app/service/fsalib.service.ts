@@ -3,7 +3,6 @@ import UPNG from 'upng-js';
 import { LoggingService } from './logging.service';
 import { OpfsCacheService } from './opfs-cache.service';
 import { StageData } from '../entity/fsalib.entity';
-import { decodeBti } from './render/bti-decoder';
 import { parseBti } from './render/bti-texture';
 import { decodeTexture } from './render/bti-image';
 import { ImageBuffer } from './render/gba-tile-renderer';
@@ -188,16 +187,13 @@ export class FSALibService {
    */
   async decodeImage(arcData: Uint8Array, path: string): Promise<ExtractedImage> {
     const raw = await this.readArchiveFile(arcData, path);
-    const decoded = decodeBti(raw);
-    // Copy into a dedicated ArrayBuffer: UPNG wants a plain ArrayBuffer and
-    // `rgba.buffer` is typed as ArrayBufferLike (may be a SharedArrayBuffer).
-    const pixels = new Uint8Array(decoded.rgba);
-    const png = UPNG.encode([pixels.buffer], decoded.width, decoded.height, 0);
+    // Format-aware pipeline: correct block padding and channel/palette order.
+    const image = decodeTexture(parseBti(raw));
     return {
       path,
-      width: decoded.width,
-      height: decoded.height,
-      pngDataUrl: `data:image/png;base64,${this.toBase64(png)}`,
+      width: image.width,
+      height: image.height,
+      pngDataUrl: this.encodePng(image),
     };
   }
 
