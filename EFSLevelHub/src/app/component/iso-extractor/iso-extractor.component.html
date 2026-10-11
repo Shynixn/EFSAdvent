@@ -1,0 +1,89 @@
+<section class="mx-auto max-w-xl space-y-6 rounded-2xl bg-slate-800 p-8 shadow-xl">
+  <header class="space-y-1">
+    <h2 class="text-2xl font-semibold text-white">GameCube ISO Extractor</h2>
+    <p class="text-sm text-slate-400">
+      Streams disc assets directly into browser OPFS storage — no full-file buffering.
+    </p>
+  </header>
+
+  <!-- File picker -->
+  <div class="space-y-3">
+    <label
+      for="iso-file"
+      class="block cursor-pointer rounded-xl border-2 border-dashed border-slate-600 bg-slate-900/50 px-6 py-8 text-center transition hover:border-indigo-400"
+    >
+      <span class="block text-sm font-medium text-slate-200">
+        Choose a <code class="text-indigo-300">.iso</code> or
+        <code class="text-indigo-300">.gcm</code> file
+      </span>
+      <span class="mt-1 block text-xs text-slate-500">
+        {{ selectedFileName() || 'No file selected' }}
+      </span>
+    </label>
+    <input
+      id="iso-file"
+      type="file"
+      accept=".iso,.gcm"
+      class="sr-only"
+      [disabled]="isExtracting()"
+      (change)="onFileSelected($event)"
+    />
+  </div>
+
+  <!-- Live status -->
+  <div class="space-y-2 rounded-xl bg-slate-900/60 p-4 text-sm">
+    @if (isExtracting()) {
+      <p class="font-medium text-indigo-300">
+        {{ statusMessage() || 'Starting…' }}
+        @if (totalFiles() > 0) {
+          <span class="text-slate-400">({{ extractedCount() }} / {{ totalFiles() }})</span>
+        } @else if (extractedCount() > 0) {
+          <span class="text-slate-400">(Entry {{ extractedCount() }})</span>
+        }
+      </p>
+      @if (currentFileName() && totalFiles() > 0) {
+        <p class="truncate text-xs text-slate-400">{{ currentFileName() }}</p>
+      }
+    } @else if (successMessage()) {
+      <p class="font-medium text-emerald-400">{{ successMessage() }}</p>
+    } @else {
+      <p class="text-slate-500">Idle — select a disc image to begin.</p>
+    }
+
+    @if (errorMessage()) {
+      <p class="font-medium text-red-400">{{ errorMessage() }}</p>
+    }
+  </div>
+
+  <!-- Storage status -->
+  <div class="space-y-3 rounded-xl bg-slate-900/60 p-4 text-sm">
+    <div class="flex items-center justify-between">
+      <span class="text-slate-400">OPFS storage</span>
+      <span class="font-mono text-slate-200">
+        {{ storage().usedMB }} MB used / {{ storage().totalMB }} MB available
+      </span>
+    </div>
+    <div class="flex items-center justify-between">
+      <span class="text-slate-400">Cached files</span>
+      <span class="font-mono text-slate-200">{{ cachedFileCount() }}</span>
+    </div>
+    <div class="flex items-center gap-2 pt-1">
+      <button
+        type="button"
+        (click)="refreshCachedFileCount()"
+        [disabled]="isExtracting() || isClearing()"
+        class="rounded-md border border-slate-600 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:border-slate-400 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        Refresh
+      </button>
+      <button
+        type="button"
+        (click)="clearCache()"
+        [disabled]="isExtracting() || isClearing() || cachedFileCount() === 0"
+        class="rounded-md border border-red-500/60 px-3 py-1.5 text-xs font-medium text-red-300 transition hover:border-red-400 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {{ isClearing() ? 'Clearing…' : 'Clear cache' }}
+      </button>
+    </div>
+  </div>
+</section>
