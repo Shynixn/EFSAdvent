@@ -129,11 +129,40 @@ public static partial class FsaInterop
             NormalizeCsvFiles(dir);
     }
 
+    /// <summary>
+    /// Sets a stage's tileset (its <c>Map.TileSheetId</c>) and re-serializes the
+    /// archive, so the change is written back into the stage's own <c>.arc</c>.
+    /// </summary>
+    /// <remarks>
+    /// The tileset id lives in the map's CSV header (<c>mapNNN.csv</c>), so the
+    /// stage must be re-serialized for the change to persist. Serialization goes
+    /// through <see cref="SerializeStage"/> so the CSV keeps the CRLF/no-BOM
+    /// format the game requires.
+    /// </remarks>
+    /// <param name="arcData">Raw bytes of the stage archive.</param>
+    /// <param name="tileSheetId">New tileset index to store.</param>
+    /// <returns>The re-serialized archive bytes, or an empty array on failure.</returns>
+    [JSExport]
+    public static byte[] SetStageTileSheet(byte[] arcData, int tileSheetId)
+    {
+        try
+        {
+            using var stream = new MemoryStream(arcData, writable: false);
+            using var rarc = new Rarc(stream);
+            using var stage = new Stage(rarc);
+            stage.Map.TileSheetId = tileSheetId;
+            return SerializeStage(stage);
+        }
+        catch
+        {
+            return Array.Empty<byte>();
+        }
+    }
+
     /// <summary>Liveness probe returning the FSALib version.</summary>
     [JSExport]
     public static string GetVersion()
         => typeof(Stage).Assembly.GetName().Version?.ToString() ?? "unknown";
-
     /// <summary>
     /// Merges one stage's *content* (map layout, rooms, actors and layers) into
     /// another stage's archive, keeping the destination's slot structure.
@@ -254,6 +283,9 @@ public static partial class FsaInterop
                     Name = pair.Value.Name,
                     ID = pair.Value.ID,
                     GbaID = pair.Value.GbaID,
+                    AssetState = pair.Value.AssetState == 0
+                    ? string.Empty
+                    : pair.Value.AssetState.ToString(),
                 };
             }
             return JsonSerializer.Serialize(map, JsonOptions);

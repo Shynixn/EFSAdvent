@@ -105,7 +105,7 @@
             }
           </a>
 
-          <!-- Open stage tabs, nested under My Stages -->
+          <!-- Open stage tabs, nested under My Stages (with their rooms) -->
           @if (item.route === '/my-stages' && !collapsed() && stageTabsList().length > 0) {
             <ul class="mt-1 space-y-0.5 pl-6">
               @for (stage of stageTabsList(); track stage.id) {
@@ -113,11 +113,30 @@
                   <a
                     [routerLink]="['/my-stages', stage.id]"
                     routerLinkActive="bg-indigo-500/15 text-white"
+                    [routerLinkActiveOptions]="{ exact: true }"
                     class="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm text-slate-400 transition hover:bg-slate-800 hover:text-white"
                   >
                     <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-slate-500"></span>
                     <span class="flex-1 truncate">{{ stage.name }}</span>
                   </a>
+
+                  <!-- Open rooms, nested under their stage tab -->
+                  @if (stage.rooms.length > 0) {
+                    <ul class="mt-0.5 space-y-0.5 pl-6">
+                      @for (room of stage.rooms; track room.index) {
+                        <li>
+                          <a
+                            [routerLink]="['/my-stages', stage.id, 'room', room.index]"
+                            routerLinkActive="bg-indigo-500/15 text-white"
+                            class="flex items-center gap-2 rounded-md px-3 py-1 text-sm text-slate-400 transition hover:bg-slate-800 hover:text-white"
+                          >
+                            <span class="h-1 w-1 shrink-0 rounded-full bg-slate-600"></span>
+                            <span class="flex-1 truncate">{{ room.name }}</span>
+                          </a>
+                        </li>
+                      }
+                    </ul>
+                  }
                 </li>
               }
             </ul>

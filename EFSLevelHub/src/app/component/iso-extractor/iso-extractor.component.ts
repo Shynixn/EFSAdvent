@@ -6,6 +6,7 @@ import { GameStateService } from '../../service/game-state.service';
 import { EditorService, WORLDMAP_FILE } from '../../service/editor.service';
 import { StageService, DEFAULT_WORLD_STAGE_COUNT } from '../../service/stage.service';
 import { WorldService } from '../../service/world.service';
+import { StagePreviewService } from '../../service/stage-preview.service';
 import { FSALibService } from '../../service/fsalib.service';
 import { LoggingService } from '../../service/logging.service';
 import { ButtonComponent } from '../button/button.component';
@@ -36,6 +37,7 @@ export class IsoExtractorComponent implements OnInit {
   private readonly editor = inject(EditorService);
   private readonly stageService = inject(StageService);
   private readonly worldService = inject(WorldService);
+  private readonly stagePreview = inject(StagePreviewService);
   private readonly logger = inject(LoggingService);
 
   readonly selectedFileName = signal('');
@@ -172,6 +174,7 @@ export class IsoExtractorComponent implements OnInit {
   private async generateEditorFiles(): Promise<void> {
     await this.generateWorldmap();
     await this.importDefaultStages();
+    await this.generateTilesetPreviews();
     await this.dumpEditorStore();
   }
 
@@ -208,6 +211,25 @@ export class IsoExtractorComponent implements OnInit {
       await this.worldService.seedDefaultWorld(defaultStages);
     } catch (error) {
       this.logger.warn('UI: failed to create default stages/world (non-fatal)', error);
+    }
+  }
+
+  /**
+   * Renders and caches the tileset preview images used by the stage page's theme
+   * picker, so opening a stage never has to render them on the fly.
+   *
+   * All tilesets are rendered (including development ones) so the cache stays
+   * complete regardless of which the UI chooses to show. Non-fatal on failure.
+   */
+  private async generateTilesetPreviews(): Promise<void> {
+    try {
+      const indices = Object.keys(await this.fsaLib.loadTilesets()).map((key) => Number(key));
+      this.statusMessage.set('Generating tileset previews…');
+      await this.stagePreview.ensureTilesetPreviews(indices, (done, total) => {
+        this.statusMessage.set(`Generating tileset previews… ${done}/${total}`);
+      });
+    } catch (error) {
+      this.logger.warn('UI: failed to generate tileset previews (non-fatal)', error);
     }
   }
 

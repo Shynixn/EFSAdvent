@@ -16,6 +16,11 @@ export function stageThumbnailPath(stageId: string): string {
   return `cache/image/${stageId}/thumbnail.png`;
 }
 
+/** Builds the relative `/editor` path of a cached tileset preview PNG. */
+export function tilesetPreviewPath(tilesetIndex: number): string {
+  return `cache/image/tileset_${tilesetIndex}.png`;
+}
+
 /** Progress reported while generating a stage's preview images. */
 export interface PreviewProgress {
   /** Number of rooms rendered so far. */
@@ -51,6 +56,7 @@ export class StagePreviewService {
    * @param stage      Parsed stage graph.
    * @param arcBytes   Raw stage archive bytes (for resource lookups).
    * @param onProgress Optional progress callback.
+   * @param force      Regenerate even when cached (e.g. after a theme change).
    * @returns `true` when images were generated, `false` when already present.
    */
   async ensurePreviews(
@@ -58,6 +64,7 @@ export class StagePreviewService {
     stage: StageData,
     arcBytes: Uint8Array,
     onProgress?: (progress: PreviewProgress) => void,
+    force = false,
   ): Promise<boolean> {
     const layout = stage.Map;
     const cols = layout.XDimension;
@@ -77,10 +84,11 @@ export class StagePreviewService {
 
     // Skip entirely when everything (rooms + thumbnail) already exists.
     if (
-      await this.allPreviewsExist(
+      !force &&
+      (await this.allPreviewsExist(
         stageId,
         cells.map((c) => c.roomIndex),
-      )
+      ))
     ) {
       this.logger.info(`StagePreview: previews for "${stageId}" already cached.`);
       return false;
@@ -153,6 +161,54 @@ export class StagePreviewService {
     return this.readImageUrl(stageThumbnailPath(stageId));
   }
 
+  /**
+   * Generates and caches a preview PNG for every tileset, once.
+   *
+   * Tileset graphics and palettes all live in `data.arc` (a stage archive never
+   * carries them), so this only needs the game files and runs right after ISO
+   * import. Existing previews are skipped, so re-running is cheap. Failures are
+   * non-fatal and logged.
+   *
+   * @param tilesetIndices Indices to render (defaults to the full 0–27 range).
+   * @param onProgress     Optional progress callback (done, total).
+   * @returns The number of previews generated.
+   */
+  async ensureTilesetPreviews(
+    tilesetIndices: number[],
+    onProgress?: (done: number, total: number) => void,
+  ): Promise<number> {
+    const empty = new Uint8Array(0);
+    let generated = 0;
+
+    for (let i = 0; i < tilesetIndices.length; i++) {
+      const index = tilesetIndices[i];
+      onProgress?.(i, tilesetIndices.length);
+
+      if (await this.editor.hasEditorFile(tilesetPreviewPath(index))) {
+        continue;
+      }
+
+      try {
+        const dataUrl = await this.fsaLib.renderTilesetPreview(index, empty);
+        if (!dataUrl) {
+          continue;
+        }
+        await this.editor.writeEditorFile(tilesetPreviewPath(index), this.dataUrlToBytes(dataUrl));
+        generated++;
+      } catch (error) {
+        this.logger.warn(`StagePreview: failed to render tileset ${index} preview`, error);
+      }
+    }
+
+    onProgress?.(tilesetIndices.length, tilesetIndices.length);
+    this.logger.info(`StagePreview: cached ${generated} tileset preview(s).`);
+    return generated;
+  }
+
+  /** Reads a cached tileset preview as a blob URL, or null when missing. */
+  async readTilesetPreviewUrl(tilesetIndex: number): Promise<string | null> {
+    return this.readImageUrl(tilesetPreviewPath(tilesetIndex));
+  }
   /** Reads a cached room preview as a blob URL, or null when it does not exist. */
   async readRoomPreviewUrl(stageId: string, roomIndex: number): Promise<string | null> {
     return this.readImageUrl(stageRoomPreviewPath(stageId, roomIndex));
@@ -180,7 +236,11 @@ export class StagePreviewService {
 
   /** Encodes an image buffer as raw PNG bytes (strips the data-URL prefix). */
   private pngBytes(image: ImageBuffer): Uint8Array {
-    const dataUrl = this.fsaLib.encodePng(image);
+    return this.dataUrlToBytes(this.fsaLib.encodePng(image));
+  }
+
+  /** Decodes a `data:image/png;base64,…` URL into raw bytes. */
+  private dataUrlToBytes(dataUrl: string): Uint8Array {
     const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
     const binary = atob(base64);
     const bytes = new Uint8Array(binary.length);

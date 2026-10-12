@@ -49,6 +49,10 @@ const ENVIRONMENT_PALETTE = 13;
 export interface TilesetInfo {
   ID: string;
   GbaID?: string | null;
+  /** Human-readable tileset name (e.g. "Temple", "Hyrule Castle"). */
+  Name?: string;
+  /** Development state, e.g. "Development" for unfinished tilesets. */
+  AssetState?: string | null;
 }
 
 /** Reads a file's bytes out of the stage resource archive. */

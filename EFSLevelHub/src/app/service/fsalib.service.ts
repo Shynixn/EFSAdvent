@@ -5,12 +5,16 @@ import { OpfsCacheService } from './opfs-cache.service';
 import { StageData } from '../entity/fsalib.entity';
 import { parseBti } from './render/bti-texture';
 import { decodeTexture } from './render/bti-image';
-import { ImageBuffer } from './render/gba-tile-renderer';
+import { ImageBuffer, loadPalettes } from './render/gba-tile-renderer';
+import { TilesetRenderer } from './render/gba-sprite-renderer';
+import { TilesetTheme } from '../entity/tileset.util';
 import {
   ArchivePathResolver,
   RenderOptions,
   ROOM_PIXELS,
   StageRenderer,
+  TILESET_COLUMNS,
+  TILESET_COUNT,
   TilesetInfo,
 } from './render/stage-renderer';
 
@@ -22,6 +26,7 @@ interface DotnetExports {
         ParseStage(arcData: Uint8Array): string;
         RetargetStageIndex(arcData: Uint8Array, targetIndex: number): Uint8Array;
         MergeStageContent(targetArcData: Uint8Array, sourceArcData: Uint8Array): Uint8Array;
+        SetStageTileSheet(arcData: Uint8Array, tileSheetId: number): Uint8Array;
         ListArchiveFiles(arcData: Uint8Array): string;
         ReadArchiveFile(arcData: Uint8Array, path: string): Uint8Array;
         Unzip(zipData: Uint8Array): string;
@@ -195,6 +200,23 @@ export class FSALibService {
   }
 
   /**
+   * Sets a stage's tileset (its `Map.TileSheetId`) and re-serializes the archive.
+   *
+   * The tileset id is stored in the map's CSV header, so the stage archive must
+   * be rewritten for the change to persist. The stage's own `.arc` is the file
+   * that is modified, so the theme and the archive always stay in sync.
+   *
+   * @param arcData      Raw bytes of the stage archive.
+   * @param tileSheetId  New tileset index (`Map.TileSheetId`).
+   * @returns The re-serialized archive bytes, or null on failure.
+   */
+  async setStageTileSheet(arcData: Uint8Array, tileSheetId: number): Promise<Uint8Array | null> {
+    const fsa = await this.getFsa();
+    const result = fsa.SetStageTileSheet(arcData, tileSheetId);
+    return result && result.byteLength > 0 ? result : null;
+  }
+
+  /**
    * Merges one stage's content (map layout, rooms, actors and layers) into
    * another stage's archive, keeping the destination's slot structure.
    *
@@ -351,6 +373,88 @@ export class FSALibService {
     );
     await renderer.init();
     return renderer;
+  }
+
+  /**
+   * Renders a preview image of a single tileset (all 1024 tiles in a 16×64
+   * sheet), for the theme picker.
+   *
+   * Builds a throwaway {@link TilesetRenderer} so it does not disturb the active
+   * stage renderer. The tile layout (SPL) comes from the stage archive or
+   * `data.arc`; the tileset's own SCH/SCL define the graphics and colours.
+   *
+   * @param tilesetIndex Tileset index (`Map.TileSheetId`).
+   * @param arcData      Stage archive bytes (resource lookup).
+   * @param gba          Use the GBA variant of the tileset, if available.
+   * @returns A PNG data URL, or null when the tileset is unknown/unreadable.
+   */
+  async renderTilesetPreview(
+    tilesetIndex: number,
+    arcData: Uint8Array,
+    gba = false,
+  ): Promise<string | null> {
+    const tilesets = await this.loadTilesets();
+    const info = tilesets[String(tilesetIndex)];
+    if (!info) {
+      return null;
+    }
+
+    // Tileset graphics/palettes live entirely in `data.arc`; a stage archive is
+    // optional (import-time generation passes none). Only list the stage
+    // archive when bytes were actually supplied — an empty buffer would make
+    // the RARC parser throw.
+    const hasStageArc = arcData && arcData.byteLength > 0;
+    const stageFiles = hasStageArc ? await this.listArchiveFiles(arcData) : [];
+    const stagePathSet = new Set(stageFiles.map((f) => f.Path));
+    const dataArc = await this.readDataArc();
+    const allPaths = dataArc
+      ? [...stageFiles.map((f) => f.Path), ...this.dataArcPaths]
+      : stageFiles.map((f) => f.Path);
+    const resolver = new ArchivePathResolver(allPaths);
+
+    const read = async (path: string): Promise<Uint8Array | null> => {
+      const real = resolver.resolve(path);
+      if (!real) {
+        return null;
+      }
+      try {
+        const bytes = stagePathSet.has(real)
+          ? await this.readArchiveFile(arcData, real)
+          : dataArc
+            ? await this.readArchiveFile(dataArc, real)
+            : null;
+        return bytes && bytes.byteLength > 0 ? bytes : null;
+      } catch {
+        return null;
+      }
+    };
+
+    const renderer = new TilesetRenderer();
+
+    const spl = await read('SPL/bg_a_spl.szs');
+    if (spl) {
+      renderer.loadTileLayout(spl);
+    }
+    const id = gba ? (info.GbaID ?? info.ID) : info.ID;
+    const sch = await read(`SCH/bg_${id}_sch.szs`);
+    if (sch) {
+      renderer.loadTiles(sch);
+    }
+    const scl = await read(gba ? `SCL/bg_${info.ID}_gb_scl.szs` : `SCL/bg_${info.ID}_scl.szs`);
+    if (scl) {
+      const palettes = loadPalettes(scl);
+      for (let i = 0; i < palettes.length && i < renderer.palettes.length; i++) {
+        renderer.palettes[i] = palettes[i];
+      }
+    }
+
+    // Draw the full sheet on a neutral backdrop so transparent tiles read.
+    const target = new ImageBuffer(TILESET_COLUMNS * 16, Math.ceil(TILESET_COUNT / TILESET_COLUMNS) * 16);
+    target.fill(96, 96, 108, 255);
+    for (let i = 0; i < TILESET_COUNT; i++) {
+      renderer.drawTile(target, (i & 0xf) * 16, (i >> 4) * 16, i);
+    }
+    return this.encodePng(target);
   }
 
   /**
@@ -535,9 +639,30 @@ export class FSALibService {
     return this.tilesetsPromise;
   }
 
+  /**
+   * Builds the list of selectable tileset "themes" from the real tileset
+   * definitions in `tilesets.json` (loaded through the wasm), so the picker
+   * always stays in sync with the game data instead of a hard-coded list.
+   *
+   * @param includeDevelopment Include tilesets marked as "Development".
+   * @returns Themes ordered by tileset index.
+   */
+  async loadTilesetThemes(includeDevelopment = false): Promise<TilesetTheme[]> {
+    const tilesets = await this.loadTilesets();
+    return Object.entries(tilesets)
+      .map(([key, info]) => ({
+        index: Number(key),
+        name: (info.Name ?? `Tileset ${key}`).trim(),
+        development: (info.AssetState ?? '')
+          .split(',')
+          .some((flag) => flag.trim().toLowerCase() === 'development'),
+      }))
+      .filter((theme) => includeDevelopment || !theme.development)
+      .sort((a, b) => a.index - b.index);
+  }
+
   /** Loads and caches the stage definitions FSALib has loaded from its assets. */
-  async loadStages(): Promise<Record<string, StageInfo>> {
-    if (!this.stagesPromise) {
+  async loadStages(): Promise<Record<string, StageInfo>> {    if (!this.stagesPromise) {
       this.stagesPromise = this.getFsa()
         .then((fsa) => {
           fsa.EnsureAssets();

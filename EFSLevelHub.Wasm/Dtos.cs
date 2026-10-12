@@ -93,6 +93,12 @@ public sealed class TilesetDto
 
     /// <summary>Alternative id for the GBA-specific tileset files, if any.</summary>
     public string? GbaID { get; set; }
+
+    /// <summary>
+    /// Comma-separated asset flags (e.g. <c>"Development"</c>), or empty when the
+    /// tileset is considered finished. Mirrors <c>AssetFlags</c>.
+    /// </summary>
+    public string AssetState { get; set; } = string.Empty;
 }
 
 /// <summary>JSON-serializable projection of a FSALib <c>StageDefinition</c>.</summary>

@@ -170,6 +170,11 @@ export interface StageFile {
    * export skip re-indexing/merging when the stage stays in its own slot.
    */
   originalIndex?: number;
+  /**
+   * ISO timestamp (`yyyy-MM-ddTHH:mm:ss.sssZ`) of the last time the stage was
+   * saved from the editor (i.e. its archive was written back).
+   */
+  lastSaved?: string;
 }
 
 /**
@@ -222,6 +227,27 @@ export class StageService {
   /** Human-readable author of a stage, applying the default fallback. */
   authorOf(stage: StageFile | undefined): string {
     return stage?.author?.trim() || DEFAULT_STAGE_AUTHOR;
+  }
+
+  /**
+   * Records that a stage's archive was just saved from the editor, persisting
+   * the timestamp to the stage definition file and updating the in-memory list.
+   *
+   * @param id      Stage id.
+   * @param savedAt Moment the archive was written.
+   */
+  async markSaved(id: string, savedAt: Date): Promise<void> {
+    const file = await this.readStageFile(id);
+    if (!file) {
+      this.logger.warn(`StageService: cannot mark unknown stage "${id}" as saved.`);
+      return;
+    }
+    file.lastSaved = savedAt.toISOString();
+    await this.writeStageFile(file);
+
+    this.stageList.update((stages) =>
+      stages.map((stage) => (stage.id === id ? { ...stage, lastSaved: file.lastSaved } : stage)),
+    );
   }
 
   /**

@@ -3,43 +3,37 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { ButtonComponent } from '../../component/button/button.component';
 import { LoadingModalComponent } from '../../component/loading-modal/loading-modal.component';
-import {
-  RoomCanvasComponent,
-  RoomTileChange,
-} from '../../component/room-canvas/room-canvas.component';
-import { StageService, StageFile, stageArcFilePath } from '../../service/stage.service';
+import { ModalComponent } from '../../component/modal/modal.component';
+import { StageService, StageFile } from '../../service/stage.service';
 import { StageTabsService } from '../../service/stage-tabs.service';
+import { StageEditorService } from '../../service/stage-editor.service';
 import { StagePreviewService } from '../../service/stage-preview.service';
 import { EditorService } from '../../service/editor.service';
 import { FSALibService } from '../../service/fsalib.service';
 import { LoggingService } from '../../service/logging.service';
-import { MapLayoutData, RoomData, StageData } from '../../entity/fsalib.entity';
-import { ImageBuffer } from '../../service/render/gba-tile-renderer';
-import {
-  RenderOptions,
-  VISIBLE_ROOM_HEIGHT,
-  VISIBLE_ROOM_WIDTH,
-  StageRenderer,
-} from '../../service/render/stage-renderer';
+import { MapLayoutData, StageData } from '../../entity/fsalib.entity';
+import { TilesetTheme } from '../../entity/tileset.util';
 
 /**
  * StagePage
  * ---------
  * A sub-page of "My Stages" showing a single stage's map layout as a grid of
- * rooms. Clicking a room renders it (base + top layers) to a preview image.
+ * rooms plus the generated thumbnail. Clicking a room opens it on the room
+ * page. A toolbox on the right hosts the (currently single) Theme action.
  *
  * Opening the page registers a tab under the My Stages nav; the close button
  * removes the tab and returns to the stages list.
  */
 @Component({
   selector: 'app-stage-page',
-  imports: [ButtonComponent, LoadingModalComponent, RoomCanvasComponent],
+  imports: [ButtonComponent, LoadingModalComponent, ModalComponent],
   templateUrl: './stage-page.html',
   styleUrl: './stage-page.css',
 })
 export class StagePage implements OnInit, OnDestroy {
   private readonly stageService = inject(StageService);
   private readonly stageTabs = inject(StageTabsService);
+  private readonly stageEditor = inject(StageEditorService);
   private readonly stagePreview = inject(StagePreviewService);
   private readonly editor = inject(EditorService);
   private readonly fsaLib = inject(FSALibService);
@@ -59,44 +53,54 @@ export class StagePage implements OnInit, OnDestroy {
   /** Load error message, if any. */
   readonly loadError = signal('');
 
-  /** Room index the user last clicked (highlighted in the grid). */
-  readonly selectedRoom = signal<number | null>(null);
-  /** PNG data URL of the selected room's render. */
-  readonly roomRenderUrl = signal<string | null>(null);
-  /** Whether the selected room is rendering. */
-  readonly isRenderingRoom = signal(false);
-  /** Room-render error message, if any. */
-  readonly renderError = signal('');
-
   /** Whether the (blocking) preview-generation modal is open. */
   readonly generatingPreviews = signal(false);
   /** Status message shown in the preview-generation modal. */
   readonly previewMessage = signal('Preparing previews…');
 
-  // --- Room editor state ----------------------------------------------------
-
-  /** The room currently open in the editor (null when none). */
-  readonly editorRoom = signal<RoomData | null>(null);
-  /** Renderer used by the editor canvas (built lazily). */
-  readonly editorRenderer = signal<StageRenderer | null>(null);
-  /** Active layer being edited (0-7 base, 8-15 top). */
-  readonly editorLayer = signal(0);
-  /** Whether the editor draws the GBA tileset/layers. */
-  readonly editorGba = signal(false);
-  /** Tile value painted by the editor. */
-  readonly brushTile = signal(1);
-  /** Whether the stage has unsaved edits. */
-  readonly dirty = signal(false);
+  /** Whether the theme picker modal is open. */
+  readonly themeOpen = signal(false);
+  /** Theme options (real tilesets loaded from the game's `tilesets.json`). */
+  readonly themes = signal<TilesetTheme[]>([]);
+  /** Whether the theme list is still loading. */
+  readonly themesLoading = signal(false);
+  /** Active tileset index (bound to `Map.TileSheetId`). */
+  readonly currentThemeIndex = signal(0);
+  /** PNG data URL previews per tileset index (loaded when the modal opens). */
+  readonly themePreviews = signal<Record<number, string>>({});
+  /** Whether theme previews are loading. */
+  readonly themePreviewsLoading = signal(false);
+  /** Whether a preview load has completed (success or not) for this stage. */
+  private readonly themePreviewsLoaded = signal(false);
 
   /** Blob URL of the generated thumbnail (all rooms concatenated), if any. */
   readonly thumbnailUrl = signal<string | null>(null);
   /** Error from preview generation, if any (shown instead of the thumbnail). */
   readonly previewError = signal('');
 
-  /** Stage renderer for the loaded archive, built lazily on first render. */
-  private stageRenderer: StageRenderer | null = null;
-  /** Raw stage archive bytes, kept so the renderer can re-read resources. */
-  private arcBytes: Uint8Array | null = null;
+  /** Whether there are unsaved edits (e.g. a newly picked theme). */
+  readonly dirty = signal(false);
+  /** Whether a save is currently in flight. */
+  readonly saving = signal(false);
+  /** ISO timestamp of the last successful save, if any. */
+  readonly lastSaved = signal<string | null>(null);
+
+  /** `yyyy-MM-dd HH:mm` of the last save, or a placeholder when never saved. */
+  readonly lastSavedLabel = computed(() => {
+    const iso = this.lastSaved();
+    if (!iso) {
+      return 'Not saved yet';
+    }
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) {
+      return 'Not saved yet';
+    }
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    return (
+      `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
+      `${pad(date.getHours())}:${pad(date.getMinutes())}`
+    );
+  });
 
   /** Route param subscription; re-loads when the open stage tab changes. */
   private paramSub: Subscription | null = null;
@@ -117,8 +121,6 @@ export class StagePage implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.paramSub?.unsubscribe();
-    this.stageRenderer = null;
-    this.arcBytes = null;
   }
 
   /** Sets the active stage, opens its tab and loads its archive. */
@@ -126,6 +128,9 @@ export class StagePage implements OnInit, OnDestroy {
     this.stageId.set(id);
     this.thumbnailUrl.set(null);
     this.previewError.set('');
+    // Theme previews are per-stage (the list is global, the thumbnails come from
+    // the shared cache but are keyed by tileset, so just re-run the loader).
+    this.themePreviewsLoaded.set(false);
 
     await this.stageService.load();
     const stage = this.stageService.getById(id);
@@ -145,35 +150,26 @@ export class StagePage implements OnInit, OnDestroy {
     this.isLoading.set(true);
     this.loadError.set('');
     this.stageData.set(null);
-    this.selectedRoom.set(null);
-    this.roomRenderUrl.set(null);
-    this.renderError.set('');
-    this.stageRenderer = null;
-    this.arcBytes = null;
     this.thumbnailUrl.set(null);
     this.previewError.set('');
 
     try {
-      const bytes = await this.editor.readEditorFile(stageArcFilePath(id));
-      if (!bytes) {
+      const loaded = await this.stageEditor.load(id);
+      if (!loaded) {
         this.loadError.set('This stage has no archive yet.');
         return;
       }
-      this.arcBytes = bytes;
-
-      const stage = await this.fsaLib.parseStage(bytes);
-      this.stageData.set(stage);
+      this.stageData.set(loaded.data);
+      this.currentThemeIndex.set(loaded.data.Map.TileSheetId);
+      this.lastSaved.set(this.stage()?.lastSaved ?? null);
+      this.dirty.set(false);
       this.logger.info(
-        `StagePage: parsed stage ${stage.Index} ` +
-          `(map ${stage.Map.Index}, ${stage.Map.XDimension}x${stage.Map.YDimension}).`,
+        `StagePage: parsed stage ${loaded.data.Index} ` +
+          `(map ${loaded.data.Map.Index}, ${loaded.data.Map.XDimension}x${loaded.data.Map.YDimension}).`,
       );
 
-      // Build the shared renderer now (used by the room editor + previews) so
-      // the tileset/palette is ready before any room is opened.
-      void this.prepareRenderer(stage, bytes);
-
       // Generate the room previews + thumbnail (blocking modal) when missing.
-      void this.generatePreviews(stage, bytes);
+      void this.generatePreviews(loaded.data, loaded.arcBytes);
     } catch (error) {
       this.loadError.set(error instanceof Error ? error.message : 'Failed to load the stage.');
       this.logger.error(`StagePage: failed to load stage "${id}"`, error);
@@ -182,29 +178,22 @@ export class StagePage implements OnInit, OnDestroy {
     }
   }
 
-  /** Builds the shared renderer and pre-loads its tileset on stage load. */
-  private async prepareRenderer(stage: StageData, bytes: Uint8Array): Promise<void> {
-    try {
-      if (!this.stageRenderer) {
-        this.stageRenderer = await this.fsaLib.createStageRenderer(stage, bytes);
-      }
-      await this.stageRenderer.prepareTileset();
-      this.editorRenderer.set(this.stageRenderer);
-    } catch (error) {
-      this.logger.error(`StagePage: failed to build the stage renderer`, error);
-    }
-  }
-
   /** Renders/caches the stage's preview images, showing the loading modal. */
-  private async generatePreviews(stage: StageData, bytes: Uint8Array): Promise<void> {
+  private async generatePreviews(stage: StageData, bytes: Uint8Array, force = false): Promise<void> {
     const id = this.stageId();
     this.generatingPreviews.set(true);
     this.previewMessage.set('Generating stage previews…');
     this.previewError.set('');
     try {
-      await this.stagePreview.ensurePreviews(id, stage, bytes, (progress) => {
-        this.previewMessage.set(progress.message);
-      });
+      await this.stagePreview.ensurePreviews(
+        id,
+        stage,
+        bytes,
+        (progress) => {
+          this.previewMessage.set(progress.message);
+        },
+        force,
+      );
     } catch (error) {
       // Preview generation is non-fatal — the page still works without it.
       this.previewError.set(error instanceof Error ? error.message : 'Preview generation failed.');
@@ -271,75 +260,125 @@ export class StagePage implements OnInit, OnDestroy {
     return !!layout && x === layout.StartX && y === layout.StartY;
   }
 
-  /** Selects a room: shows its preview and opens it in the room editor. */
-  selectRoom(roomIndex: number): void {
+  /** Opens a room on the room page (registers a nested tab). */
+  openRoom(roomIndex: number): void {
     if (roomIndex < 0 || roomIndex === this.emptyRoomValue()) {
       return;
     }
-    this.selectedRoom.set(roomIndex);
-    void this.renderRoom(roomIndex);
-    this.openRoomEditor(roomIndex);
+    void this.router.navigate(['/my-stages', this.stageId(), 'room', roomIndex]);
   }
 
-  /**
-   * Opens a room in the editor canvas. The renderer is built on stage load
-   * ({@link prepareRenderer}); this only selects the room.
-   */
-  private openRoomEditor(roomIndex: number): void {
+  /** Opens the theme picker modal and (lazily) generates tileset previews. */
+  openTheme(): void {
+    this.themeOpen.set(true);
+    void this.loadThemePreviews();
+  }
+
+  /** Closes the theme picker modal. */
+  closeTheme(): void {
+    this.themeOpen.set(false);
+  }
+
+  /** Renders a preview image per theme (once) for the theme picker. */
+  private async loadThemePreviews(): Promise<void> {
+    if (this.themePreviewsLoading() || this.themePreviewsLoaded()) {
+      return;
+    }
+    const loaded = this.stageEditor.get(this.stageId());
+    if (!loaded) {
+      return;
+    }
+
+    this.themePreviewsLoading.set(true);
+    try {
+      this.themesLoading.set(true);
+
+      // Load the real tileset list from the wasm (once).
+      let themes = this.themes();
+      if (themes.length === 0) {
+        themes = await this.fsaLib.loadTilesetThemes();
+        this.themes.set(themes);
+      }
+
+      const previews: Record<number, string> = {};
+      for (const theme of themes) {
+        if (previews[theme.index]) {
+          continue;
+        }
+        try {
+          // Prefer the preview cached at ISO import; render on the fly only when
+          // it is missing (e.g. a stage opened before the cache was generated).
+          let url = await this.stagePreview.readTilesetPreviewUrl(theme.index);
+          if (!url) {
+            url = await this.fsaLib.renderTilesetPreview(theme.index, loaded.arcBytes);
+          }
+          if (url) {
+            previews[theme.index] = url;
+          } else {
+            this.logger.warn(`StagePage: no preview for tileset ${theme.index}.`);
+          }
+        } catch (error) {
+          this.logger.warn(`StagePage: failed to render preview for tileset ${theme.index}`, error);
+        }
+      }
+      this.themePreviews.set(previews);
+      this.themePreviewsLoaded.set(true);
+    } finally {
+      this.themePreviewsLoading.set(false);
+      this.themesLoading.set(false);
+    }
+  }
+
+  /** Applies a tileset theme by setting the stage's `Map.TileSheetId`. */
+  selectTheme(theme: TilesetTheme): void {
     const stage = this.stageData();
     if (!stage) {
       return;
     }
-    this.editorRoom.set(stage.Rooms[roomIndex] ?? null);
-  }
-
-  /** Applies a tile edit from the room editor and marks the stage dirty. */
-  onTileChanged(change: RoomTileChange): void {
-    this.dirty.set(true);
-    this.logger.debug(
-      `StagePage: tile edit layer ${change.layerIndex} (${change.x},${change.y}) = ${change.tile}`,
-    );
+    if (stage.Map.TileSheetId !== theme.index) {
+      stage.Map.TileSheetId = theme.index;
+      this.dirty.set(true);
+    }
+    this.currentThemeIndex.set(theme.index);
+    this.logger.info(`StagePage: theme "${theme.name}" (tileset ${theme.index}) selected.`);
+    this.closeTheme();
   }
 
   /**
-   * Selects a room and shows its preview. Uses the cached `room_<index>.png`
-   * image when available, falling back to a live render only if it is missing.
+   * Applies pending edits back to the stage's archive and refreshes the derived
+   * previews (thumbnail + room PNGs) so they reflect the new theme.
    */
-  private async renderRoom(roomIndex: number): Promise<void> {
-    const stage = this.stageData();
-    const bytes = this.arcBytes;
-    if (!stage || !bytes) {
-      this.renderError.set('Stage is not loaded.');
+  async save(): Promise<void> {
+    const id = this.stageId();
+    if (this.saving() || !this.dirty()) {
       return;
     }
 
-    this.isRenderingRoom.set(true);
-    this.renderError.set('');
-
+    this.saving.set(true);
+    this.previewError.set('');
     try {
-      // Prefer the cached preview generated when the stage was opened.
-      const cached = await this.stagePreview.readRoomPreviewUrl(this.stageId(), roomIndex);
-      if (cached) {
-        this.roomRenderUrl.set(cached);
+      const result = await this.stageEditor.save(id);
+      if (!result) {
+        this.previewError.set('Failed to save the stage.');
         return;
       }
 
-      // Cache miss — render it live.
-      if (!this.stageRenderer) {
-        this.stageRenderer = await this.fsaLib.createStageRenderer(stage, bytes);
-      }
+      await this.stageService.markSaved(id, result.savedAt);
+      this.lastSaved.set(result.savedAt.toISOString());
+      this.dirty.set(false);
 
-      // Render into a cropped-height buffer: the renderer's writes below the
-      // visible area are skipped, dropping the band the game hides.
-      const target = new ImageBuffer(VISIBLE_ROOM_WIDTH, VISIBLE_ROOM_HEIGHT);
-      target.fill(0, 0, 0, 255);
-      await this.stageRenderer.draw(target, roomIndex, 0, RenderOptions.Layers);
-      this.roomRenderUrl.set(this.fsaLib.encodePng(target));
+      // The archive changed, so regenerate previews and refresh the thumbnail.
+      const loaded = this.stageEditor.get(id);
+      if (loaded) {
+        this.stageData.set(loaded.data);
+        await this.generatePreviews(loaded.data, loaded.arcBytes, true);
+      }
+      this.logger.info(`StagePage: saved stage "${id}".`);
     } catch (error) {
-      this.renderError.set(error instanceof Error ? error.message : 'Failed to render the room.');
-      this.logger.error(`StagePage: failed to render room ${roomIndex}`, error);
+      this.previewError.set(error instanceof Error ? error.message : 'Failed to save the stage.');
+      this.logger.error(`StagePage: failed to save stage "${id}"`, error);
     } finally {
-      this.isRenderingRoom.set(false);
+      this.saving.set(false);
     }
   }
 
