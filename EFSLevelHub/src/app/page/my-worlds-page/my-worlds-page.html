@@ -1,7 +1,10 @@
 <div class="mx-auto max-w-6xl space-y-6 p-6 lg:p-8">
-  <header class="space-y-1">
-    <h1 class="text-3xl font-bold tracking-tight text-white">My Worlds</h1>
-    <p class="text-slate-400">Worlds you have assembled from your stages.</p>
+  <header class="flex items-end justify-between gap-4">
+    <div class="space-y-1">
+      <h1 class="text-3xl font-bold tracking-tight text-white">My Worlds</h1>
+      <p class="text-slate-400">Worlds you have assembled from your stages.</p>
+    </div>
+    <app-sort-dropdown [value]="sort()" (changed)="sort.set($event)" />
   </header>
 
   <div class="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
@@ -22,10 +25,11 @@
       <span class="text-sm font-medium">New World</span>
     </article>
 
-    @for (world of worlds(); track world.id) {
+    @for (world of sortedWorlds(); track world.id) {
       <app-card
         [title]="world.name"
         [author]="world.author"
+        [creationDate]="world.creationDate"
         [uuid]="world.id"
         [imageUrl]="worldmapUrl()"
         (cardClick)="openWorld(world)"
@@ -41,6 +45,7 @@
       <span class="text-xs font-medium uppercase tracking-wide text-slate-400">Name</span>
       <input
         type="text"
+        required
         [ngModel]="newName()"
         (ngModelChange)="newName.set($event)"
         placeholder="My World"
@@ -53,11 +58,13 @@
       <span class="text-xs font-medium uppercase tracking-wide text-slate-400">Author</span>
       <input
         type="text"
+        required
         [ngModel]="newAuthor()"
         (ngModelChange)="newAuthor.set($event)"
         placeholder="You"
         class="w-full rounded-xl border border-slate-700 bg-slate-800/70 px-3 py-2.5 text-sm text-slate-100 placeholder-slate-500 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/30"
       />
+      <span class="block text-xs text-slate-500">Required.</span>
     </label>
 
     @if (createError()) {

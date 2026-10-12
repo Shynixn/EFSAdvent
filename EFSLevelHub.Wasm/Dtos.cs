@@ -73,6 +73,16 @@ public sealed class ArchiveFileDto
     public int Size { get; set; }
 }
 
+/// <summary>A single entry extracted from a ZIP archive.</summary>
+public sealed class ZipEntryDto
+{
+    /// <summary>Path of the entry inside the zip, using forward slashes.</summary>
+    public string Path { get; set; } = string.Empty;
+
+    /// <summary>Base64-encoded contents of the entry.</summary>
+    public string Data { get; set; } = string.Empty;
+}
+
 /// <summary>JSON-serializable projection of a FSALib <c>TilesetDefinition</c>.</summary>
 public sealed class TilesetDto
 {

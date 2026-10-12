@@ -22,6 +22,8 @@ export class CardComponent {
   @Input() subtitle = '';
   /** Optional author name, shown with an avatar icon under the title. */
   @Input() author = '';
+  /** Optional creation date (`yyyy-MM-dd`), shown above the uuid. */
+  @Input() creationDate = '';
   /** Optional unique id, shown very small at the bottom of the card. */
   @Input() uuid = '';
   /** Optional image URL rendered in the header banner. */

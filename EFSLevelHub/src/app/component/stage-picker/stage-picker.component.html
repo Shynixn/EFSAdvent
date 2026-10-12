@@ -1,54 +1,57 @@
-<app-modal [open]="open" [title]="title" maxWidth="max-w-lg" (closed)="close()">
-  <div class="flex flex-col gap-3">
-    <!-- Search bar -->
-    <div class="relative">
-      <span class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
-        <svg viewBox="0 0 18 18" fill="currentColor" class="h-4 w-4" aria-hidden="true">
-          <path
-            fill-rule="evenodd"
-            d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z"
-            clip-rule="evenodd"
-          />
-        </svg>
-      </span>
-      <input
-        type="search"
-        [value]="query()"
-        (input)="onSearchInput($event)"
-        placeholder="Search by stage or author name…"
-        class="w-full rounded-xl border border-slate-700 bg-slate-800/70 py-2.5 pl-9 pr-3 text-sm text-slate-100 placeholder-slate-500 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/30"
-      />
+<div class="flex flex-col gap-3">
+  <!-- Sort + search -->
+  <div class="flex flex-wrap items-end gap-3">
+    <div class="flex-1">
+      <div class="relative">
+        <span class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+          <svg viewBox="0 0 18 18" fill="currentColor" class="h-4 w-4" aria-hidden="true">
+            <path
+              fill-rule="evenodd"
+              d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z"
+              clip-rule="evenodd"
+            />
+          </svg>
+        </span>
+        <input
+          type="search"
+          [value]="query()"
+          (input)="onSearchInput($event)"
+          [placeholder]="placeholder"
+          class="w-full rounded-xl border border-slate-700 bg-slate-800/70 py-2.5 pl-9 pr-3 text-sm text-slate-100 placeholder-slate-500 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/30"
+        />
+      </div>
     </div>
-
-    <!-- Scrollable results table (name, author) -->
-    <div class="max-h-72 overflow-y-auto rounded-xl border border-slate-700">
-      <table class="w-full border-collapse text-left text-sm">
-        <thead
-          class="sticky top-0 z-10 bg-slate-900/95 text-xs uppercase tracking-wide text-slate-400"
-        >
-          <tr>
-            <th scope="col" class="px-3 py-2 font-medium">Name</th>
-            <th scope="col" class="px-3 py-2 font-medium">Author</th>
-          </tr>
-        </thead>
-        <tbody>
-          @for (row of filtered(); track row.id) {
-            <tr
-              (click)="select(row)"
-              class="cursor-pointer border-t border-slate-700/60 transition hover:bg-slate-700/40"
-              [class.bg-indigo-500/20]="row.id === selectedId"
-              [attr.aria-selected]="row.id === selectedId"
-            >
-              <td class="px-3 py-2 font-medium text-slate-100">{{ row.name }}</td>
-              <td class="px-3 py-2 text-slate-400">{{ row.author }}</td>
-            </tr>
-          } @empty {
-            <tr>
-              <td colspan="2" class="px-3 py-6 text-center text-slate-500">No stages found.</td>
-            </tr>
-          }
-        </tbody>
-      </table>
-    </div>
+    <app-sort-dropdown [value]="sort()" (changed)="sort.set($event)" />
   </div>
-</app-modal>
+
+  <!-- Scrollable results table (name, author) -->
+  <div class="max-h-72 overflow-y-auto rounded-xl border border-slate-700">
+    <table class="w-full border-collapse text-left text-sm">
+      <thead
+        class="sticky top-0 z-10 bg-slate-900/95 text-xs uppercase tracking-wide text-slate-400"
+      >
+        <tr>
+          <th scope="col" class="px-3 py-2 font-medium">Name</th>
+          <th scope="col" class="px-3 py-2 font-medium">Author</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (row of filtered(); track row.id) {
+          <tr
+            (click)="select(row)"
+            class="cursor-pointer border-t border-slate-700/60 transition hover:bg-slate-700/40"
+            [class.bg-indigo-500/20]="row.id === selectedId"
+            [attr.aria-selected]="row.id === selectedId"
+          >
+            <td class="px-3 py-2 font-medium text-slate-100">{{ row.name }}</td>
+            <td class="px-3 py-2 text-slate-400">{{ row.author }}</td>
+          </tr>
+        } @empty {
+          <tr>
+            <td colspan="2" class="px-3 py-6 text-center text-slate-500">No stages found.</td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  </div>
+</div>

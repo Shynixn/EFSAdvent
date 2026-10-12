@@ -99,14 +99,18 @@
 </div>
 
 <!-- Stage picker: re-points the clicked marker at a different stage. -->
-<app-stage-picker
+<app-modal
   [open]="pickerOpen()"
-  [stages]="allStages()"
-  [selectedId]="activePoint()?.stageId ?? ''"
   [title]="activePoint()?.label ? 'Re-point ' + activePoint()!.label : 'Select a stage'"
-  (picked)="onStagePicked($event)"
+  maxWidth="max-w-lg"
   (closed)="closePicker()"
-/>
+>
+  <app-stage-picker
+    [stages]="allStages()"
+    [selectedId]="activePoint()?.stageId ?? ''"
+    (picked)="onStagePicked($event)"
+  />
+</app-modal>
 
 <!-- Delete-world confirmation modal -->
 <app-modal [open]="deleteOpen()" title="Delete world" maxWidth="max-w-sm" (closed)="closeDelete()">

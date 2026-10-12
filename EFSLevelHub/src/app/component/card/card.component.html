@@ -65,6 +65,9 @@
         <span class="text-sm text-slate-200">
           {{ author }}
         </span>
+        @if (creationDate) {
+          <span class="text-xs text-slate-400">({{ creationDate }})</span>
+        }
       </div>
     }
     @if (uuid) {

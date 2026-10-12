@@ -1,18 +1,17 @@
 import { Injectable, inject, signal } from '@angular/core';
-import { WorldData, WorldStageRef } from '../entity/editor.entity';
+import { WORLD_FILE_VERSION, WorldData, WorldStageRef } from '../entity/editor.entity';
 import { EditorService } from './editor.service';
 import { LoggingService } from './logging.service';
 import {
+  CREATION_DATE_EPOCH,
   DEFAULT_STAGE_ARC_ORDER,
   DEFAULT_WORLD_STAGE_COUNT,
   defaultStageUuid,
+  formatIsoDate,
 } from './stage.service';
 
 /** Minimum number of characters required for a world name. */
 export const MIN_WORLD_NAME_LENGTH = 3;
-
-/** Default author for new worlds. */
-export const DEFAULT_AUTHOR = 'You';
 
 /** Key under which world ids are stored in the editor's `userdata.json`. */
 const WORLDS_KEY = 'worlds';
@@ -72,6 +71,8 @@ export class WorldService {
       name: DEFAULT_WORLD_NAME,
       author: 'Nintendo',
       stages,
+      version: WORLD_FILE_VERSION,
+      creationDate: CREATION_DATE_EPOCH,
     };
 
     await this.writeWorldFile(world);
@@ -121,21 +122,29 @@ export class WorldService {
    *
    * @param name   Display name (trimmed; must be at least
    *               {@link MIN_WORLD_NAME_LENGTH} characters).
-   * @param author Author shown on the card (defaults to {@link DEFAULT_AUTHOR}).
-   * @returns The created world, or `null` when the name is invalid.
+   * @param author Author shown on the card (trimmed; must not be empty).
+   * @returns The created world, or `null` when the name or author is invalid.
    */
-  async createWorld(name: string, author = DEFAULT_AUTHOR): Promise<WorldData | null> {
+  async createWorld(name: string, author: string): Promise<WorldData | null> {
     const trimmed = name.trim();
     if (trimmed.length < MIN_WORLD_NAME_LENGTH) {
       this.logger.warn(`WorldService: world name "${name}" is too short.`);
       return null;
     }
 
+    const trimmedAuthor = author.trim();
+    if (!trimmedAuthor) {
+      this.logger.warn('WorldService: world author is required.');
+      return null;
+    }
+
     const world: WorldData = {
       id: crypto.randomUUID(),
       name: trimmed,
-      author: author.trim() || DEFAULT_AUTHOR,
+      author: trimmedAuthor,
       stages: this.buildDefaultStageRefs(),
+      version: WORLD_FILE_VERSION,
+      creationDate: formatIsoDate(new Date()),
     };
 
     await this.writeWorldFile(world);
@@ -215,7 +224,10 @@ export class WorldService {
       if (!bytes) {
         return null;
       }
-      return JSON.parse(new TextDecoder().decode(bytes)) as WorldData;
+      const world = JSON.parse(new TextDecoder().decode(bytes)) as WorldData;
+      // Files written before the version field existed default to v1.
+      world.version ??= WORLD_FILE_VERSION;
+      return world;
     } catch {
       return null;
     }

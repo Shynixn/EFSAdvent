@@ -24,6 +24,7 @@ interface DotnetExports {
         MergeStageContent(targetArcData: Uint8Array, sourceArcData: Uint8Array): Uint8Array;
         ListArchiveFiles(arcData: Uint8Array): string;
         ReadArchiveFile(arcData: Uint8Array, path: string): Uint8Array;
+        Unzip(zipData: Uint8Array): string;
         EnsureAssets(): string;
         GetTilesets(): string;
         GetStages(): string;
@@ -38,6 +39,30 @@ export interface ArchiveFile {
   Path: string;
   Name: string;
   Size: number;
+}
+
+/** A file extracted from a ZIP archive. */
+export interface ZipEntry {
+  /** Path of the entry inside the zip, using forward slashes. */
+  path: string;
+  /** Raw, decoded contents of the entry. */
+  data: Uint8Array;
+}
+
+/** Wire shape of a zip entry as returned by the WASM `Unzip` export. */
+interface ZipEntryJson {
+  Path: string;
+  Data: string;
+}
+
+/** Decodes a base64 string into its raw bytes. */
+function base64ToBytes(base64: string): Uint8Array {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
 }
 
 /** A decoded image ready for display, encoded as a PNG data URL. */
@@ -215,6 +240,27 @@ export class FSALibService {
   async readArchiveFile(arcData: Uint8Array, path: string): Promise<Uint8Array> {
     const fsa = await this.getFsa();
     return fsa.ReadArchiveFile(arcData, path);
+  }
+
+  /**
+   * Extracts every file from a ZIP archive (e.g. a shared stage package) and
+   * returns their names and raw bytes.
+   *
+   * @param zipData Raw bytes of the ZIP archive.
+   * @returns One entry per file, in archive order. Directory entries are
+   *          omitted.
+   */
+  async unzip(zipData: Uint8Array): Promise<ZipEntry[]> {
+    const fsa = await this.getFsa();
+    const json = fsa.Unzip(zipData);
+    const result = JSON.parse(json) as ZipEntryJson[] | { error?: string };
+    if (!Array.isArray(result)) {
+      throw new Error(`FSALib failed to read zip: ${result.error ?? 'unknown error'}`);
+    }
+    return result.map((entry) => ({
+      path: entry.Path,
+      data: base64ToBytes(entry.Data),
+    }));
   }
 
   /**

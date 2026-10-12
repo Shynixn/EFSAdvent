@@ -346,8 +346,7 @@ public static partial class FsaInterop
     /// </summary>
     [JSExport]
     public static string ListArchiveFiles(byte[] arcData)
-    {
-        try
+    {        try
         {
             using var stream = new MemoryStream(arcData, writable: false);
             using var rarc = new Rarc(stream);
@@ -384,6 +383,52 @@ public static partial class FsaInterop
         file.Data.Position = 0;
         file.Data.CopyTo(ms);
         return ms.ToArray();
+    }
+
+    /// <summary>
+    /// Extracts every file from a ZIP archive and returns them as JSON, each
+    /// entry carrying its path and base64-encoded contents.
+    /// </summary>
+    /// <remarks>
+    /// Used to import a shared stage package (a zip holding a <c>manifest.json</c>
+    /// and a <c>stage.arc</c>). Directory entries are skipped.
+    /// </remarks>
+    /// <param name="zipData">Raw bytes of the ZIP archive.</param>
+    /// <returns>JSON array of <see cref="ZipEntryDto"/>, or an error object.</returns>
+    [JSExport]
+    public static string Unzip(byte[] zipData)
+    {
+        try
+        {
+            using var stream = new MemoryStream(zipData, writable: false);
+            using var archive = new System.IO.Compression.ZipArchive(stream, System.IO.Compression.ZipArchiveMode.Read);
+
+            var entries = new List<ZipEntryDto>();
+            foreach (var entry in archive.Entries)
+            {
+                // Skip pure directory entries (they have an empty name).
+                if (string.IsNullOrEmpty(entry.Name))
+                {
+                    continue;
+                }
+
+                using var entryStream = entry.Open();
+                using var buffer = new MemoryStream();
+                entryStream.CopyTo(buffer);
+
+                entries.Add(new ZipEntryDto
+                {
+                    Path = entry.FullName.Replace('\\', '/'),
+                    Data = Convert.ToBase64String(buffer.ToArray()),
+                });
+            }
+
+            return JsonSerializer.Serialize(entries, JsonOptions);
+        }
+        catch (Exception ex)
+        {
+            return JsonSerializer.Serialize(new { error = ex.Message }, JsonOptions);
+        }
     }
 
     private static void WalkDirectory(Rarc.DirectoryNode dir, string prefix, List<ArchiveFileDto> list)

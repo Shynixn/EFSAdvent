@@ -1,9 +1,11 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { CardComponent } from '../../component/card/card.component';
 import { ModalComponent } from '../../component/modal/modal.component';
 import { ButtonComponent } from '../../component/button/button.component';
+import { SortDropdownComponent } from '../../component/sort-dropdown/sort-dropdown.component';
+import { DEFAULT_SORT, SortState, sortItems } from '../../component/sort-dropdown/sort.util';
 import { WorldData } from '../../entity/editor.entity';
 import { WorldService, MIN_WORLD_NAME_LENGTH } from '../../service/world.service';
 import { WorldTabsService } from '../../service/world-tabs.service';
@@ -18,7 +20,7 @@ import { LoggingService } from '../../service/logging.service';
  */
 @Component({
   selector: 'app-my-worlds-page',
-  imports: [CardComponent, ModalComponent, ButtonComponent, FormsModule],
+  imports: [CardComponent, ModalComponent, ButtonComponent, SortDropdownComponent, FormsModule],
   templateUrl: './my-worlds-page.html',
   styleUrl: './my-worlds-page.css',
 })
@@ -31,6 +33,12 @@ export class MyWorldsPage implements OnInit {
 
   /** Every world to render. */
   readonly worlds = this.worldService.worlds;
+
+  /** Current sort selection. */
+  readonly sort = signal<SortState>(DEFAULT_SORT);
+
+  /** Worlds in the selected sort order. */
+  readonly sortedWorlds = computed(() => sortItems(this.worlds(), this.sort()));
 
   /** Blob URL of the shared world map image, resolved from OPFS. */
   readonly worldmapUrl = signal<string | null>(null);
@@ -67,9 +75,16 @@ export class MyWorldsPage implements OnInit {
 
   /** Creates a world from the form values and opens it. */
   async createWorld(): Promise<void> {
+    if (!this.newName().trim() || !this.newAuthor().trim()) {
+      this.createError.set('Name and author are required.');
+      return;
+    }
+
     const world = await this.worldService.createWorld(this.newName(), this.newAuthor());
     if (!world) {
-      this.createError.set(`Enter a name of at least ${MIN_WORLD_NAME_LENGTH} characters.`);
+      this.createError.set(
+        `Enter a name of at least ${MIN_WORLD_NAME_LENGTH} characters and an author.`,
+      );
       return;
     }
     this.closeCreate();

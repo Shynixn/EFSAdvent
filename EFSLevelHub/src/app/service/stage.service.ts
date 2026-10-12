@@ -116,12 +116,50 @@ export function stageArcFilePath(uuid: string): string {
 /** Author attributed to stages that don't declare one (i.e. the game's own). */
 export const DEFAULT_STAGE_AUTHOR = 'Nintendo';
 
+/** Minimum number of characters required for a stage name. */
+export const MIN_STAGE_NAME_LENGTH = 3;
+
+/** Default author for newly created/imported stages. */
+export const DEFAULT_STAGE_CREATOR_AUTHOR = 'You';
+
+/** Schema version written to every stage definition file. */
+export const STAGE_FILE_VERSION = 1;
+
+/**
+ * Base date all imported stages count back from. The first default stage
+ * (`0001`, Lake Hylia) is the most recent and lands exactly on this day.
+ */
+export const CREATION_DATE_EPOCH = '2004-03-18';
+
+/** Formats a `Date` as an ISO day (`yyyy-MM-dd`). */
+export function formatIsoDate(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+/**
+ * Derives the creation date for the `index`-th (1-based) default stage.
+ *
+ * Index `1` (Lake Hylia) is the most recent and sits exactly on
+ * {@link CREATION_DATE_EPOCH}; each following stage is one day older.
+ *
+ * @param index 1-based position in {@link DEFAULT_STAGE_ARC_ORDER}.
+ */
+export function creationDateForStageIndex(index: number): string {
+  const base = new Date(`${CREATION_DATE_EPOCH}T00:00:00Z`);
+  base.setUTCDate(base.getUTCDate() - (index - 1));
+  return formatIsoDate(base);
+}
+
 /** A minimal stage definition file persisted under `/editor/stage/<uuid>.json`. */
 export interface StageFile {
   id: string;
   name: string;
   /** Author shown in the stage picker; falls back to "Nintendo" when absent. */
   author?: string;
+  /** Schema version of the stage file; always {@link STAGE_FILE_VERSION}. */
+  version: number;
+  /** Creation date as an ISO day (`yyyy-MM-dd`). */
+  creationDate?: string;
   /**
    * SHA-256 (hex) of the archive copied at import time. Used at export to skip
    * stages that have not been modified (`/editor/stage/<uuid>.arc` unchanged).
@@ -187,6 +225,152 @@ export class StageService {
   }
 
   /**
+   * Creates a new, editable stage and persists it.
+   *
+   * The stage's archive is seeded from the chosen `templateId` (every stage is
+   * based on an existing one). All fields are required.
+   *
+   * @param name       Display name (trimmed; must be at least
+   *                   {@link MIN_STAGE_NAME_LENGTH} characters).
+   * @param author     Author shown on the card (trimmed; must not be empty).
+   * @param templateId Id of the stage to use as a base template (required).
+   * @returns The created stage, or `null` when any field is invalid.
+   */
+  async createStage(name: string, author: string, templateId: string): Promise<StageFile | null> {
+    const trimmed = name.trim();
+    if (trimmed.length < MIN_STAGE_NAME_LENGTH) {
+      this.logger.warn(`StageService: stage name "${name}" is too short.`);
+      return null;
+    }
+
+    const trimmedAuthor = author.trim();
+    if (!trimmedAuthor) {
+      this.logger.warn('StageService: stage author is required.');
+      return null;
+    }
+
+    const template = this.getById(templateId);
+    if (!template) {
+      this.logger.warn('StageService: a template stage is required.');
+      return null;
+    }
+
+    const id = crypto.randomUUID();
+
+    const file: StageFile = {
+      id,
+      name: trimmed,
+      author: trimmedAuthor,
+      version: STAGE_FILE_VERSION,
+      creationDate: formatIsoDate(new Date()),
+      originalIndex: template.originalIndex,
+    };
+
+    // Seed the archive from the template stage.
+    const bytes = await this.editor.readEditorFile(stageArcFilePath(template.id));
+    if (bytes) {
+      await this.editor.writeEditorFile(stageArcFilePath(id), bytes);
+      file.originalHash = await sha256Hex(bytes);
+    } else {
+      this.logger.warn(`StageService: template "${template.id}" has no archive to copy.`);
+    }
+
+    await this.writeStageFile(file);
+    await this.addStageRef(id);
+    this.stageList.set([...this.stageList(), file]);
+    this.logger.info(`StageService: created stage "${file.name}" (${id}).`);
+    return file;
+  }
+
+  /**
+   * Imports a shared stage package (a ZIP containing `manifest.json` — the
+   * stage definition renamed — and a `stage.arc`).
+   *
+   * The manifest provides the display name and author (falling back when
+   * absent); a fresh id is always assigned so imports never clash with existing
+   * stages. The archive is stored verbatim as the stage's own `.arc`.
+   *
+   * @param zipBytes Raw bytes of the uploaded ZIP.
+   * @returns The imported stage, or `null` when the package is invalid.
+   */
+  async importStageZip(zipBytes: Uint8Array): Promise<StageFile | null> {
+    let entries;
+    try {
+      entries = await this.fsaLib.unzip(zipBytes);
+    } catch (error) {
+      this.logger.error('StageService: failed to read stage zip', error);
+      return null;
+    }
+
+    const manifestEntry = entries.find((entry) => /(^|\/)manifest\.json$/i.test(entry.path));
+    if (!manifestEntry) {
+      this.logger.warn('StageService: stage zip has no manifest.json.');
+      return null;
+    }
+
+    const arcEntry = entries.find((entry) => /\.arc$/i.test(entry.path));
+    if (!arcEntry) {
+      this.logger.warn('StageService: stage zip has no .arc file.');
+      return null;
+    }
+
+    const manifest = this.parseManifest(manifestEntry.data);
+    const id = crypto.randomUUID();
+
+    const file: StageFile = {
+      id,
+      name: manifest?.name?.trim() || 'Imported Stage',
+      author: manifest?.author?.trim() || DEFAULT_STAGE_CREATOR_AUTHOR,
+      version: STAGE_FILE_VERSION,
+      creationDate: formatIsoDate(new Date()),
+      originalIndex: manifest?.originalIndex,
+      originalHash: await sha256Hex(arcEntry.data),
+    };
+
+    await this.editor.writeEditorFile(stageArcFilePath(id), arcEntry.data);
+    await this.writeStageFile(file);
+    await this.addStageRef(id);
+    this.stageList.set([...this.stageList(), file]);
+    this.logger.info(`StageService: imported stage "${file.name}" (${id}).`);
+    return file;
+  }
+
+  /** Persists a stage definition file. */
+  private async writeStageFile(file: StageFile): Promise<void> {
+    await this.editor.writeEditorFile(
+      stageFilePath(file.id),
+      new TextEncoder().encode(JSON.stringify(file, null, 2)),
+    );
+  }
+
+  /** Appends a newly created/imported stage id to `userdata.json`. */
+  private async addStageRef(id: string): Promise<void> {
+    const refs = await this.editor.get<{ id: string }[]>(STAGES_KEY, []);
+    const nextRefs = [...(Array.isArray(refs) ? refs : []), { id }];
+    await this.editor.set(STAGES_KEY, nextRefs);
+  }
+
+  /** Parses a package's `manifest.json`, tolerating partial/renamed shapes. */
+  private parseManifest(bytes: Uint8Array): {
+    name?: string;
+    author?: string;
+    originalIndex?: number;
+  } | null {
+    try {
+      const raw = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
+      return {
+        name: typeof raw['name'] === 'string' ? (raw['name'] as string) : undefined,
+        author: typeof raw['author'] === 'string' ? (raw['author'] as string) : undefined,
+        originalIndex:
+          typeof raw['originalIndex'] === 'number' ? (raw['originalIndex'] as number) : undefined,
+      };
+    } catch {
+      this.logger.warn('StageService: manifest.json is not valid JSON.');
+      return null;
+    }
+  }
+
+  /**
    * Creates a stage definition file and copies the source archive for every
    * default stage (once), then records their ids in `userdata.json`.
    *
@@ -225,6 +409,9 @@ export class StageService {
         id: uuid,
         name,
         author: DEFAULT_STAGE_AUTHOR,
+        version: STAGE_FILE_VERSION,
+        // Lake Hylia (index 1) is the most recent; each later stage is older.
+        creationDate: creationDateForStageIndex(i + 1),
         originalIndex: Number.parseInt(id.replace(/\D/g, ''), 10),
         // Hash the archive as imported, so export can skip unmodified stages.
         originalHash: arcBytes ? await sha256Hex(arcBytes) : undefined,
@@ -256,7 +443,10 @@ export class StageService {
       if (!bytes) {
         return null;
       }
-      return JSON.parse(new TextDecoder().decode(bytes)) as StageFile;
+      const file = JSON.parse(new TextDecoder().decode(bytes)) as StageFile;
+      // Files written before the version field existed default to v1.
+      file.version ??= STAGE_FILE_VERSION;
+      return file;
     } catch {
       return null;
     }
