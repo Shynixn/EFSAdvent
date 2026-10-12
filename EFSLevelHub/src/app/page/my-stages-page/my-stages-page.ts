@@ -1,5 +1,6 @@
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { Router } from '@angular/router';
 import { CardComponent } from '../../component/card/card.component';
 import { ModalComponent } from '../../component/modal/modal.component';
 import { ButtonComponent } from '../../component/button/button.component';
@@ -7,6 +8,8 @@ import { StagePickerComponent } from '../../component/stage-picker/stage-picker.
 import { SortDropdownComponent } from '../../component/sort-dropdown/sort-dropdown.component';
 import { DEFAULT_SORT, SortState, sortItems } from '../../component/sort-dropdown/sort.util';
 import { MIN_STAGE_NAME_LENGTH, StageFile, StageService } from '../../service/stage.service';
+import { StageTabsService } from '../../service/stage-tabs.service';
+import { StagePreviewService } from '../../service/stage-preview.service';
 import { EditorService, WORLDMAP_FILE } from '../../service/editor.service';
 import { LoggingService } from '../../service/logging.service';
 
@@ -34,7 +37,10 @@ import { LoggingService } from '../../service/logging.service';
 })
 export class MyStagesPage implements OnInit {
   private readonly stageService = inject(StageService);
+  private readonly stageTabs = inject(StageTabsService);
+  private readonly stagePreview = inject(StagePreviewService);
   private readonly editor = inject(EditorService);
+  private readonly router = inject(Router);
   private readonly logger = inject(LoggingService);
 
   /** All registered stages. */
@@ -48,6 +54,9 @@ export class MyStagesPage implements OnInit {
 
   /** Blob URL of the shared world map image (used as a placeholder preview). */
   readonly worldmapUrl = signal<string | null>(null);
+
+  /** Per-stage thumbnail blob URLs (only present once generated). */
+  private readonly thumbnails = signal<Record<string, string>>({});
 
   /** Whether the "choose create/import" modal is open. */
   readonly choiceOpen = signal(false);
@@ -78,6 +87,7 @@ export class MyStagesPage implements OnInit {
   private async init(): Promise<void> {
     await this.stageService.load();
     await this.loadWorldmap();
+    await this.loadThumbnails();
   }
 
   /** Human-readable author of a stage (with the game's fallback). */
@@ -85,9 +95,40 @@ export class MyStagesPage implements OnInit {
     return this.stageService.authorOf(stage);
   }
 
+  /** Preview image for a stage card: its thumbnail when generated, else the world map. */
+  previewFor(stage: StageFile): string | null {
+    return this.thumbnails()[stage.id] ?? this.worldmapUrl();
+  }
+
+  /**
+   * How the card should fit the preview image: stage thumbnails are centred
+   * (`contain`), the shared world map placeholder fills the box (`cover`).
+   */
+  previewFit(stage: StageFile): 'cover' | 'contain' {
+    return this.thumbnails()[stage.id] ? 'contain' : 'cover';
+  }
+
+  /** Loads each stage's cached thumbnail (if any) as a blob URL. */
+  private async loadThumbnails(): Promise<void> {
+    const map: Record<string, string> = {};
+    for (const stage of this.stages()) {
+      const url = await this.stagePreview.readThumbnailUrl(stage.id);
+      if (url) {
+        map[stage.id] = url;
+      }
+    }
+    this.thumbnails.set(map);
+  }
+
   /** Opens the initial choice modal. */
   openChoice(): void {
     this.choiceOpen.set(true);
+  }
+
+  /** Opens a stage in a new tab and navigates to its page. */
+  openStage(stage: StageFile): void {
+    this.stageTabs.open(stage.id);
+    void this.router.navigate(['/my-stages', stage.id]);
   }
 
   /** Closes the choice modal. */

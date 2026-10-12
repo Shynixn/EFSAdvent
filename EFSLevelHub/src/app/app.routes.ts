@@ -22,6 +22,12 @@ export const routes: Routes = [
     canActivate: [requiresGameFilesGuard],
   },
   {
+    path: 'my-stages/:stageId',
+    loadComponent: () => import('./page/stage-page/stage-page').then((m) => m.StagePage),
+    title: 'Stage',
+    canActivate: [requiresGameFilesGuard],
+  },
+  {
     path: 'my-worlds',
     loadComponent: () => import('./page/my-worlds-page/my-worlds-page').then((m) => m.MyWorldsPage),
     title: 'My Worlds',
@@ -45,13 +51,6 @@ export const routes: Routes = [
         (m) => m.IsoExtractorComponent,
       ),
     title: 'ISO Extractor',
-  },
-  {
-    path: 'map-viewer',
-    loadComponent: () =>
-      import('./component/map-viewer/map-viewer.component').then((m) => m.MapViewerComponent),
-    title: 'Map Viewer',
-    canActivate: [requiresGameFilesGuard],
   },
   {
     path: 'debug',

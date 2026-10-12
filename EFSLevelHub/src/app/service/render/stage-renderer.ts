@@ -434,3 +434,11 @@ export const ROOM_PIXELS = LAYER_DIMENSION * TILE_SIZE;
 
 /** Visible height of a TV-layer room, in pixels. */
 export const TV_PIXELS = TV_HEIGHT * TILE_SIZE;
+
+/**
+ * Visible size of a rendered room after the TV crop: the full 512px width but
+ * only {@link TV_PIXELS} (384px) of height. The bottom band the game hides is
+ * dropped when rendering room previews.
+ */
+export const VISIBLE_ROOM_WIDTH = ROOM_PIXELS;
+export const VISIBLE_ROOM_HEIGHT = TV_PIXELS;

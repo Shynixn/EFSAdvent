@@ -2,6 +2,7 @@ import { Component, inject, signal } from '@angular/core';
 import { RouterLink, RouterLinkActive } from '@angular/router';
 import { GameStateService } from '../../service/game-state.service';
 import { WorldTabsService } from '../../service/world-tabs.service';
+import { StageTabsService } from '../../service/stage-tabs.service';
 
 /** A single entry in the application's side navigation. */
 export interface NavItem {
@@ -28,6 +29,7 @@ export interface NavItem {
 export class SideNavComponent {
   private readonly gameState = inject(GameStateService);
   private readonly worldTabs = inject(WorldTabsService);
+  private readonly stageTabs = inject(StageTabsService);
 
   /** Whether the rail is collapsed to icons only. */
   readonly collapsed = signal(false);
@@ -37,6 +39,9 @@ export class SideNavComponent {
 
   /** Open world tabs, shown nested under "My Worlds". */
   readonly worldTabsList = this.worldTabs.tabs;
+
+  /** Open stage tabs, shown nested under "My Stages". */
+  readonly stageTabsList = this.stageTabs.tabs;
 
   /** Navigation entries rendered top-to-bottom. */
   readonly items: NavItem[] = [

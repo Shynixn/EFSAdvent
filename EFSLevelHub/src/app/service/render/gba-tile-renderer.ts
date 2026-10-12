@@ -66,6 +66,41 @@ export class ImageBuffer {
     return [this.pixels[i], this.pixels[i + 1], this.pixels[i + 2], this.pixels[i + 3]];
   }
 
+  /**
+   * Returns a copy cropped to the given size, anchored at the top-left.
+   *
+   * The game renders a 32×32-tile room but only shows the top `height` rows
+   * (the TV crops the rest), so callers crop the rendered buffer to drop the
+   * unused bottom band.
+   */
+  crop(width: number, height: number): ImageBuffer {
+    const w = Math.min(width, this.width);
+    const h = Math.min(height, this.height);
+    const cropped = new ImageBuffer(w, h);
+    for (let y = 0; y < h; y++) {
+      const srcStart = y * this.width * 4;
+      cropped.pixels.set(this.pixels.subarray(srcStart, srcStart + w * 4), y * w * 4);
+    }
+    return cropped;
+  }
+
+  /**
+   * Returns a copy of the sub-rectangle at (x, y) with the given size.
+   *
+   * Used to trim transparent margins from a composed image (e.g. a thumbnail
+   * built on a sparse map grid) so only the occupied area remains.
+   */
+  cropRect(x: number, y: number, width: number, height: number): ImageBuffer {
+    const w = Math.max(0, Math.min(width, this.width - x));
+    const h = Math.max(0, Math.min(height, this.height - y));
+    const cropped = new ImageBuffer(w, h);
+    for (let row = 0; row < h; row++) {
+      const srcStart = ((y + row) * this.width + x) * 4;
+      cropped.pixels.set(this.pixels.subarray(srcStart, srcStart + w * 4), row * w * 4);
+    }
+    return cropped;
+  }
+
   /** Fills the whole buffer with an RGBA colour. */
   fill(r: number, g: number, b: number, a: number): void {
     for (let i = 0; i < this.pixels.length; i += 4) {

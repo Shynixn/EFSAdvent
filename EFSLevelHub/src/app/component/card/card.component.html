@@ -33,7 +33,13 @@
         <span class="text-xs font-medium">{{ loadingText }}</span>
       </div>
     } @else if (imageUrl) {
-      <img [src]="imageUrl" alt="" class="h-full w-full object-cover" />
+      <img
+        [src]="imageUrl"
+        alt=""
+        class="h-full w-full"
+        [class.object-cover]="imageFit === 'cover'"
+        [class.object-contain]="imageFit === 'contain'"
+      />
     }
     @if (badge) {
       <span

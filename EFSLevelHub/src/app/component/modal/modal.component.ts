@@ -21,11 +21,19 @@ export class ModalComponent {
   @Input() open = false;
   /** Tailwind max-width class for the dialog panel. */
   @Input() maxWidth = 'max-w-md';
+  /**
+   * When false the dialog cannot be dismissed (no close button; backdrop and
+   * Escape are ignored) — used for blocking progress dialogs.
+   */
+  @Input() dismissible = true;
   /** Emits when the dialog should be dismissed. */
   @Output() closed = new EventEmitter<void>();
 
   /** Requests dismissal (backdrop / close button / Escape). */
   close(): void {
+    if (!this.dismissible) {
+      return;
+    }
     this.closed.emit();
   }
 

@@ -28,6 +28,11 @@ export class CardComponent {
   @Input() uuid = '';
   /** Optional image URL rendered in the header banner. */
   @Input() imageUrl: string | null = null;
+  /**
+   * How the header image fills its box: `cover` crops to fill (default),
+   * `contain` fits and centres the whole image (used for stage thumbnails).
+   */
+  @Input() imageFit: 'cover' | 'contain' = 'cover';
   /** When true, the header shows a spinner instead of the image. */
   @Input() loading = false;
   /** Text shown next to the spinner in the loading state. */

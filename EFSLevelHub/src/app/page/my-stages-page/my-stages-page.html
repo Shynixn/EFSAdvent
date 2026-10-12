@@ -31,7 +31,9 @@
         [author]="authorOf(stage)"
         [creationDate]="stage.creationDate ?? ''"
         [uuid]="stage.id"
-        [imageUrl]="worldmapUrl()"
+        [imageUrl]="previewFor(stage)"
+        [imageFit]="previewFit(stage)"
+        (cardClick)="openStage(stage)"
       />
     }
   </div>

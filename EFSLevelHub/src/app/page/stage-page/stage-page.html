@@ -1,0 +1,140 @@
+<div class="flex h-full flex-col">
+  <!-- Action bar -->
+  <header
+    class="flex items-center justify-between gap-4 border-b border-slate-800 bg-slate-900/80 px-6 py-3"
+  >
+    <div class="flex min-w-0 items-center gap-2">
+      <app-button
+        variant="ghost"
+        color="slate"
+        [iconOnly]="true"
+        title="Close stage"
+        [icon]="'M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z'"
+        (clicked)="close()"
+      />
+      <div class="min-w-0">
+        <h1 class="truncate text-lg font-semibold text-white">{{ stageName() }}</h1>
+        <p class="text-xs text-slate-400">Stage</p>
+      </div>
+    </div>
+  </header>
+
+  <!-- Content -->
+  <div class="min-h-0 flex-1 overflow-auto bg-slate-950 p-6">
+    @if (isLoading()) {
+      <p class="text-sm text-indigo-300">Loading stage…</p>
+    } @else if (loadError()) {
+      <p class="rounded-lg bg-red-500/10 p-3 text-sm text-red-400">{{ loadError() }}</p>
+    } @else if (map(); as m) {
+      <div class="mx-auto max-w-5xl space-y-6">
+        <!-- Map metadata -->
+        <dl class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-4">
+          <div>
+            <dt class="text-slate-500">Stage index</dt>
+            <dd class="font-mono text-slate-200">{{ stageData()?.Index }}</dd>
+          </div>
+          <div>
+            <dt class="text-slate-500">Map index</dt>
+            <dd class="font-mono text-slate-200">{{ m.Index }}</dd>
+          </div>
+          <div>
+            <dt class="text-slate-500">Size</dt>
+            <dd class="font-mono text-slate-200">{{ mapWidth() }} × {{ mapHeight() }}</dd>
+          </div>
+          <div>
+            <dt class="text-slate-500">Start</dt>
+            <dd class="font-mono text-slate-200">{{ m.StartX }}, {{ m.StartY }}</dd>
+          </div>
+        </dl>
+
+        <!-- Map grid -->
+        <section class="space-y-2">
+          <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-400">Map Grid</h2>
+          <div class="overflow-auto rounded-xl border border-slate-700 bg-slate-900/60 p-3">
+            <div
+              class="inline-grid grid-flow-row gap-1"
+              [style.gridTemplateColumns]="'repeat(' + mapWidth() + ', 3.5rem)'"
+            >
+              @for (y of range(mapHeight()); track y) {
+                @for (x of range(mapWidth()); track x) {
+                  <button
+                    type="button"
+                    (click)="selectRoom(roomAt(x, y))"
+                    [disabled]="isEmpty(x, y)"
+                    [class]="
+                      'flex h-14 w-14 flex-col items-center justify-center rounded border text-xs font-mono transition ' +
+                      (isEmpty(x, y)
+                        ? 'cursor-default border-slate-700 bg-slate-800/40 text-slate-600'
+                        : 'cursor-pointer border-slate-500 bg-slate-700 text-slate-100 hover:border-indigo-400 hover:bg-slate-600') +
+                      (isStart(x, y) ? ' ring-2 ring-emerald-400' : '') +
+                      (selectedRoom() === roomAt(x, y) && !isEmpty(x, y)
+                        ? ' ring-2 ring-indigo-400'
+                        : '')
+                    "
+                  >
+                    @if (!isEmpty(x, y)) {
+                      <span>{{ roomAt(x, y) }}</span>
+                      <span class="text-[10px] text-slate-500">{{ x }},{{ y }}</span>
+                    } @else {
+                      <span>—</span>
+                    }
+                  </button>
+                }
+              }
+            </div>
+          </div>
+          <p class="text-xs text-slate-500">Green ring = start room.</p>
+        </section>
+
+        <!-- Thumbnail: all rooms concatenated -->
+        <section class="space-y-2">
+          <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-400">Thumbnail</h2>
+          @if (thumbnailUrl(); as thumb) {
+            <div class="overflow-auto rounded-xl border border-slate-700 bg-slate-900/60 p-2">
+              <img
+                [src]="thumb"
+                alt="Stage thumbnail"
+                class="max-w-full"
+                style="image-rendering: pixelated"
+              />
+            </div>
+          } @else if (previewError()) {
+            <p class="rounded-lg bg-red-500/10 p-3 text-sm text-red-400">{{ previewError() }}</p>
+          } @else {
+            <p class="text-sm text-slate-500">Thumbnail is being generated…</p>
+          }
+        </section>
+
+        <!-- Rendered room -->
+        @if (selectedRoom() !== null) {
+          <section class="space-y-2">
+            <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-400">
+              Room {{ selectedRoom() }}
+            </h2>
+            @if (renderError()) {
+              <p class="rounded-lg bg-red-500/10 p-3 text-sm text-red-400">{{ renderError() }}</p>
+            } @else if (isRenderingRoom()) {
+              <p class="text-sm text-indigo-300">Rendering room…</p>
+            } @else if (roomRenderUrl(); as url) {
+              <div class="overflow-auto rounded-xl border border-slate-700 bg-slate-900/60 p-2">
+                <img
+                  [src]="url"
+                  [alt]="'Room ' + selectedRoom()"
+                  class="max-h-[32rem] max-w-full"
+                  style="image-rendering: pixelated"
+                />
+              </div>
+            }
+          </section>
+        }
+      </div>
+    }
+  </div>
+</div>
+
+<!-- Blocking modal while room previews + thumbnail are generated. -->
+<app-loading-modal
+  [open]="generatingPreviews()"
+  title="Generating previews"
+  [message]="previewMessage()"
+/>

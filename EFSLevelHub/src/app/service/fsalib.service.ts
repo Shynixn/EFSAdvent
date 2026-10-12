@@ -354,6 +354,89 @@ export class FSALibService {
   }
 
   /**
+   * Pre-reads every resource a {@link StageRenderer} can request into a plain
+   * `path → bytes` record, so the rendering can happen in a Web Worker without
+   * access to WASM or OPFS.
+   *
+   * The set of resources is bounded: the fixed tileset/sprite/palette files plus
+   * the stage's own TIMG textures. Paths are resolved against the combined
+   * stage + `data.arc` listing (same layering as {@link createStageRenderer}).
+   *
+   * @param stage   Parsed stage.
+   * @param arcData Raw stage archive bytes.
+   * @returns A record keyed by the archive's real path.
+   */
+  async gatherStageResources(
+    stage: StageData,
+    arcData: Uint8Array,
+  ): Promise<Record<string, Uint8Array>> {
+    const stageFiles = await this.listArchiveFiles(arcData);
+    const stagePathSet = new Set(stageFiles.map((f) => f.Path));
+
+    const dataArc = await this.readDataArc();
+    const allPaths = dataArc
+      ? [...stageFiles.map((f) => f.Path), ...this.dataArcPaths]
+      : stageFiles.map((f) => f.Path);
+    const resolver = new ArchivePathResolver(allPaths);
+
+    // The fixed files the renderer reads, plus the stage's own textures.
+    const tilesets = await this.loadTilesets();
+    const tilesetInfo = tilesets[String(stage.Map.TileSheetId)];
+    const wanted = new Set<string>([
+      'SPL/bg_a_spl.szs',
+      'SCH/bg_base_sch.szs',
+      'SCH/gb_ch_obj_base_sch.szs',
+      `SCH/gb_ch_obj_tr_sch${stage.Map.NpcSheetId.toString(16)}.szs`,
+      'SCH/enemy_sch.szs',
+      'SOB/enemy_both_sob.bin',
+      'SOB/enemy_both2_sob.bin',
+      'SOB/enemy_gc_sob.bin',
+      'SOB/player_sob.bin',
+      'SOB/kage_sob.bin',
+      'SOB/player_kage_sob.bin',
+      'SCL/cu_cl_obj_base_scl.szs',
+      'SCL/gb_cl_obj_base_scl.szs',
+    ]);
+    if (tilesetInfo) {
+      wanted.add(`SCH/bg_${tilesetInfo.ID}_sch.szs`);
+      wanted.add(`SCH/bg_${tilesetInfo.GbaID ?? tilesetInfo.ID}_sch.szs`);
+      wanted.add(`SCL/bg_${tilesetInfo.ID}_scl.szs`);
+      wanted.add(`SCL/bg_${tilesetInfo.GbaID ?? tilesetInfo.ID}_gb_scl.szs`);
+    }
+
+    // Every .bti texture named in the stage's TIMG folder.
+    const timg = stage.Resources?.Directories?.['TIMG'];
+    if (timg) {
+      for (const name of timg.Files) {
+        if (name.toLowerCase().endsWith('.bti')) {
+          wanted.add(`TIMG/${name}`);
+        }
+      }
+    }
+
+    const resources: Record<string, Uint8Array> = {};
+    for (const path of wanted) {
+      const real = resolver.resolve(path);
+      if (!real) {
+        continue;
+      }
+      try {
+        const bytes = stagePathSet.has(real)
+          ? await this.readArchiveFile(arcData, real)
+          : dataArc
+            ? await this.readArchiveFile(dataArc, real)
+            : null;
+        if (bytes && bytes.byteLength > 0) {
+          resources[real] = bytes;
+        }
+      } catch {
+        // Missing optional resources are fine; the renderer handles nulls.
+      }
+    }
+    return resources;
+  }
+
+  /**
    * Reads the game's shared `data.arc` from OPFS, or null if not extracted.
    *
    * The bytes and their file-path list are cached for the session so that
