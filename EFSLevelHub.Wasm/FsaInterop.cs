@@ -134,10 +134,13 @@ public static partial class FsaInterop
     /// archive, so the change is written back into the stage's own <c>.arc</c>.
     /// </summary>
     /// <remarks>
-    /// The tileset id lives in the map's CSV header (<c>mapNNN.csv</c>), so the
-    /// stage must be re-serialized for the change to persist. Serialization goes
-    /// through <see cref="SerializeStage"/> so the CSV keeps the CRLF/no-BOM
-    /// format the game requires.
+    /// The tileset id lives in the map's CSV header. A stage carries TWO maps:
+    /// <c>mapNNN.csv</c> (the shared/multiplayer map, <see cref="Stage.Map"/>) and
+    /// <c>mapNNN_1.csv</c> (the single-player map,
+    /// <see cref="Stage.MapSingleplayer"/>, which is what the game actually uses
+    /// in single-player). Both headers must be updated or the game keeps drawing
+    /// the old tileset. Serialization goes through <see cref="SerializeStage"/>
+    /// so the CSVs keep the CRLF/no-BOM format the game requires.
     /// </remarks>
     /// <param name="arcData">Raw bytes of the stage archive.</param>
     /// <param name="tileSheetId">New tileset index to store.</param>
@@ -151,6 +154,13 @@ public static partial class FsaInterop
             using var rarc = new Rarc(stream);
             using var stage = new Stage(rarc);
             stage.Map.TileSheetId = tileSheetId;
+            // The single-player map (`mapNNN_1.csv`) is a separate CSV and is the
+            // one the game reads in single-player, so it must be updated too.
+            // Shadow-battle stages have no single-player map.
+            if (stage.MapSingleplayer != null)
+            {
+                stage.MapSingleplayer.TileSheetId = tileSheetId;
+            }
             return SerializeStage(stage);
         }
         catch
