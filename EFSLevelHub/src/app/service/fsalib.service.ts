@@ -449,7 +449,10 @@ export class FSALibService {
     }
 
     // Draw the full sheet on a neutral backdrop so transparent tiles read.
-    const target = new ImageBuffer(TILESET_COLUMNS * 16, Math.ceil(TILESET_COUNT / TILESET_COLUMNS) * 16);
+    const target = new ImageBuffer(
+      TILESET_COLUMNS * 16,
+      Math.ceil(TILESET_COUNT / TILESET_COLUMNS) * 16,
+    );
     target.fill(96, 96, 108, 255);
     for (let i = 0; i < TILESET_COUNT; i++) {
       renderer.drawTile(target, (i & 0xf) * 16, (i >> 4) * 16, i);
@@ -662,7 +665,8 @@ export class FSALibService {
   }
 
   /** Loads and caches the stage definitions FSALib has loaded from its assets. */
-  async loadStages(): Promise<Record<string, StageInfo>> {    if (!this.stagesPromise) {
+  async loadStages(): Promise<Record<string, StageInfo>> {
+    if (!this.stagesPromise) {
       this.stagesPromise = this.getFsa()
         .then((fsa) => {
           fsa.EnsureAssets();

@@ -135,9 +135,7 @@
           [class.border-slate-700]="currentThemeIndex() !== theme.index"
           [class.hover:bg-slate-700/50]="currentThemeIndex() !== theme.index"
         >
-          <div
-            class="h-24 w-full overflow-hidden rounded border border-slate-700 bg-slate-900"
-          >
+          <div class="h-24 w-full overflow-hidden rounded border border-slate-700 bg-slate-900">
             @if (themePreviews()[theme.index]; as preview) {
               <img
                 [src]="preview"

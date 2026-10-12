@@ -108,7 +108,9 @@ export class StageEditorService {
     await this.load(stageId);
 
     const savedAt = new Date();
-    this.logger.info(`StageEditor: saved stage "${stageId}" (tileset ${loaded.data.Map.TileSheetId}).`);
+    this.logger.info(
+      `StageEditor: saved stage "${stageId}" (tileset ${loaded.data.Map.TileSheetId}).`,
+    );
     return { bytes, savedAt };
   }
 

@@ -179,7 +179,11 @@ export class StagePage implements OnInit, OnDestroy {
   }
 
   /** Renders/caches the stage's preview images, showing the loading modal. */
-  private async generatePreviews(stage: StageData, bytes: Uint8Array, force = false): Promise<void> {
+  private async generatePreviews(
+    stage: StageData,
+    bytes: Uint8Array,
+    force = false,
+  ): Promise<void> {
     const id = this.stageId();
     this.generatingPreviews.set(true);
     this.previewMessage.set('Generating stage previews…');
