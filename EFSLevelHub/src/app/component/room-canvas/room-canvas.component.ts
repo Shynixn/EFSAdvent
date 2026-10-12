@@ -203,11 +203,7 @@ export class RoomCanvasComponent implements AfterViewInit {
     if (!ctx) {
       return;
     }
-    const image = new ImageData(
-      new Uint8ClampedArray(buffer.pixels),
-      buffer.width,
-      buffer.height,
-    );
+    const image = new ImageData(new Uint8ClampedArray(buffer.pixels), buffer.width, buffer.height);
     ctx.putImageData(image, 0, 0);
   }
 

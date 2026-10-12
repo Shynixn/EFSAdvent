@@ -264,12 +264,7 @@ export class StageRenderer {
    * @param layerIndex 0-7 = base layers, 8-15 = top layers.
    * @param gba        Use the GBA tileset (layer level 1) instead of the TV one.
    */
-  drawSingleLayer(
-    target: ImageBuffer,
-    roomIndex: number,
-    layerIndex: number,
-    gba = false,
-  ): void {
+  drawSingleLayer(target: ImageBuffer, roomIndex: number, layerIndex: number, gba = false): void {
     const room = this.stage.Rooms[roomIndex];
     const layer = room?.Layers[layerIndex];
     if (!layer) {
