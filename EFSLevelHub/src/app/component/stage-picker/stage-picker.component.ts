@@ -72,8 +72,7 @@ export class StagePickerComponent {
     const rows = this.stageRows();
     const matched = term
       ? rows.filter(
-          (row) =>
-            row.name.toLowerCase().includes(term) || row.author.toLowerCase().includes(term),
+          (row) => row.name.toLowerCase().includes(term) || row.author.toLowerCase().includes(term),
         )
       : rows;
     return sortItems(matched, this.sort());
