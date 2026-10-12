@@ -28,12 +28,6 @@ export const routes: Routes = [
     canActivate: [requiresGameFilesGuard],
   },
   {
-    path: 'my-stages/:stageId/room/:roomIndex',
-    loadComponent: () => import('./page/room-page/room-page').then((m) => m.RoomPage),
-    title: 'Room',
-    canActivate: [requiresGameFilesGuard],
-  },
-  {
     path: 'my-worlds',
     loadComponent: () => import('./page/my-worlds-page/my-worlds-page').then((m) => m.MyWorldsPage),
     title: 'My Worlds',

@@ -1,0 +1,47 @@
+<div class="flex flex-col gap-4">
+  @if (isLoading()) {
+    <p class="text-sm text-indigo-300">Loading room…</p>
+  } @else if (loadError()) {
+    <p class="rounded-lg bg-red-500/10 p-3 text-sm text-red-400">{{ loadError() }}</p>
+  } @else if (room(); as roomData) {
+    <div class="space-y-4">
+      <!-- Layer controls -->
+      <div class="flex flex-wrap items-center gap-4 text-sm">
+        <label class="flex items-center gap-2">
+          <span class="text-xs uppercase tracking-wide text-slate-400">Base layer</span>
+          <select
+            [value]="layerIndex()"
+            (change)="layerIndex.set(+$any($event.target).value)"
+            class="cursor-pointer rounded-lg border border-slate-700 bg-slate-800/70 px-2 py-1 text-slate-100"
+          >
+            @for (l of [0, 1, 2, 3, 4, 5, 6, 7]; track l) {
+              <option [value]="l">{{ l }}</option>
+            }
+          </select>
+        </label>
+
+        <label class="flex cursor-pointer items-center gap-2">
+          <input
+            type="checkbox"
+            class="accent-indigo-500"
+            [checked]="gba()"
+            (change)="gba.set($any($event.target).checked)"
+          />
+          <span class="text-xs uppercase tracking-wide text-slate-400">GBA layer</span>
+        </label>
+      </div>
+
+      <!-- Room canvas + tile selection -->
+      <app-room-canvas
+        [room]="roomData"
+        [index]="roomIndex"
+        [renderer]="renderer()"
+        [layerIndex]="layerIndex()"
+        [gba]="gba()"
+        [tile]="brushTile()"
+        (tileChanged)="onTileChanged($event)"
+        (tilePicked)="brushTile.set($event)"
+      />
+    </div>
+  }
+</div>

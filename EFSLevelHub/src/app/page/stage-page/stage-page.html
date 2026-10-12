@@ -8,14 +8,14 @@
         variant="ghost"
         color="slate"
         [iconOnly]="true"
-        title="Close stage"
+        [title]="activeRoom() != null ? 'Close room' : 'Close stage'"
         [icon]="'M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z'"
-        (clicked)="close()"
+        (clicked)="closeTop()"
       />
       <div class="min-w-0">
-        <h1 class="truncate text-lg font-semibold text-white">{{ stageName() }}</h1>
+        <h1 class="truncate text-lg font-semibold text-white">{{ headerTitle() }}</h1>
         <p class="text-xs text-slate-400">
-          Stage
+          {{ activeRoom() != null ? 'Room editor' : 'Stage' }}
           <span class="text-slate-600">·</span>
           <span>Last saved: {{ lastSavedLabel() }}</span>
         </p>
@@ -23,14 +23,14 @@
     </div>
 
     <div class="flex flex-shrink-0 items-center gap-2">
-      @if (dirty()) {
+      @if (hasUnsavedChanges()) {
         <span class="text-xs text-amber-400">Unsaved changes</span>
       }
       <app-button
         variant="primary"
         color="indigo"
         size="sm"
-        [disabled]="!dirty() || saving()"
+        [disabled]="!canSave()"
         (clicked)="save()"
       >
         {{ saving() ? 'Saving…' : 'Save' }}
@@ -45,6 +45,11 @@
         <p class="text-sm text-indigo-300">Loading stage…</p>
       } @else if (loadError()) {
         <p class="rounded-lg bg-red-500/10 p-3 text-sm text-red-400">{{ loadError() }}</p>
+      } @else if (hasActiveRoom()) {
+        <!-- Room editor: shown instead of the map grid + thumbnail. -->
+        <div class="mx-auto max-w-5xl">
+          <app-room-editor [stageId]="stageId()" [roomIndex]="activeRoom()!" />
+        </div>
       } @else if (map()) {
         <div class="mx-auto max-w-5xl space-y-6">
           <!-- Map grid -->
@@ -105,13 +110,15 @@
       }
     </div>
 
-    <!-- Toolbox -->
-    <aside class="w-56 shrink-0 space-y-3 border-l border-slate-800 bg-slate-900/60 p-4">
-      <h2 class="text-xs font-semibold uppercase tracking-wide text-slate-400">Toolbox</h2>
-      <app-button variant="outline" color="indigo" [fullWidth]="true" (clicked)="openTheme()">
-        Theme
-      </app-button>
-    </aside>
+    <!-- Toolbox (hidden while a room is open) -->
+    @if (!hasActiveRoom()) {
+      <aside class="w-56 shrink-0 space-y-3 border-l border-slate-800 bg-slate-900/60 p-4">
+        <h2 class="text-xs font-semibold uppercase tracking-wide text-slate-400">Toolbox</h2>
+        <app-button variant="outline" color="indigo" [fullWidth]="true" (clicked)="openTheme()">
+          Theme
+        </app-button>
+      </aside>
+    }
   </div>
 </div>
 

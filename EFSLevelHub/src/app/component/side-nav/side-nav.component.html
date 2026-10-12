@@ -120,19 +120,26 @@
                     <span class="flex-1 truncate">{{ stage.name }}</span>
                   </a>
 
-                  <!-- Open rooms, nested under their stage tab -->
+                  <!-- Open rooms, nested under their stage tab. Rooms are not
+                       routes (the editor is embedded in the stage page), so
+                       they open the editor via the room service. -->
                   @if (stage.rooms.length > 0) {
                     <ul class="mt-0.5 space-y-0.5 pl-6">
                       @for (room of stage.rooms; track room.index) {
                         <li>
-                          <a
-                            [routerLink]="['/my-stages', stage.id, 'room', room.index]"
-                            routerLinkActive="bg-indigo-500/15 text-white"
-                            class="flex items-center gap-2 rounded-md px-3 py-1 text-sm text-slate-400 transition hover:bg-slate-800 hover:text-white"
+                          <button
+                            type="button"
+                            (click)="openRoom(stage.id, room.index)"
+                            class="flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-1 text-left text-sm transition"
+                            [class.bg-indigo-500/15]="isRoomActive(stage.id, room.index)"
+                            [class.text-white]="isRoomActive(stage.id, room.index)"
+                            [class.text-slate-400]="!isRoomActive(stage.id, room.index)"
+                            [class.hover:bg-slate-800]="!isRoomActive(stage.id, room.index)"
+                            [class.hover:text-white]="!isRoomActive(stage.id, room.index)"
                           >
                             <span class="h-1 w-1 shrink-0 rounded-full bg-slate-600"></span>
                             <span class="flex-1 truncate">{{ room.name }}</span>
-                          </a>
+                          </button>
                         </li>
                       }
                     </ul>

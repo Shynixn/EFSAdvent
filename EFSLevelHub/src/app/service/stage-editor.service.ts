@@ -14,6 +14,12 @@ export interface LoadedStage {
   renderer: StageRenderer;
 }
 
+/** Identifies a room layer that has unsaved edits (written on save). */
+export interface DirtyLayer {
+  roomIndex: number;
+  layerIndex: number;
+}
+
 /**
  * StageEditorService
  * ------------------
@@ -37,6 +43,15 @@ export class StageEditorService {
 
   /** The currently loaded stage, if any. */
   readonly loaded = this.current.asReadonly();
+
+  /**
+   * Bumped every time a stage archive is saved (re-serialized). Editors use it
+   * to reload the freshly parsed data and drop references to stale objects.
+   */
+  private readonly saveCounter = signal(0);
+
+  /** Monotonic count of completed saves across all stages. */
+  readonly saveVersion = this.saveCounter.asReadonly();
 
   /**
    * Loads (or returns the cached) parsed stage + renderer for `stageId`.
@@ -73,28 +88,57 @@ export class StageEditorService {
   }
 
   /**
-   * Persists pending edits to a stage's archive by re-serializing it with the
-   * current in-memory `StageData` and writing it back to `/editor/stage/<id>.arc`.
+   * Persists pending edits to a stage's archive by re-serializing it and writing
+   * it back to `/editor/stage/<id>.arc`.
    *
-   * Right now the only persisted change is the stage's tileset
-   * (`Map.TileSheetId`), which lives in the map CSV header; the wasm re-writes
-   * the archive so the change survives a reload and stays in sync with the theme
-   * picked in the UI.
+   * Edits are applied to the archive only here (on save): the stage's tileset
+   * (`Map.TileSheetId`, stored in the map CSV headers) and every room layer the
+   * canvas marked dirty. Each step re-serializes the archive, so the output of
+   * one is fed into the next.
    *
+   * @param stageId     Stage to save.
+   * @param dirtyLayers Room layers edited since the last save (their tile arrays
+   *                    are read from the in-memory `StageData`). Defaults to none.
    * @returns The new archive bytes (and the timestamp they were written), or
    *          `null` when the stage is not loaded / the save failed.
    */
-  async save(stageId: string): Promise<{ bytes: Uint8Array; savedAt: Date } | null> {
+  async save(
+    stageId: string,
+    dirtyLayers: readonly DirtyLayer[] = [],
+  ): Promise<{ bytes: Uint8Array; savedAt: Date } | null> {
     const loaded = this.cache.get(stageId);
     if (!loaded) {
       this.logger.warn(`StageEditor: nothing to save for stage "${stageId}".`);
       return null;
     }
 
-    const bytes = await this.fsaLib.setStageTileSheet(loaded.arcBytes, loaded.data.Map.TileSheetId);
+    let bytes = await this.fsaLib.setStageTileSheet(
+      loaded.arcBytes,
+      loaded.data.Map.TileSheetId,
+    );
     if (!bytes) {
-      this.logger.error(`StageEditor: failed to serialize stage "${stageId}".`);
+      this.logger.error(`StageEditor: failed to serialize stage "${stageId}" (tileset).`);
       return null;
+    }
+
+    // Write back each edited room layer, chaining the re-serialized archive.
+    for (const { roomIndex, layerIndex } of dirtyLayers) {
+      const room = loaded.data.Rooms[roomIndex];
+      const tiles = room?.Layers[layerIndex]?.Tiles;
+      if (!tiles) {
+        this.logger.warn(
+          `StageEditor: skipping missing layer ${layerIndex} of room ${roomIndex} in "${stageId}".`,
+        );
+        continue;
+      }
+      const updated = await this.fsaLib.setRoomLayer(bytes, roomIndex, layerIndex, tiles);
+      if (!updated) {
+        this.logger.error(
+          `StageEditor: failed to serialize layer ${layerIndex} of room ${roomIndex} in "${stageId}".`,
+        );
+        return null;
+      }
+      bytes = updated;
     }
 
     await this.editor.writeEditorFile(stageArcFilePath(stageId), bytes);
@@ -107,9 +151,12 @@ export class StageEditorService {
     }
     await this.load(stageId);
 
+    this.saveCounter.update((n) => n + 1);
+
     const savedAt = new Date();
     this.logger.info(
-      `StageEditor: saved stage "${stageId}" (tileset ${loaded.data.Map.TileSheetId}).`,
+      `StageEditor: saved stage "${stageId}" ` +
+        `(tileset ${loaded.data.Map.TileSheetId}, ${dirtyLayers.length} room layer(s)).`,
     );
     return { bytes, savedAt };
   }

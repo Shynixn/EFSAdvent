@@ -4,10 +4,12 @@ import { Subscription } from 'rxjs';
 import { ButtonComponent } from '../../component/button/button.component';
 import { LoadingModalComponent } from '../../component/loading-modal/loading-modal.component';
 import { ModalComponent } from '../../component/modal/modal.component';
+import { RoomEditorComponent } from '../../component/room-editor/room-editor.component';
 import { StageService, StageFile } from '../../service/stage.service';
 import { StageTabsService } from '../../service/stage-tabs.service';
 import { StageEditorService } from '../../service/stage-editor.service';
 import { StagePreviewService } from '../../service/stage-preview.service';
+import { StageRoomService } from '../../service/stage-room.service';
 import { EditorService } from '../../service/editor.service';
 import { FSALibService } from '../../service/fsalib.service';
 import { LoggingService } from '../../service/logging.service';
@@ -26,7 +28,7 @@ import { TilesetTheme } from '../../entity/tileset.util';
  */
 @Component({
   selector: 'app-stage-page',
-  imports: [ButtonComponent, LoadingModalComponent, ModalComponent],
+  imports: [ButtonComponent, LoadingModalComponent, ModalComponent, RoomEditorComponent],
   templateUrl: './stage-page.html',
   styleUrl: './stage-page.css',
 })
@@ -35,6 +37,7 @@ export class StagePage implements OnInit, OnDestroy {
   private readonly stageTabs = inject(StageTabsService);
   private readonly stageEditor = inject(StageEditorService);
   private readonly stagePreview = inject(StagePreviewService);
+  private readonly stageRoom = inject(StageRoomService);
   private readonly editor = inject(EditorService);
   private readonly fsaLib = inject(FSALibService);
   private readonly route = inject(ActivatedRoute);
@@ -78,6 +81,20 @@ export class StagePage implements OnInit, OnDestroy {
   /** Error from preview generation, if any (shown instead of the thumbnail). */
   readonly previewError = signal('');
 
+  /**
+   * Room currently open in the embedded editor, or `null` when the map grid +
+   * thumbnail are shown instead. Backed by {@link StageRoomService} (plain
+   * shared state, not a route) so opening/closing a room never navigates and
+   * therefore never recreates this page.
+   */
+  readonly activeRoom = this.stageRoom.activeRoom;
+
+  /**
+   * Whether a room is open. Used for template guards because `activeRoom` can be
+   * `0` (the start room), which is falsy.
+   */
+  readonly hasActiveRoom = this.stageRoom.hasActiveRoom;
+
   /** Whether there are unsaved edits (e.g. a newly picked theme). */
   readonly dirty = signal(false);
   /** Whether a save is currently in flight. */
@@ -108,6 +125,22 @@ export class StagePage implements OnInit, OnDestroy {
   /** Display name shown in the header (falls back to the id). */
   readonly stageName = computed(() => this.stage()?.name ?? 'Stage');
 
+  /** Header title: the room when one is open, otherwise the stage name. */
+  readonly headerTitle = computed(() => {
+    const room = this.activeRoom();
+    return room == null ? this.stageName() : `${this.stageName()} · Room ${room}`;
+  });
+
+  /** Whether anything has unsaved edits (stage theme or the open room). */
+  readonly hasUnsavedChanges = computed(() => this.dirty() || this.stageRoom.dirty());
+
+  /**
+   * Whether the Save button is actionable. Saving is always allowed (it simply
+   * writes the current archive), except while a save is already running or the
+   * blocking preview-generation modal is up.
+   */
+  readonly canSave = computed(() => !this.saving() && !this.generatingPreviews());
+
   ngOnInit(): void {
     // React to the route param so switching between open stage tabs (which
     // reuses this component instance) reloads the selected stage.
@@ -126,6 +159,8 @@ export class StagePage implements OnInit, OnDestroy {
   /** Sets the active stage, opens its tab and loads its archive. */
   private async loadStageById(id: string): Promise<void> {
     this.stageId.set(id);
+    // Tell the room service which stage's selection is now on screen.
+    this.stageRoom.setActiveStage(id);
     this.thumbnailUrl.set(null);
     this.previewError.set('');
     // Theme previews are per-stage (the list is global, the thumbnails come from
@@ -264,12 +299,38 @@ export class StagePage implements OnInit, OnDestroy {
     return !!layout && x === layout.StartX && y === layout.StartY;
   }
 
-  /** Opens a room on the room page (registers a nested tab). */
+  /** Opens a room in the embedded editor (registers a nested tab). */
   openRoom(roomIndex: number): void {
     if (roomIndex < 0 || roomIndex === this.emptyRoomValue()) {
       return;
     }
-    void this.router.navigate(['/my-stages', this.stageId(), 'room', roomIndex]);
+    const stageId = this.stageId();
+    this.stageTabs.openRoom(stageId, roomIndex);
+    // Plain state, no navigation — navigating would recreate this page (flash).
+    this.stageRoom.setActiveStage(stageId);
+    this.stageRoom.open(stageId, roomIndex);
+  }
+
+  /** Closes the embedded room editor and returns to the map grid + thumbnail. */
+  closeRoom(): void {
+    const stageId = this.stageId();
+    const index = this.activeRoom();
+    if (index != null) {
+      this.stageTabs.closeRoom(stageId, index);
+    }
+    this.stageRoom.close(stageId);
+  }
+
+  /**
+   * The header "x": closes the open room first, and only closes the whole
+   * stage once no room is open.
+   */
+  closeTop(): void {
+    if (this.activeRoom() != null) {
+      this.closeRoom();
+    } else {
+      this.close();
+    }
   }
 
   /** Opens the theme picker modal and (lazily) generates tileset previews. */
@@ -351,17 +412,20 @@ export class StagePage implements OnInit, OnDestroy {
   /**
    * Applies pending edits back to the stage's archive and refreshes the derived
    * previews (thumbnail + room PNGs) so they reflect the new theme.
+   *
+   * Saving is always permitted — even with no pending changes it simply
+   * re-writes the current archive — so the button is never a dead end.
    */
   async save(): Promise<void> {
     const id = this.stageId();
-    if (this.saving() || !this.dirty()) {
+    if (this.saving() || this.generatingPreviews()) {
       return;
     }
 
     this.saving.set(true);
     this.previewError.set('');
     try {
-      const result = await this.stageEditor.save(id);
+      const result = await this.stageEditor.save(id, this.stageRoom.dirtyLayers());
       if (!result) {
         this.previewError.set('Failed to save the stage.');
         return;
@@ -370,6 +434,8 @@ export class StagePage implements OnInit, OnDestroy {
       await this.stageService.markSaved(id, result.savedAt);
       this.lastSaved.set(result.savedAt.toISOString());
       this.dirty.set(false);
+      this.stageRoom.setDirty(false);
+      this.stageRoom.clearDirtyLayers();
 
       // The archive changed, so regenerate previews and refresh the thumbnail.
       const loaded = this.stageEditor.get(id);
@@ -390,6 +456,8 @@ export class StagePage implements OnInit, OnDestroy {
   close(): void {
     const id = this.stageId();
     this.stageTabs.close(id);
+    // Drop the stage's room selection so reopening it starts on the map grid.
+    this.stageRoom.close(id);
     void this.router.navigate(['/my-stages']);
   }
 }

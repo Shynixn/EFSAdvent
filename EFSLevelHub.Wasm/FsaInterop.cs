@@ -169,6 +169,69 @@ public static partial class FsaInterop
         }
     }
 
+    /// <summary>
+    /// Replaces one room layer's tiles in a stage archive and re-serializes it.
+    /// </summary>
+    /// <remarks>
+    /// The editable room canvas paints individual tiles, so writing back just the
+    /// affected layer (rather than the whole stage graph) keeps the round-trip
+    /// small and avoids clobbering any data the browser does not model. The
+    /// layer is written through FSALib's <see cref="Room.SaveToRarc"/> (via
+    /// <see cref="SerializeStage"/>) so the SZS-compressed layer files keep the
+    /// format the game expects.
+    /// </remarks>
+    /// <param name="arcData">Raw bytes of the stage archive.</param>
+    /// <param name="roomIndex">Room whose layer is being replaced.</param>
+    /// <param name="layerIndex">Layer index (0-7 base, 8-15 top).</param>
+    /// <param name="tilesJson">
+    /// JSON array of flat row-major tile values (32×32 = 1024 entries). Shorter
+    /// input is rejected; extra entries are ignored. Passed as JSON because
+    /// <c>ushort[]</c> is not supported by the source-generated JS interop.
+    /// </param>
+    /// <returns>The re-serialized archive bytes, or an empty array on failure.</returns>
+    [JSExport]
+    public static byte[] SetRoomLayer(byte[] arcData, int roomIndex, int layerIndex, string tilesJson)
+    {
+        try
+        {
+            ushort[]? tiles;
+            try
+            {
+                tiles = JsonSerializer.Deserialize<ushort[]>(tilesJson, JsonOptions);
+            }
+            catch
+            {
+                return Array.Empty<byte>();
+            }
+
+            if (tiles == null || tiles.Length < Layer.TILES)
+            {
+                return Array.Empty<byte>();
+            }
+
+            using var stream = new MemoryStream(arcData, writable: false);
+            using var rarc = new Rarc(stream);
+            using var stage = new Stage(rarc);
+
+            if (roomIndex < 0 || roomIndex >= stage.Rooms.Length)
+            {
+                return Array.Empty<byte>();
+            }
+            Room? room = stage.Rooms[roomIndex];
+            if (room == null || layerIndex < 0 || layerIndex >= room.Layers.Length)
+            {
+                return Array.Empty<byte>();
+            }
+
+            room.Layers[layerIndex].SetTiles(tiles.AsSpan(0, Layer.TILES), 0);
+            return SerializeStage(stage);
+        }
+        catch
+        {
+            return Array.Empty<byte>();
+        }
+    }
+
     /// <summary>Liveness probe returning the FSALib version.</summary>
     [JSExport]
     public static string GetVersion()

@@ -27,6 +27,12 @@ interface DotnetExports {
         RetargetStageIndex(arcData: Uint8Array, targetIndex: number): Uint8Array;
         MergeStageContent(targetArcData: Uint8Array, sourceArcData: Uint8Array): Uint8Array;
         SetStageTileSheet(arcData: Uint8Array, tileSheetId: number): Uint8Array;
+        SetRoomLayer(
+          arcData: Uint8Array,
+          roomIndex: number,
+          layerIndex: number,
+          tilesJson: string,
+        ): Uint8Array;
         ListArchiveFiles(arcData: Uint8Array): string;
         ReadArchiveFile(arcData: Uint8Array, path: string): Uint8Array;
         Unzip(zipData: Uint8Array): string;
@@ -213,6 +219,31 @@ export class FSALibService {
   async setStageTileSheet(arcData: Uint8Array, tileSheetId: number): Promise<Uint8Array | null> {
     const fsa = await this.getFsa();
     const result = fsa.SetStageTileSheet(arcData, tileSheetId);
+    return result && result.byteLength > 0 ? result : null;
+  }
+
+  /**
+   * Replaces a single room layer's tiles and re-serializes the stage archive.
+   *
+   * Used when saving the room canvas: the edited layer is handed to FSALib,
+   * which writes the SZS-compressed layer files back into the archive. Only the
+   * affected layer is replaced, so untouched data is preserved byte-for-byte
+   * semantics-wise (it is re-serialized, not copied).
+   *
+   * @param arcData    Raw bytes of the stage archive.
+   * @param roomIndex  Room whose layer is being replaced.
+   * @param layerIndex Layer index (0-7 base, 8-15 top).
+   * @param tiles      Flat row-major tile values (1024 entries, 32×32).
+   * @returns The re-serialized archive bytes, or null on failure.
+   */
+  async setRoomLayer(
+    arcData: Uint8Array,
+    roomIndex: number,
+    layerIndex: number,
+    tiles: readonly number[],
+  ): Promise<Uint8Array | null> {
+    const fsa = await this.getFsa();
+    const result = fsa.SetRoomLayer(arcData, roomIndex, layerIndex, JSON.stringify(tiles));
     return result && result.byteLength > 0 ? result : null;
   }
 

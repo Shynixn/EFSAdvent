@@ -1,8 +1,9 @@
 import { Component, inject, signal } from '@angular/core';
-import { RouterLink, RouterLinkActive } from '@angular/router';
+import { Router, RouterLink, RouterLinkActive } from '@angular/router';
 import { GameStateService } from '../../service/game-state.service';
 import { WorldTabsService } from '../../service/world-tabs.service';
 import { StageTabsService } from '../../service/stage-tabs.service';
+import { StageRoomService } from '../../service/stage-room.service';
 
 /** A single entry in the application's side navigation. */
 export interface NavItem {
@@ -30,6 +31,8 @@ export class SideNavComponent {
   private readonly gameState = inject(GameStateService);
   private readonly worldTabs = inject(WorldTabsService);
   private readonly stageTabs = inject(StageTabsService);
+  private readonly stageRoom = inject(StageRoomService);
+  private readonly router = inject(Router);
 
   /** Whether the rail is collapsed to icons only. */
   readonly collapsed = signal(false);
@@ -76,6 +79,27 @@ export class SideNavComponent {
   /** Toggles the collapsed (icon-only) state. */
   toggle(): void {
     this.collapsed.update((value) => !value);
+  }
+
+  /**
+   * Opens a room in the stage page's embedded editor.
+   *
+   * Rooms are not routes (that would recreate the stage page). If the room
+   * belongs to the stage currently on screen the editor simply swaps in;
+   * otherwise we navigate to that stage first (the room service drives the
+   * selection once the stage page is mounted).
+   */
+  async openRoom(stageId: string, roomIndex: number): Promise<void> {
+    if (this.stageRoom.activeStageId() !== stageId) {
+      await this.router.navigate(['/my-stages', stageId]);
+    }
+    this.stageRoom.setActiveStage(stageId);
+    this.stageRoom.open(stageId, roomIndex);
+  }
+
+  /** Whether the given room is the one currently open in the editor. */
+  isRoomActive(stageId: string, roomIndex: number): boolean {
+    return this.stageRoom.activeStageId() === stageId && this.stageRoom.isOpen(stageId, roomIndex);
   }
 
   /**
