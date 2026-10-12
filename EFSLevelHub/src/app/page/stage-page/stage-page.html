@@ -105,26 +105,57 @@
           }
         </section>
 
-        <!-- Rendered room -->
-        @if (selectedRoom() !== null) {
-          <section class="space-y-2">
-            <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-400">
-              Room {{ selectedRoom() }}
-            </h2>
-            @if (renderError()) {
-              <p class="rounded-lg bg-red-500/10 p-3 text-sm text-red-400">{{ renderError() }}</p>
-            } @else if (isRenderingRoom()) {
-              <p class="text-sm text-indigo-300">Rendering room…</p>
-            } @else if (roomRenderUrl(); as url) {
-              <div class="overflow-auto rounded-xl border border-slate-700 bg-slate-900/60 p-2">
-                <img
-                  [src]="url"
-                  [alt]="'Room ' + selectedRoom()"
-                  class="max-h-[32rem] max-w-full"
-                  style="image-rendering: pixelated"
+        <!-- Room editor (opens on room click) -->
+        @if (editorRoom(); as room) {
+          <section class="space-y-3">
+            <div class="flex items-center justify-between gap-4">
+              <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-400">
+                Edit Room {{ selectedRoom() }}
+              </h2>
+              @if (dirty()) {
+                <span class="text-xs font-medium text-amber-400">Unsaved changes</span>
+              }
+            </div>
+
+            <!-- Layer controls -->
+            <div class="flex flex-wrap items-center gap-4 text-sm">
+              <label class="flex items-center gap-2">
+                <span class="text-xs uppercase tracking-wide text-slate-400">Base layer</span>
+                <select
+                  [value]="editorLayer()"
+                  (change)="editorLayer.set(+$any($event.target).value)"
+                  class="cursor-pointer rounded-lg border border-slate-700 bg-slate-800/70 px-2 py-1 text-slate-100"
+                >
+                  @for (l of [0, 1, 2, 3, 4, 5, 6, 7]; track l) {
+                    <option [value]="l">{{ l }}</option>
+                  }
+                </select>
+              </label>
+
+              <label class="flex cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  class="accent-indigo-500"
+                  [checked]="editorGba()"
+                  (change)="editorGba.set($any($event.target).checked)"
                 />
-              </div>
-            }
+                <span class="text-xs uppercase tracking-wide text-slate-400">GBA layer</span>
+              </label>
+
+              @if (renderError()) {
+                <span class="text-sm text-red-400">{{ renderError() }}</span>
+              }
+            </div>
+
+            <app-room-canvas
+              [room]="room"
+              [index]="selectedRoom() ?? -1"
+              [renderer]="editorRenderer()"
+              [layerIndex]="editorLayer()"
+              [gba]="editorGba()"
+              [tile]="brushTile()"
+              (tileChanged)="onTileChanged($event)"
+            />
           </section>
         }
       </div>

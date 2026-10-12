@@ -3,13 +3,17 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { ButtonComponent } from '../../component/button/button.component';
 import { LoadingModalComponent } from '../../component/loading-modal/loading-modal.component';
+import {
+  RoomCanvasComponent,
+  RoomTileChange,
+} from '../../component/room-canvas/room-canvas.component';
 import { StageService, StageFile, stageArcFilePath } from '../../service/stage.service';
 import { StageTabsService } from '../../service/stage-tabs.service';
 import { StagePreviewService } from '../../service/stage-preview.service';
 import { EditorService } from '../../service/editor.service';
 import { FSALibService } from '../../service/fsalib.service';
 import { LoggingService } from '../../service/logging.service';
-import { MapLayoutData, StageData } from '../../entity/fsalib.entity';
+import { MapLayoutData, RoomData, StageData } from '../../entity/fsalib.entity';
 import { ImageBuffer } from '../../service/render/gba-tile-renderer';
 import {
   RenderOptions,
@@ -29,7 +33,7 @@ import {
  */
 @Component({
   selector: 'app-stage-page',
-  imports: [ButtonComponent, LoadingModalComponent],
+  imports: [ButtonComponent, LoadingModalComponent, RoomCanvasComponent],
   templateUrl: './stage-page.html',
   styleUrl: './stage-page.css',
 })
@@ -68,6 +72,21 @@ export class StagePage implements OnInit, OnDestroy {
   readonly generatingPreviews = signal(false);
   /** Status message shown in the preview-generation modal. */
   readonly previewMessage = signal('Preparing previews…');
+
+  // --- Room editor state ----------------------------------------------------
+
+  /** The room currently open in the editor (null when none). */
+  readonly editorRoom = signal<RoomData | null>(null);
+  /** Renderer used by the editor canvas (built lazily). */
+  readonly editorRenderer = signal<StageRenderer | null>(null);
+  /** Active layer being edited (0-7 base, 8-15 top). */
+  readonly editorLayer = signal(0);
+  /** Whether the editor draws the GBA tileset/layers. */
+  readonly editorGba = signal(false);
+  /** Tile value painted by the editor. */
+  readonly brushTile = signal(1);
+  /** Whether the stage has unsaved edits. */
+  readonly dirty = signal(false);
 
   /** Blob URL of the generated thumbnail (all rooms concatenated), if any. */
   readonly thumbnailUrl = signal<string | null>(null);
@@ -149,6 +168,10 @@ export class StagePage implements OnInit, OnDestroy {
           `(map ${stage.Map.Index}, ${stage.Map.XDimension}x${stage.Map.YDimension}).`,
       );
 
+      // Build the shared renderer now (used by the room editor + previews) so
+      // the tileset/palette is ready before any room is opened.
+      void this.prepareRenderer(stage, bytes);
+
       // Generate the room previews + thumbnail (blocking modal) when missing.
       void this.generatePreviews(stage, bytes);
     } catch (error) {
@@ -156,6 +179,19 @@ export class StagePage implements OnInit, OnDestroy {
       this.logger.error(`StagePage: failed to load stage "${id}"`, error);
     } finally {
       this.isLoading.set(false);
+    }
+  }
+
+  /** Builds the shared renderer and pre-loads its tileset on stage load. */
+  private async prepareRenderer(stage: StageData, bytes: Uint8Array): Promise<void> {
+    try {
+      if (!this.stageRenderer) {
+        this.stageRenderer = await this.fsaLib.createStageRenderer(stage, bytes);
+      }
+      await this.stageRenderer.prepareTileset();
+      this.editorRenderer.set(this.stageRenderer);
+    } catch (error) {
+      this.logger.error(`StagePage: failed to build the stage renderer`, error);
     }
   }
 
@@ -235,13 +271,34 @@ export class StagePage implements OnInit, OnDestroy {
     return !!layout && x === layout.StartX && y === layout.StartY;
   }
 
-  /** Selects a room and renders it. */
+  /** Selects a room: shows its preview and opens it in the room editor. */
   selectRoom(roomIndex: number): void {
     if (roomIndex < 0 || roomIndex === this.emptyRoomValue()) {
       return;
     }
     this.selectedRoom.set(roomIndex);
     void this.renderRoom(roomIndex);
+    this.openRoomEditor(roomIndex);
+  }
+
+  /**
+   * Opens a room in the editor canvas. The renderer is built on stage load
+   * ({@link prepareRenderer}); this only selects the room.
+   */
+  private openRoomEditor(roomIndex: number): void {
+    const stage = this.stageData();
+    if (!stage) {
+      return;
+    }
+    this.editorRoom.set(stage.Rooms[roomIndex] ?? null);
+  }
+
+  /** Applies a tile edit from the room editor and marks the stage dirty. */
+  onTileChanged(change: RoomTileChange): void {
+    this.dirty.set(true);
+    this.logger.debug(
+      `StagePage: tile edit layer ${change.layerIndex} (${change.x},${change.y}) = ${change.tile}`,
+    );
   }
 
   /**

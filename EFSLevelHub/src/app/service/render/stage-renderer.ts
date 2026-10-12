@@ -37,6 +37,11 @@ export enum RenderOptions {
 const LAYER_DIMENSION = 32;
 const TV_HEIGHT = 24;
 
+/** The tileset holds 0x400 (1024) 16×16 tiles, laid out as a 16×64 sheet. */
+export const TILESET_COLUMNS = 16;
+export const TILESET_ROWS = 64;
+export const TILESET_COUNT = TILESET_COLUMNS * TILESET_ROWS;
+
 /** Index of the palette whose entries 8-10 carry environment transparency. */
 const ENVIRONMENT_PALETTE = 13;
 
@@ -101,6 +106,9 @@ export class StageRenderer {
   private currentTilesetIndex = -1;
   private currentSobIndex = -1;
   private layoutLoaded = false;
+
+  /** In-flight tileset load, so concurrent callers await the same load. */
+  private tilesetPromise: Promise<void> | null = null;
 
   constructor(
     private readonly stage: StageData,
@@ -238,6 +246,57 @@ export class StageRenderer {
     }
   }
 
+  // --- Editor helpers -------------------------------------------------------
+  // Everything below is used by the room editor (`room-canvas`) to draw a single
+  // layer (without actors/overlays) and to render the tileset for tile picking.
+
+  /** Ensures the tileset for the stage's tilesheet is loaded. */
+  async prepareTileset(): Promise<void> {
+    await this.ensureTileset(this.stage.Map.TileSheetId);
+  }
+
+  /**
+   * Draws one layer of a room only (no actors or overlay), for editing.
+   *
+   * @param target     Destination (expected [`VISIBLE_ROOM_WIDTH`] ×
+   *                   [`VISIBLE_ROOM_HEIGHT`]).
+   * @param roomIndex  Room to draw.
+   * @param layerIndex 0-7 = base layers, 8-15 = top layers.
+   * @param gba        Use the GBA tileset (layer level 1) instead of the TV one.
+   */
+  drawSingleLayer(
+    target: ImageBuffer,
+    roomIndex: number,
+    layerIndex: number,
+    gba = false,
+  ): void {
+    const room = this.stage.Rooms[roomIndex];
+    const layer = room?.Layers[layerIndex];
+    if (!layer) {
+      return;
+    }
+    this.drawLayer(target, gba ? this.tilesetGBA : this.tilesetTV, layer);
+  }
+
+  /** Draws one 16×16 tile from the tileset at (x, y) — used for tile previews. */
+  drawTilesetTile(target: ImageBuffer, x: number, y: number, tileIndex: number, gba = false): void {
+    (gba ? this.tilesetGBA : this.tilesetTV).drawTile(target, x, y, tileIndex);
+  }
+
+  /**
+   * Renders the entire tileset into a [`TILESET_COLUMNS` × `TILESET_ROWS`] grid
+   * of 16×16 tiles (256×1024 px), for the room editor's tile palette. Mirrors
+   * `TilesetRenderer.Draw(target)` in FSALib.
+   */
+  drawTileset(target: ImageBuffer, gba = false): void {
+    const renderer = gba ? this.tilesetGBA : this.tilesetTV;
+    for (let i = 0; i < TILESET_COUNT; i++) {
+      const x = (i & 0xf) * TILE_SIZE;
+      const y = (i >> 4) * TILE_SIZE;
+      renderer.drawTile(target, x, y, i);
+    }
+  }
+
   /**
    * Draws a single actor.
    *
@@ -320,10 +379,20 @@ export class StageRenderer {
   /** Loads the tileset + palette for `index` if not already active. */
   private async ensureTileset(index: number): Promise<void> {
     if (this.currentTilesetIndex === index) {
+      // A load for this tileset is done or in flight; await it if needed.
+      if (this.tilesetPromise) {
+        await this.tilesetPromise;
+      }
       return;
     }
     this.currentTilesetIndex = index;
+    this.tilesetPromise = this.loadTileset(index);
+    await this.tilesetPromise;
+    this.tilesetPromise = null;
+  }
 
+  /** Performs the actual tileset/palette load for `index`. */
+  private async loadTileset(index: number): Promise<void> {
     const info = this.tilesets[String(index)];
     if (!info) {
       return;
