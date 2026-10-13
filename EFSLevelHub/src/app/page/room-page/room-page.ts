@@ -13,7 +13,10 @@ import { Subscription } from 'rxjs';
 import { ButtonComponent } from '../../component/button/button.component';
 import { SystemColumnComponent } from '../../component/system-column/system-column.component';
 import { ToolboxColumnComponent } from '../../component/toolbox-column/toolbox-column.component';
-import { RoomCanvasComponent, RoomTileChange } from '../../component/room-canvas/room-canvas.component';
+import {
+  RoomCanvasComponent,
+  RoomTileChange,
+} from '../../component/room-canvas/room-canvas.component';
 import { ThemePickerComponent } from '../../component/theme-picker/theme-picker.component';
 import { LoadingOverlayComponent } from '../../component/loading-overlay/loading-overlay.component';
 import { StageService } from '../../service/stage.service';

@@ -140,7 +140,9 @@ export class TilesetThemeService {
       loaded.data.Map.TileSheetId = theme.index;
     }
     this.setSelected(stageId, theme.index);
-    this.logger.info(`TilesetTheme: "${theme.name}" (tileset ${theme.index}) applied to "${stageId}".`);
+    this.logger.info(
+      `TilesetTheme: "${theme.name}" (tileset ${theme.index}) applied to "${stageId}".`,
+    );
     return true;
   }
 }
