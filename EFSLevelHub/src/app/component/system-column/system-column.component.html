@@ -1,0 +1,24 @@
+<!-- Left column (System): flush against the side nav (no spacing). -->
+<aside class="flex h-full w-full flex-col overflow-y-auto border-r border-slate-800 bg-slate-900/60">
+  <h2
+    class="border-b border-slate-800 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-400"
+  >
+    System
+  </h2>
+
+  <div class="flex-1 space-y-3 px-4 py-4">
+    @if (stage) {
+      <div class="overflow-auto">
+        <app-map-grid
+          [stage]="stage"
+          [selectedRoom]="selectedRoom"
+          [compact]="true"
+          (roomSelected)="roomSelected.emit($event)"
+        />
+      </div>
+      <p class="text-[10px] text-slate-500">Green ring = start room. Click to swap.</p>
+    } @else {
+      <p class="text-xs text-slate-500">Loading…</p>
+    }
+  </div>
+</aside>

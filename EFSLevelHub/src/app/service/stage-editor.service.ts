@@ -1,4 +1,4 @@
-import { Injectable, inject, signal } from '@angular/core';
+import { Injectable, computed, inject, signal } from '@angular/core';
 import { EditorService } from './editor.service';
 import { FSALibService } from './fsalib.service';
 import { LoggingService } from './logging.service';
@@ -52,6 +52,46 @@ export class StageEditorService {
 
   /** Monotonic count of completed saves across all stages. */
   readonly saveVersion = this.saveCounter.asReadonly();
+
+  /**
+   * Stages with unsaved edits (tile changes and/or a theme change), keyed by
+   * stage id. A stage is marked dirty when an editor mutates it and cleared on
+   * a successful save — this drives the "unsaved changes" prompts at the stage
+   * level (refresh / close a stage), shared by the stage and room pages.
+   */
+  private readonly dirtyStages = signal<Record<string, boolean>>({});
+
+  /** Whether the given stage has unsaved edits. */
+  isDirty(stageId: string): boolean {
+    return this.dirtyStages()[stageId] === true;
+  }
+
+  /** Whether any stage has unsaved edits. */
+  readonly hasAnyDirty = computed(() => Object.values(this.dirtyStages()).some(Boolean));
+
+  /** Marks (or clears) a stage's unsaved-edit flag. */
+  setDirty(stageId: string, dirty: boolean): void {
+    if (!stageId) {
+      return;
+    }
+    this.dirtyStages.update((map) => {
+      if ((map[stageId] === true) === dirty) {
+        return map;
+      }
+      const next = { ...map };
+      if (dirty) {
+        next[stageId] = true;
+      } else {
+        delete next[stageId];
+      }
+      return next;
+    });
+  }
+
+  /** Clears the unsaved-edit flag for a stage. */
+  clearDirty(stageId: string): void {
+    this.setDirty(stageId, false);
+  }
 
   /**
    * Loads (or returns the cached) parsed stage + renderer for `stageId`.
@@ -112,10 +152,7 @@ export class StageEditorService {
       return null;
     }
 
-    let bytes = await this.fsaLib.setStageTileSheet(
-      loaded.arcBytes,
-      loaded.data.Map.TileSheetId,
-    );
+    let bytes = await this.fsaLib.setStageTileSheet(loaded.arcBytes, loaded.data.Map.TileSheetId);
     if (!bytes) {
       this.logger.error(`StageEditor: failed to serialize stage "${stageId}" (tileset).`);
       return null;
@@ -151,6 +188,7 @@ export class StageEditorService {
     }
     await this.load(stageId);
 
+    this.setDirty(stageId, false);
     this.saveCounter.update((n) => n + 1);
 
     const savedAt = new Date();

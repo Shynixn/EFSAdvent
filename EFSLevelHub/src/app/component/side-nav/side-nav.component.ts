@@ -82,19 +82,17 @@ export class SideNavComponent {
   }
 
   /**
-   * Opens a room in the stage page's embedded editor.
+   * Opens a room in its dedicated room page.
    *
-   * Rooms are not routes (that would recreate the stage page). If the room
-   * belongs to the stage currently on screen the editor simply swaps in;
-   * otherwise we navigate to that stage first (the room service drives the
-   * selection once the stage page is mounted).
+   * Rooms are routed at `/my-stages/:stageId/rooms/:roomIndex`, so opening one
+   * navigates there directly (registering the room tab and marking the stage
+   * active so the nav highlights it).
    */
   async openRoom(stageId: string, roomIndex: number): Promise<void> {
-    if (this.stageRoom.activeStageId() !== stageId) {
-      await this.router.navigate(['/my-stages', stageId]);
-    }
+    this.stageTabs.openRoom(stageId, roomIndex);
     this.stageRoom.setActiveStage(stageId);
     this.stageRoom.open(stageId, roomIndex);
+    await this.router.navigate(['/my-stages', stageId, 'rooms', roomIndex]);
   }
 
   /** Whether the given room is the one currently open in the editor. */

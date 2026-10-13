@@ -107,6 +107,12 @@ export class RoomCanvasComponent implements AfterViewInit {
     this._tile = value;
   }
 
+  /**
+   * Whether the tileset palette (manual tile picker) is shown. The room editor
+   * hides it behind its "Advanced" section for advanced/manual use cases.
+   */
+  @Input() showPalette = true;
+
   /** Emits each tile edit as it is painted. */
   @Output() tileChanged = new EventEmitter<RoomTileChange>();
 

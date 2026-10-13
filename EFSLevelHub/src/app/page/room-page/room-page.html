@@ -1,0 +1,123 @@
+<div class="flex h-full flex-col">
+  <!-- Action bar -->
+  <header
+    class="flex items-center justify-between gap-4 border-b border-slate-800 bg-slate-900/80 px-6 py-3"
+  >
+    <div class="flex min-w-0 items-center gap-2">
+      <app-button
+        variant="ghost"
+        color="slate"
+        [iconOnly]="true"
+        title="Close room"
+        [icon]="'M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z'"
+        (clicked)="close()"
+      />
+      <div class="min-w-0">
+        <h1 class="truncate text-lg font-semibold text-white">{{ headerTitle() }}</h1>
+        <p class="text-xs text-slate-400">
+          Room editor
+          <span class="text-slate-600">·</span>
+          <span>Last saved: {{ lastSavedLabel() }}</span>
+        </p>
+      </div>
+    </div>
+
+    <div class="flex flex-shrink-0 items-center gap-2">
+      @if (dirty()) {
+        <span class="text-xs text-amber-400">Unsaved changes</span>
+      }
+      <app-button
+        variant="primary"
+        color="indigo"
+        [disabled]="!canSave()"
+        [icon]="'M4 4a2 2 0 00-2 2v8a2 2 0 002 2h12a2 2 0 002-2V7.414A2 2 0 0017.414 6L14 2.586A2 2 0 0012.586 2H4zm0 2h8v3a1 1 0 001 1h4v6H4V6zm2 7v-2h8v2H6z'"
+        (clicked)="save()"
+      >
+        {{ saving() ? 'Saving…' : 'Save' }}
+      </app-button>
+    </div>
+  </header>
+
+  <!-- Content: left System column · room canvas · right toolbox -->
+  <div class="flex min-h-0 flex-1 items-stretch">
+    <!-- Left column (System): wide rail, flush against the side nav (no spacing) -->
+    <div class="w-[28rem] shrink-0">
+      <app-system-column
+        [stage]="stageData()"
+        [selectedRoom]="roomIndex()"
+        (roomSelected)="selectRoom($event)"
+      />
+    </div>
+
+    <!-- Room canvas + layer controls (hugs the canvas; small black gaps to the sides) -->
+    <div class="min-h-0 shrink-0 overflow-auto bg-slate-950 p-2">
+      @if (loadError()) {
+        <p class="rounded-lg bg-red-500/10 p-3 text-sm text-red-400">{{ loadError() }}</p>
+      } @else if (room(); as roomData) {
+        <div class="space-y-3">
+          <!-- Layer controls -->
+          <div class="flex flex-wrap items-center gap-4 text-sm">
+            <label class="flex items-center gap-2">
+              <span class="text-xs uppercase tracking-wide text-slate-400">Base layer</span>
+              <select
+                [value]="layerIndex()"
+                (change)="layerIndex.set(+$any($event.target).value)"
+                class="cursor-pointer rounded-lg border border-slate-700 bg-slate-800/70 px-2 py-1 text-slate-100"
+              >
+                @for (l of [0, 1, 2, 3, 4, 5, 6, 7]; track l) {
+                  <option [value]="l">{{ l }}</option>
+                }
+              </select>
+            </label>
+
+            <label class="flex cursor-pointer items-center gap-2">
+              <input
+                type="checkbox"
+                class="accent-indigo-500"
+                [checked]="gba()"
+                (change)="gba.set($any($event.target).checked)"
+              />
+              <span class="text-xs uppercase tracking-wide text-slate-400">GBA layer</span>
+            </label>
+
+            <span class="ml-auto font-mono text-xs text-slate-500">Room {{ roomIndex() }}</span>
+          </div>
+
+          <!-- Room canvas + optional (manual) tile palette -->
+          <app-room-canvas
+            [room]="roomData"
+            [index]="roomIndex()"
+            [renderer]="renderer()"
+            [layerIndex]="layerIndex()"
+            [gba]="gba()"
+            [tile]="brushTile()"
+            [showPalette]="advancedOpen()"
+            (tileChanged)="onTileChanged($event)"
+            (tilePicked)="brushTile.set($event)"
+          />
+        </div>
+      }
+    </div>
+
+    <!-- Toolbox -->
+    <div class="w-48 shrink-0">
+      <app-toolbox-column
+        [themeName]="themeName()"
+        [brushTile]="brushTile()"
+        (themeClicked)="openTheme()"
+        (advancedOpenChange)="advancedOpen.set($event)"
+      />
+    </div>
+  </div>
+</div>
+
+<!-- Theme picker modal -->
+<app-theme-picker
+  [open]="themeOpen()"
+  [currentIndex]="themeIndex()"
+  (closed)="closeTheme()"
+  (themeSelected)="selectTheme($event)"
+/>
+
+<!-- Semi-transparent loading overlay -->
+<app-loading-overlay [open]="isLoading()" message="Loading..." />

@@ -1,0 +1,50 @@
+<!-- Right column (Toolbox). -->
+<aside class="flex h-full w-full flex-col overflow-y-auto border-l border-slate-800 bg-slate-900/60">
+  <h2
+    class="border-b border-slate-800 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-400"
+  >
+    Toolbox
+  </h2>
+
+  <div class="space-y-3 p-4">
+    <!-- Stage setting: theme (shared across all open rooms of this stage) -->
+    <div class="space-y-1">
+      <p class="text-xs uppercase tracking-wide text-slate-500">Stage setting</p>
+      <button
+        type="button"
+        (click)="themeClicked.emit()"
+        class="flex w-full cursor-pointer items-center justify-between gap-2 rounded-lg border border-slate-700 bg-slate-800/70 px-3 py-2 text-left transition hover:border-indigo-400 hover:bg-slate-700/60"
+        [title]="themeName"
+      >
+        <span class="text-xs text-slate-400">Theme</span>
+        <span class="truncate text-sm text-slate-100">{{ themeName }}</span>
+      </button>
+      <p class="text-[10px] text-slate-500">
+        Shared across every open room of this stage; applied on save.
+      </p>
+    </div>
+
+    <!-- Advanced (collapsible): manual tile drawing -->
+    <div class="rounded-lg border border-slate-800">
+      <button
+        type="button"
+        (click)="toggleAdvanced()"
+        class="flex w-full cursor-pointer items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400"
+      >
+        <span>Advanced</span>
+        <span class="text-slate-500">{{ advancedOpen() ? '▾' : '▸' }}</span>
+      </button>
+      @if (advancedOpen()) {
+        <div class="space-y-2 border-t border-slate-800 px-3 py-3">
+          <p class="text-[11px] text-slate-500">
+            Manual tile drawing for advanced use cases. Pick a tile from the palette below the
+            canvas, then paint directly onto the room.
+          </p>
+          <p class="font-mono text-xs text-slate-400">
+            Selected tile: <span class="text-slate-100">{{ brushTile }}</span>
+          </p>
+        </div>
+      }
+    </div>
+  </div>
+</aside>

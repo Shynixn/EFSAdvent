@@ -3,32 +3,31 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { ButtonComponent } from '../../component/button/button.component';
 import { LoadingModalComponent } from '../../component/loading-modal/loading-modal.component';
-import { ModalComponent } from '../../component/modal/modal.component';
-import { RoomEditorComponent } from '../../component/room-editor/room-editor.component';
+import { LoadingOverlayComponent } from '../../component/loading-overlay/loading-overlay.component';
+import { MapGridComponent } from '../../component/map-grid/map-grid.component';
 import { StageService, StageFile } from '../../service/stage.service';
 import { StageTabsService } from '../../service/stage-tabs.service';
 import { StageEditorService } from '../../service/stage-editor.service';
 import { StagePreviewService } from '../../service/stage-preview.service';
 import { StageRoomService } from '../../service/stage-room.service';
-import { EditorService } from '../../service/editor.service';
-import { FSALibService } from '../../service/fsalib.service';
+import { UnsavedChangesService } from '../../service/unsaved-changes.service';
 import { LoggingService } from '../../service/logging.service';
 import { MapLayoutData, StageData } from '../../entity/fsalib.entity';
-import { TilesetTheme } from '../../entity/tileset.util';
+import { nextPaint } from '../../util/paint';
 
 /**
  * StagePage
  * ---------
  * A sub-page of "My Stages" showing a single stage's map layout as a grid of
- * rooms plus the generated thumbnail. Clicking a room opens it on the room
- * page. A toolbox on the right hosts the (currently single) Theme action.
+ * rooms plus the generated thumbnail. Clicking a room opens it on the dedicated
+ * room page.
  *
  * Opening the page registers a tab under the My Stages nav; the close button
  * removes the tab and returns to the stages list.
  */
 @Component({
   selector: 'app-stage-page',
-  imports: [ButtonComponent, LoadingModalComponent, ModalComponent, RoomEditorComponent],
+  imports: [ButtonComponent, LoadingModalComponent, LoadingOverlayComponent, MapGridComponent],
   templateUrl: './stage-page.html',
   styleUrl: './stage-page.css',
 })
@@ -38,8 +37,7 @@ export class StagePage implements OnInit, OnDestroy {
   private readonly stageEditor = inject(StageEditorService);
   private readonly stagePreview = inject(StagePreviewService);
   private readonly stageRoom = inject(StageRoomService);
-  private readonly editor = inject(EditorService);
-  private readonly fsaLib = inject(FSALibService);
+  private readonly unsaved = inject(UnsavedChangesService);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly logger = inject(LoggingService);
@@ -61,42 +59,13 @@ export class StagePage implements OnInit, OnDestroy {
   /** Status message shown in the preview-generation modal. */
   readonly previewMessage = signal('Preparing previews…');
 
-  /** Whether the theme picker modal is open. */
-  readonly themeOpen = signal(false);
-  /** Theme options (real tilesets loaded from the game's `tilesets.json`). */
-  readonly themes = signal<TilesetTheme[]>([]);
-  /** Whether the theme list is still loading. */
-  readonly themesLoading = signal(false);
-  /** Active tileset index (bound to `Map.TileSheetId`). */
-  readonly currentThemeIndex = signal(0);
-  /** PNG data URL previews per tileset index (loaded when the modal opens). */
-  readonly themePreviews = signal<Record<number, string>>({});
-  /** Whether theme previews are loading. */
-  readonly themePreviewsLoading = signal(false);
-  /** Whether a preview load has completed (success or not) for this stage. */
-  private readonly themePreviewsLoaded = signal(false);
-
   /** Blob URL of the generated thumbnail (all rooms concatenated), if any. */
   readonly thumbnailUrl = signal<string | null>(null);
   /** Error from preview generation, if any (shown instead of the thumbnail). */
   readonly previewError = signal('');
 
-  /**
-   * Room currently open in the embedded editor, or `null` when the map grid +
-   * thumbnail are shown instead. Backed by {@link StageRoomService} (plain
-   * shared state, not a route) so opening/closing a room never navigates and
-   * therefore never recreates this page.
-   */
-  readonly activeRoom = this.stageRoom.activeRoom;
-
-  /**
-   * Whether a room is open. Used for template guards because `activeRoom` can be
-   * `0` (the start room), which is falsy.
-   */
-  readonly hasActiveRoom = this.stageRoom.hasActiveRoom;
-
-  /** Whether there are unsaved edits (e.g. a newly picked theme). */
-  readonly dirty = signal(false);
+  /** Whether there are unsaved edits for this stage (tiles and/or theme). */
+  readonly dirty = computed(() => this.stageEditor.isDirty(this.stageId()));
   /** Whether a save is currently in flight. */
   readonly saving = signal(false);
   /** ISO timestamp of the last successful save, if any. */
@@ -122,17 +91,17 @@ export class StagePage implements OnInit, OnDestroy {
   /** Route param subscription; re-loads when the open stage tab changes. */
   private paramSub: Subscription | null = null;
 
+  /** Teardown for the `beforeunload` listener (installed while on this page). */
+  private removeUnloadListener: (() => void) | null = null;
+
   /** Display name shown in the header (falls back to the id). */
   readonly stageName = computed(() => this.stage()?.name ?? 'Stage');
 
-  /** Header title: the room when one is open, otherwise the stage name. */
-  readonly headerTitle = computed(() => {
-    const room = this.activeRoom();
-    return room == null ? this.stageName() : `${this.stageName()} · Room ${room}`;
-  });
+  /** Header title (the stage name). */
+  readonly headerTitle = computed(() => this.stageName());
 
-  /** Whether anything has unsaved edits (stage theme or the open room). */
-  readonly hasUnsavedChanges = computed(() => this.dirty() || this.stageRoom.dirty());
+  /** Whether anything has unsaved edits for this stage. */
+  readonly hasUnsavedChanges = computed(() => this.dirty());
 
   /**
    * Whether the Save button is actionable. Saving is always allowed (it simply
@@ -142,6 +111,9 @@ export class StagePage implements OnInit, OnDestroy {
   readonly canSave = computed(() => !this.saving() && !this.generatingPreviews());
 
   ngOnInit(): void {
+    // Warn before a page refresh/close while this stage has unsaved edits.
+    this.removeUnloadListener = this.unsaved.preventUnload(() => this.stageId());
+
     // React to the route param so switching between open stage tabs (which
     // reuses this component instance) reloads the selected stage.
     this.paramSub = this.route.paramMap.subscribe((params) => {
@@ -154,6 +126,7 @@ export class StagePage implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.paramSub?.unsubscribe();
+    this.removeUnloadListener?.();
   }
 
   /** Sets the active stage, opens its tab and loads its archive. */
@@ -163,9 +136,6 @@ export class StagePage implements OnInit, OnDestroy {
     this.stageRoom.setActiveStage(id);
     this.thumbnailUrl.set(null);
     this.previewError.set('');
-    // Theme previews are per-stage (the list is global, the thumbnails come from
-    // the shared cache but are keyed by tileset, so just re-run the loader).
-    this.themePreviewsLoaded.set(false);
 
     await this.stageService.load();
     const stage = this.stageService.getById(id);
@@ -188,6 +158,9 @@ export class StagePage implements OnInit, OnDestroy {
     this.thumbnailUrl.set(null);
     this.previewError.set('');
 
+    // Let the loading overlay paint before the (blocking) parse/render work.
+    await nextPaint();
+
     try {
       const loaded = await this.stageEditor.load(id);
       if (!loaded) {
@@ -195,9 +168,7 @@ export class StagePage implements OnInit, OnDestroy {
         return;
       }
       this.stageData.set(loaded.data);
-      this.currentThemeIndex.set(loaded.data.Map.TileSheetId);
       this.lastSaved.set(this.stage()?.lastSaved ?? null);
-      this.dirty.set(false);
       this.logger.info(
         `StagePage: parsed stage ${loaded.data.Index} ` +
           `(map ${loaded.data.Map.Index}, ${loaded.data.Map.XDimension}x${loaded.data.Map.YDimension}).`,
@@ -259,159 +230,30 @@ export class StagePage implements OnInit, OnDestroy {
     return this.stageData()?.Map ?? null;
   }
 
-  /** Grid width (rooms). */
-  mapWidth(): number {
-    return this.stageData()?.Map.XDimension ?? 0;
-  }
-
-  /** Grid height (rooms). */
-  mapHeight(): number {
-    return this.stageData()?.Map.YDimension ?? 0;
-  }
-
-  /** Row index helper for iterating the grid in the template. */
-  range(count: number): number[] {
-    return Array.from({ length: count }, (_, i) => i);
-  }
-
-  /** The empty-room sentinel reported by wasm. */
-  emptyRoomValue(): number {
-    return this.stageData()?.Map.EmptyRoomValue ?? -1;
-  }
-
-  /** Room index at (x, y) in the row-major array, or the empty sentinel. */
-  roomAt(x: number, y: number): number {
-    const layout = this.map();
-    if (!layout) {
-      return -1;
-    }
-    return layout.Rooms[x + y * this.mapWidth()] ?? this.emptyRoomValue();
-  }
-
-  /** True if the cell at (x, y) is empty (no room). */
-  isEmpty(x: number, y: number): boolean {
-    return this.roomAt(x, y) === this.emptyRoomValue();
-  }
-
-  /** True if the cell is the map's start room. */
-  isStart(x: number, y: number): boolean {
-    const layout = this.map();
-    return !!layout && x === layout.StartX && y === layout.StartY;
-  }
-
-  /** Opens a room in the embedded editor (registers a nested tab). */
+  /** Opens a room on its dedicated room page (registers a nested tab). */
   openRoom(roomIndex: number): void {
-    if (roomIndex < 0 || roomIndex === this.emptyRoomValue()) {
+    const emptyValue = this.stageData()?.Map.EmptyRoomValue ?? -1;
+    if (roomIndex < 0 || roomIndex === emptyValue) {
       return;
     }
     const stageId = this.stageId();
     this.stageTabs.openRoom(stageId, roomIndex);
-    // Plain state, no navigation — navigating would recreate this page (flash).
     this.stageRoom.setActiveStage(stageId);
     this.stageRoom.open(stageId, roomIndex);
-  }
-
-  /** Closes the embedded room editor and returns to the map grid + thumbnail. */
-  closeRoom(): void {
-    const stageId = this.stageId();
-    const index = this.activeRoom();
-    if (index != null) {
-      this.stageTabs.closeRoom(stageId, index);
-    }
-    this.stageRoom.close(stageId);
+    void this.router.navigate(['/my-stages', stageId, 'rooms', roomIndex]);
   }
 
   /**
-   * The header "x": closes the open room first, and only closes the whole
-   * stage once no room is open.
+   * The header "x": closes the stage tab and returns to the stages list. If the
+   * stage has unsaved changes, a native confirm asks whether to save first.
    */
-  closeTop(): void {
-    if (this.activeRoom() != null) {
-      this.closeRoom();
-    } else {
-      this.close();
-    }
-  }
-
-  /** Opens the theme picker modal and (lazily) generates tileset previews. */
-  openTheme(): void {
-    this.themeOpen.set(true);
-    void this.loadThemePreviews();
-  }
-
-  /** Closes the theme picker modal. */
-  closeTheme(): void {
-    this.themeOpen.set(false);
-  }
-
-  /** Renders a preview image per theme (once) for the theme picker. */
-  private async loadThemePreviews(): Promise<void> {
-    if (this.themePreviewsLoading() || this.themePreviewsLoaded()) {
-      return;
-    }
-    const loaded = this.stageEditor.get(this.stageId());
-    if (!loaded) {
-      return;
-    }
-
-    this.themePreviewsLoading.set(true);
-    try {
-      this.themesLoading.set(true);
-
-      // Load the real tileset list from the wasm (once).
-      let themes = this.themes();
-      if (themes.length === 0) {
-        themes = await this.fsaLib.loadTilesetThemes();
-        this.themes.set(themes);
-      }
-
-      const previews: Record<number, string> = {};
-      for (const theme of themes) {
-        if (previews[theme.index]) {
-          continue;
-        }
-        try {
-          // Prefer the preview cached at ISO import; render on the fly only when
-          // it is missing (e.g. a stage opened before the cache was generated).
-          let url = await this.stagePreview.readTilesetPreviewUrl(theme.index);
-          if (!url) {
-            url = await this.fsaLib.renderTilesetPreview(theme.index, loaded.arcBytes);
-          }
-          if (url) {
-            previews[theme.index] = url;
-          } else {
-            this.logger.warn(`StagePage: no preview for tileset ${theme.index}.`);
-          }
-        } catch (error) {
-          this.logger.warn(`StagePage: failed to render preview for tileset ${theme.index}`, error);
-        }
-      }
-      this.themePreviews.set(previews);
-      this.themePreviewsLoaded.set(true);
-    } finally {
-      this.themePreviewsLoading.set(false);
-      this.themesLoading.set(false);
-    }
-  }
-
-  /** Applies a tileset theme by setting the stage's `Map.TileSheetId`. */
-  selectTheme(theme: TilesetTheme): void {
-    const stage = this.stageData();
-    if (!stage) {
-      return;
-    }
-    if (stage.Map.TileSheetId !== theme.index) {
-      stage.Map.TileSheetId = theme.index;
-      this.dirty.set(true);
-    }
-    this.currentThemeIndex.set(theme.index);
-    this.logger.info(`StagePage: theme "${theme.name}" (tileset ${theme.index}) selected.`);
-    this.closeTheme();
+  async closeTop(): Promise<void> {
+    await this.close();
   }
 
   /**
    * Applies pending edits back to the stage's archive and refreshes the derived
-   * previews (thumbnail + room PNGs) so they reflect the new theme.
+   * previews (thumbnail + room PNGs).
    *
    * Saving is always permitted — even with no pending changes it simply
    * re-writes the current archive — so the button is never a dead end.
@@ -433,7 +275,6 @@ export class StagePage implements OnInit, OnDestroy {
 
       await this.stageService.markSaved(id, result.savedAt);
       this.lastSaved.set(result.savedAt.toISOString());
-      this.dirty.set(false);
       this.stageRoom.setDirty(false);
       this.stageRoom.clearDirtyLayers();
 
@@ -453,8 +294,13 @@ export class StagePage implements OnInit, OnDestroy {
   }
 
   /** Closes the stage tab and returns to the stages list. */
-  close(): void {
+  async close(): Promise<void> {
     const id = this.stageId();
+    // Ask about unsaved changes; when the user agrees, save before leaving.
+    const proceed = await this.unsaved.confirmDiscard(id, 'close this stage', () => this.save());
+    if (!proceed) {
+      return;
+    }
     this.stageTabs.close(id);
     // Drop the stage's room selection so reopening it starts on the map grid.
     this.stageRoom.close(id);

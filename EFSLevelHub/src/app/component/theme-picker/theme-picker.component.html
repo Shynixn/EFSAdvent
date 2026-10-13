@@ -1,0 +1,48 @@
+<app-modal [open]="open" title="Theme" maxWidth="max-w-2xl" (closed)="close()">
+  <div class="flex flex-col gap-3">
+    <p class="text-sm text-slate-400">Select the tileset used to draw this stage's rooms.</p>
+    @if (themesLoading()) {
+      <div class="flex flex-col items-center justify-center gap-2 py-10 text-slate-400">
+        <p class="text-sm">Loading tilesets…</p>
+      </div>
+    }
+    <div class="grid max-h-96 grid-cols-2 gap-3 overflow-y-auto sm:grid-cols-3">
+      @for (theme of themes(); track theme.index) {
+        <button
+          type="button"
+          (click)="pick(theme)"
+          class="flex cursor-pointer flex-col gap-2 rounded-lg border p-2 text-left text-sm transition"
+          [class.border-indigo-400]="currentIndex === theme.index"
+          [class.bg-indigo-500/20]="currentIndex === theme.index"
+          [class.border-slate-700]="currentIndex !== theme.index"
+          [class.hover:bg-slate-700/50]="currentIndex !== theme.index"
+        >
+          <div class="h-24 w-full overflow-hidden rounded border border-slate-700 bg-slate-900">
+            @if (previews()[theme.index]; as preview) {
+              <img
+                [src]="preview"
+                alt="{{ theme.name }} tileset"
+                class="h-full w-full object-cover object-top"
+                style="image-rendering: pixelated"
+              />
+            } @else {
+              <div class="flex h-full w-full items-center justify-center text-xs text-slate-600">
+                {{ previewsLoading() ? 'Loading…' : 'No preview' }}
+              </div>
+            }
+          </div>
+          <span
+            class="font-medium"
+            [class.text-white]="currentIndex === theme.index"
+            [class.text-slate-200]="currentIndex !== theme.index"
+          >
+            {{ theme.name }}
+          </span>
+        </button>
+      }
+    </div>
+    <div class="flex justify-end pt-1">
+      <app-button variant="ghost" color="slate" (clicked)="close()">Close</app-button>
+    </div>
+  </div>
+</app-modal>

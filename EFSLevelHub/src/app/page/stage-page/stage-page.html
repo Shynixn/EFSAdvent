@@ -8,14 +8,14 @@
         variant="ghost"
         color="slate"
         [iconOnly]="true"
-        [title]="activeRoom() != null ? 'Close room' : 'Close stage'"
+        title="Close stage"
         [icon]="'M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z'"
         (clicked)="closeTop()"
       />
       <div class="min-w-0">
         <h1 class="truncate text-lg font-semibold text-white">{{ headerTitle() }}</h1>
         <p class="text-xs text-slate-400">
-          {{ activeRoom() != null ? 'Room editor' : 'Stage' }}
+          Stage
           <span class="text-slate-600">·</span>
           <span>Last saved: {{ lastSavedLabel() }}</span>
         </p>
@@ -29,8 +29,8 @@
       <app-button
         variant="primary"
         color="indigo"
-        size="sm"
         [disabled]="!canSave()"
+        [icon]="'M4 4a2 2 0 00-2 2v8a2 2 0 002 2h12a2 2 0 002-2V7.414A2 2 0 0017.414 6L14 2.586A2 2 0 0012.586 2H4zm0 2h8v3a1 1 0 001 1h4v6H4V6zm2 7v-2h8v2H6z'"
         (clicked)="save()"
       >
         {{ saving() ? 'Saving…' : 'Save' }}
@@ -41,49 +41,15 @@
   <!-- Content: map + thumbnail on the left, toolbox on the right -->
   <div class="flex min-h-0 flex-1">
     <div class="min-h-0 flex-1 overflow-auto bg-slate-950 p-6">
-      @if (isLoading()) {
-        <p class="text-sm text-indigo-300">Loading stage…</p>
-      } @else if (loadError()) {
+      @if (loadError()) {
         <p class="rounded-lg bg-red-500/10 p-3 text-sm text-red-400">{{ loadError() }}</p>
-      } @else if (hasActiveRoom()) {
-        <!-- Room editor: shown instead of the map grid + thumbnail. -->
-        <div class="mx-auto max-w-5xl">
-          <app-room-editor [stageId]="stageId()" [roomIndex]="activeRoom()!" />
-        </div>
       } @else if (map()) {
         <div class="mx-auto max-w-5xl space-y-6">
           <!-- Map grid -->
           <section class="space-y-2">
             <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-400">Map Grid</h2>
             <div class="overflow-auto rounded-xl border border-slate-700 bg-slate-900/60 p-3">
-              <div
-                class="inline-grid grid-flow-row gap-1"
-                [style.gridTemplateColumns]="'repeat(' + mapWidth() + ', 3.5rem)'"
-              >
-                @for (y of range(mapHeight()); track y) {
-                  @for (x of range(mapWidth()); track x) {
-                    <button
-                      type="button"
-                      (click)="openRoom(roomAt(x, y))"
-                      [disabled]="isEmpty(x, y)"
-                      [class]="
-                        'flex h-14 w-14 flex-col items-center justify-center rounded border text-xs font-mono transition ' +
-                        (isEmpty(x, y)
-                          ? 'cursor-default border-slate-700 bg-slate-800/40 text-slate-600'
-                          : 'cursor-pointer border-slate-500 bg-slate-700 text-slate-100 hover:border-indigo-400 hover:bg-slate-600') +
-                        (isStart(x, y) ? ' ring-2 ring-emerald-400' : '')
-                      "
-                    >
-                      @if (!isEmpty(x, y)) {
-                        <span>{{ roomAt(x, y) }}</span>
-                        <span class="text-[10px] text-slate-500">{{ x }},{{ y }}</span>
-                      } @else {
-                        <span>—</span>
-                      }
-                    </button>
-                  }
-                }
-              </div>
+              <app-map-grid [stage]="stageData()" (roomSelected)="openRoom($event)" />
             </div>
             <p class="text-xs text-slate-500">Green ring = start room. Click a room to edit it.</p>
           </section>
@@ -109,68 +75,8 @@
         </div>
       }
     </div>
-
-    <!-- Toolbox (hidden while a room is open) -->
-    @if (!hasActiveRoom()) {
-      <aside class="w-56 shrink-0 space-y-3 border-l border-slate-800 bg-slate-900/60 p-4">
-        <h2 class="text-xs font-semibold uppercase tracking-wide text-slate-400">Toolbox</h2>
-        <app-button variant="outline" color="indigo" [fullWidth]="true" (clicked)="openTheme()">
-          Theme
-        </app-button>
-      </aside>
-    }
   </div>
 </div>
-
-<!-- Theme picker modal -->
-<app-modal [open]="themeOpen()" title="Theme" maxWidth="max-w-2xl" (closed)="closeTheme()">
-  <div class="flex flex-col gap-3">
-    <p class="text-sm text-slate-400">Select the tileset used to draw this stage's rooms.</p>
-    @if (themesLoading()) {
-      <div class="flex flex-col items-center justify-center gap-2 py-10 text-slate-400">
-        <p class="text-sm">Loading tilesets…</p>
-      </div>
-    }
-    <div class="grid max-h-96 grid-cols-2 gap-3 overflow-y-auto sm:grid-cols-3">
-      @for (theme of themes(); track theme.index) {
-        <button
-          type="button"
-          (click)="selectTheme(theme)"
-          class="flex cursor-pointer flex-col gap-2 rounded-lg border p-2 text-left text-sm transition"
-          [class.border-indigo-400]="currentThemeIndex() === theme.index"
-          [class.bg-indigo-500/20]="currentThemeIndex() === theme.index"
-          [class.border-slate-700]="currentThemeIndex() !== theme.index"
-          [class.hover:bg-slate-700/50]="currentThemeIndex() !== theme.index"
-        >
-          <div class="h-24 w-full overflow-hidden rounded border border-slate-700 bg-slate-900">
-            @if (themePreviews()[theme.index]; as preview) {
-              <img
-                [src]="preview"
-                alt="{{ theme.name }} tileset"
-                class="h-full w-full object-cover object-top"
-                style="image-rendering: pixelated"
-              />
-            } @else {
-              <div class="flex h-full w-full items-center justify-center text-xs text-slate-600">
-                {{ themePreviewsLoading() ? 'Loading…' : 'No preview' }}
-              </div>
-            }
-          </div>
-          <span
-            class="font-medium"
-            [class.text-white]="currentThemeIndex() === theme.index"
-            [class.text-slate-200]="currentThemeIndex() !== theme.index"
-          >
-            {{ theme.name }}
-          </span>
-        </button>
-      }
-    </div>
-    <div class="flex justify-end pt-1">
-      <app-button variant="ghost" color="slate" (clicked)="closeTheme()">Close</app-button>
-    </div>
-  </div>
-</app-modal>
 
 <!-- Blocking modal while room previews + thumbnail are generated. -->
 <app-loading-modal
@@ -178,3 +84,6 @@
   title="Generating previews"
   [message]="previewMessage()"
 />
+
+<!-- Semi-transparent loading overlay -->
+<app-loading-overlay [open]="isLoading()" message="Loading..." />
