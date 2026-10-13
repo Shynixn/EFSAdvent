@@ -123,6 +123,85 @@ export class IsoBuilderService {
     onProgress?.({ percent: 2, message: 'Resolving replacement stage archives…' });
     const { map: replacements, retargeted } = await this.resolveReplacements(world.stages);
 
+    return this.buildIso(iso, replacements, retargeted, output, onProgress);
+  }
+
+  /**
+   * Builds a "test" ISO where the given (currently open) stage is placed into
+   * the **first** stage slot (`boss010.arc`) only.
+   *
+   * The stage's archive is re-indexed to that slot's map index (10) so the game
+   * resolves it correctly. All other slots keep their original arcs.
+   *
+   * @param stageId  Stage whose archive is used for the first slot.
+   * @param output   Destination writer (file stream or in-memory collector).
+   * @param onProgress Optional progress callback.
+   */
+  async exportTestIso(
+    stageId: string,
+    output: IsoWriter,
+    onProgress?: ExportProgressCallback,
+  ): Promise<ExportResult> {
+    const iso = await this.isoSource.getFile();
+    if (!iso) {
+      throw new Error(
+        'Source ISO is not available. Re-import the disc image so it can be saved for export.',
+      );
+    }
+
+    onProgress?.({ percent: 2, message: 'Resolving test stage archive…' });
+    const { map: replacements, retargeted } = await this.resolveSingleStageForFirstSlot(stageId);
+
+    return this.buildIso(iso, replacements, retargeted, output, onProgress);
+  }
+
+  /**
+   * Builds the replacement map for a test ISO: the stage archive is placed in
+   * the FIRST {@link DEFAULT_STAGE_ARC_ORDER} slot (`boss010.arc`), re-indexed
+   * to that slot.
+   */
+  private async resolveSingleStageForFirstSlot(
+    stageId: string,
+  ): Promise<{ map: Map<string, Uint8Array>; retargeted: number }> {
+    const map = new Map<string, Uint8Array>();
+    let retargeted = 0;
+
+    const original = await this.editor.readEditorFile(stageArcFilePath(stageId));
+    if (!original) {
+      throw new Error('This stage has no editor archive to export yet.');
+    }
+
+    const arcId = DEFAULT_STAGE_ARC_ORDER[0];
+    if (!arcId) {
+      throw new Error('No stage slots are configured.');
+    }
+    const arcName = `${arcId}.arc`;
+    const targetIndex = Number.parseInt(arcId.replace(/\D/g, ''), 10);
+    const { bytes, retargeted: didRetarget } = await this.retargetIfNeeded(
+      original,
+      arcId,
+      targetIndex,
+      arcName,
+    );
+    if (didRetarget) {
+      retargeted++;
+    }
+    map.set(arcName.toLowerCase(), bytes);
+
+    return { map, retargeted };
+  }
+
+  /**
+   * Writes the rebuilt image: patches the FST and streams the prefix + every
+   * payload (with `replacements` substituted) contiguously into `output`.
+   */
+  private async buildIso(
+    iso: File,
+    replacements: Map<string, Uint8Array>,
+    retargeted: number,
+    output: IsoWriter,
+    onProgress?: ExportProgressCallback,
+  ): Promise<ExportResult> {
     // 1. Read and parse the FST.
     onProgress?.({ percent: 5, message: 'Reading file system table…' });
     const { fstOffset, fstSize, fstRaw, entries, stringTable } = await this.readFst(iso);

@@ -23,9 +23,6 @@
     </div>
 
     <div class="flex flex-shrink-0 items-center gap-2">
-      @if (hasUnsavedChanges()) {
-        <span class="text-xs text-amber-400">Unsaved changes</span>
-      }
       <app-button
         variant="primary"
         color="indigo"
@@ -87,3 +84,6 @@
 
 <!-- Semi-transparent loading overlay -->
 <app-loading-overlay [open]="isLoading()" message="Loading..." />
+
+<!-- Save progress (reuses the loading overlay) -->
+<app-loading-overlay [open]="saving()" message="Saving..." />

@@ -23,9 +23,6 @@
     </div>
 
     <div class="flex flex-shrink-0 items-center gap-2">
-      @if (dirty()) {
-        <span class="text-xs text-amber-400">Unsaved changes</span>
-      }
       <app-button
         variant="primary"
         color="indigo"
@@ -34,6 +31,20 @@
         (clicked)="save()"
       >
         {{ saving() ? 'Saving…' : 'Save' }}
+      </app-button>
+      <app-button
+        variant="primary"
+        color="emerald"
+        [disabled]="!canSaveAndExport()"
+        [title]="
+          canExport()
+            ? 'Save, then rebuild a test ISO with this stage in the first stage slot (boss010)'
+            : 'Re-import the disc image to enable export'
+        "
+        [icon]="'M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z'"
+        (clicked)="saveAndExportTestIso()"
+      >
+        {{ exporting() ? 'Exporting…' : 'Export Test ISO' }}
       </app-button>
     </div>
   </header>
@@ -121,3 +132,9 @@
 
 <!-- Semi-transparent loading overlay -->
 <app-loading-overlay [open]="isLoading()" message="Loading..." />
+
+<!-- Save progress (reuses the loading overlay) -->
+<app-loading-overlay [open]="saving()" message="Saving..." />
+
+<!-- Test ISO export progress (reuses the loading overlay) -->
+<app-loading-overlay [open]="exporting()" message="Exporting test ISO..." />

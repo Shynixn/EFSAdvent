@@ -100,9 +100,6 @@ export class StagePage implements OnInit, OnDestroy {
   /** Header title (the stage name). */
   readonly headerTitle = computed(() => this.stageName());
 
-  /** Whether anything has unsaved edits for this stage. */
-  readonly hasUnsavedChanges = computed(() => this.dirty());
-
   /**
    * Whether the Save button is actionable. Saving is always allowed (it simply
    * writes the current archive), except while a save is already running or the
@@ -266,6 +263,8 @@ export class StagePage implements OnInit, OnDestroy {
 
     this.saving.set(true);
     this.previewError.set('');
+    // Let the "Saving..." overlay paint before the (blocking) serialization.
+    await nextPaint();
     try {
       const result = await this.stageEditor.save(id, this.stageRoom.dirtyLayers());
       if (!result) {

@@ -26,6 +26,13 @@ import { StagePreviewService } from '../../service/stage-preview.service';
 import { StageRoomService } from '../../service/stage-room.service';
 import { TilesetThemeService } from '../../service/tileset-theme.service';
 import { UnsavedChangesService } from '../../service/unsaved-changes.service';
+import {
+  IsoBuilderService,
+  BlobIsoWriter,
+  FileStreamIsoWriter,
+  IsoWriter,
+} from '../../service/iso-builder.service';
+import { IsoSourceService } from '../../service/iso-source.service';
 import { LoggingService } from '../../service/logging.service';
 import { RoomData, StageData } from '../../entity/fsalib.entity';
 import { TilesetTheme } from '../../entity/tileset.util';
@@ -71,6 +78,8 @@ export class RoomPage implements OnInit, OnDestroy {
   private readonly stageRoom = inject(StageRoomService);
   private readonly themeService = inject(TilesetThemeService);
   private readonly unsaved = inject(UnsavedChangesService);
+  private readonly isoBuilder = inject(IsoBuilderService);
+  private readonly isoSource = inject(IsoSourceService);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly logger = inject(LoggingService);
@@ -154,6 +163,17 @@ export class RoomPage implements OnInit, OnDestroy {
 
   /** Whether a save can run right now. */
   readonly canSave = computed(() => !this.saving() && this.room() != null);
+
+  /** Whether a source ISO is available for a test export. */
+  readonly canExport = signal(false);
+
+  /** Whether an export is currently in flight (drives the loading overlay). */
+  readonly exporting = signal(false);
+
+  /** Whether the "Export Test ISO" button is actionable. */
+  readonly canSaveAndExport = computed(
+    () => !this.saving() && !this.exporting() && this.canExport() && this.room() != null,
+  );
 
   /** Route param subscription; re-loads when the open room changes. */
   private paramSub: Subscription | null = null;
@@ -267,6 +287,9 @@ export class RoomPage implements OnInit, OnDestroy {
       this.stageTabs.openRoom(stageId, roomIndex);
       this.stageRoom.setActiveStage(stageId);
       this.stageRoom.open(stageId, roomIndex);
+
+      // Whether a test ISO can be exported (a source disc image must be saved).
+      void this.isoSource.exists().then((has) => this.canExport.set(has));
     } catch (error) {
       this.loadError.set(error instanceof Error ? error.message : 'Failed to load the room.');
       this.logger.error(`RoomPage: failed to load room ${roomIndex} of "${stageId}"`, error);
@@ -348,6 +371,8 @@ export class RoomPage implements OnInit, OnDestroy {
       return;
     }
     this.saving.set(true);
+    // Let the "Saving..." overlay paint before the (blocking) serialization.
+    await nextPaint();
     try {
       const result = await this.stageEditor.save(id, this.stageRoom.dirtyLayers());
       if (!result) {
@@ -385,4 +410,96 @@ export class RoomPage implements OnInit, OnDestroy {
     this.stageRoom.close(stageId);
     void this.router.navigate(['/my-stages', stageId]);
   }
+
+  /**
+   * Saves the current room, then builds a "test" ISO in which every stage slot
+   * is replaced with this stage's archive, prompting the user to save it.
+   *
+   * Uses the File System Access API's save picker when available; otherwise
+   * falls back to a standard blob download.
+   */
+  async saveAndExportTestIso(): Promise<void> {
+    const stageId = this.stageId();
+    if (!this.canSaveAndExport()) {
+      return;
+    }
+
+    // Persist the current edits first so the exported archive includes them.
+    await this.save();
+    if (this.stageEditor.isDirty(stageId)) {
+      // The save failed — do not export a stale archive.
+      return;
+    }
+
+    const suggestedName = `${(this.stageName() || 'stage').replace(/[^\w.-]+/g, '_')}_test.iso`;
+
+    const picker = (window as unknown as { showSaveFilePicker?: SaveFilePickerFn })
+      .showSaveFilePicker;
+    let writer: IsoWriter;
+    if (picker) {
+      let handle: FileSystemFileHandle;
+      try {
+        handle = await picker({
+          suggestedName,
+          types: [
+            { description: 'GameCube ISO', accept: { 'application/octet-stream': ['.iso'] } },
+          ],
+        });
+      } catch {
+        // User cancelled the save dialog — do nothing.
+        return;
+      }
+      writer = new FileStreamIsoWriter(await handle.createWritable());
+    } else {
+      writer = new BlobIsoWriter();
+    }
+
+    const blobWriter = writer instanceof BlobIsoWriter ? writer : null;
+
+    this.exporting.set(true);
+    try {
+      const result = await this.isoBuilder.exportTestIso(stageId, writer);
+
+      if (blobWriter) {
+        this.downloadBlob(blobWriter.toBlob(), suggestedName);
+      }
+      this.logger.info(
+        `RoomPage: test ISO export done — first slot replaced with stage "${stageId}" ` +
+          `(${result.retargetedArcs} re-indexed, ${this.formatBytes(result.outputSize)}).`,
+      );
+    } catch (error) {
+      this.logger.error('RoomPage: test ISO export failed', error);
+    } finally {
+      this.exporting.set(false);
+    }
+  }
+
+  /** Triggers a browser download of the given blob via a temporary link. */
+  private downloadBlob(blob: Blob, fileName: string): void {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  }
+
+  /** Formats a byte count for display. */
+  private formatBytes(bytes: number): string {
+    if (bytes < 1024) {
+      return `${bytes} B`;
+    }
+    if (bytes < 1024 * 1024) {
+      return `${(bytes / 1024).toFixed(1)} KB`;
+    }
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
 }
+
+/** Minimal typing for `window.showSaveFilePicker`. */
+type SaveFilePickerFn = (options?: {
+  suggestedName?: string;
+  types?: { description?: string; accept: Record<string, string[]> }[];
+}) => Promise<FileSystemFileHandle>;
