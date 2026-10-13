@@ -1,6 +1,8 @@
 <div
-  class="inline-grid grid-flow-row gap-1"
-  [style.gridTemplateColumns]="'repeat(' + width + ', ' + (compact ? '1.75rem' : '3.5rem') + ')'"
+  [class]="'grid grid-flow-row gap-1 ' + (compact ? 'w-full' : 'inline-grid')"
+  [style.gridTemplateColumns]="
+    'repeat(' + width + ', ' + (compact ? 'minmax(0, 1fr)' : '3.5rem') + ')'
+  "
 >
   @for (y of rows; track y) {
     @for (x of cols; track x) {

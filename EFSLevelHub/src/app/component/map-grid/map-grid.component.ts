@@ -120,6 +120,8 @@ export class MapGridComponent {
 
   /** Tailwind cell size class (compact vs. full). */
   get cellClass(): string {
-    return this.compact ? 'h-7 w-7 text-[10px]' : 'h-14 w-14 text-xs';
+    // Compact cells stretch to fill the column width (square via aspect ratio);
+    // full cells use a fixed size for the larger stage-page grid.
+    return this.compact ? 'aspect-square w-full text-[10px]' : 'h-14 w-14 text-xs';
   }
 }
