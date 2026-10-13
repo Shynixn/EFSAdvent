@@ -277,6 +277,38 @@ export class StageRenderer {
     this.drawLayer(target, gba ? this.tilesetGBA : this.tilesetTV, layer);
   }
 
+  /**
+   * Draws a layer's base tiles followed by its top tiles (the "Layers" view),
+   * for editing. The top layer uses `layerIndex + 8`, matching the game's layer
+   * pairing (base 0-7, top 8-15).
+   *
+   * This mirrors the EFSAdvent WinForms editor's default render
+   * (`RenderOptions.Layers = BaseLayer | TopLayer`), so props such as trees
+   * (whose trunk is on the base layer and canopy on the top layer) composite
+   * correctly instead of appearing incomplete.
+   *
+   * @param target     Destination (expected [`VISIBLE_ROOM_WIDTH`] ×
+   *                   [`VISIBLE_ROOM_HEIGHT`]).
+   * @param roomIndex  Room to draw.
+   * @param layerIndex Base layer index (0-7). Its top layer is `layerIndex + 8`.
+   * @param gba        Use the GBA tileset (layer level 1) instead of the TV one.
+   */
+  drawLayerStack(target: ImageBuffer, roomIndex: number, layerIndex: number, gba = false): void {
+    const room = this.stage.Rooms[roomIndex];
+    if (!room) {
+      return;
+    }
+    const renderer = gba ? this.tilesetGBA : this.tilesetTV;
+    const base = room.Layers[layerIndex];
+    if (base) {
+      this.drawLayer(target, renderer, base);
+    }
+    const top = room.Layers[layerIndex + 8];
+    if (top) {
+      this.drawLayer(target, renderer, top);
+    }
+  }
+
   /** Draws one 16×16 tile from the tileset at (x, y) — used for tile previews. */
   drawTilesetTile(target: ImageBuffer, x: number, y: number, tileIndex: number, gba = false): void {
     (gba ? this.tilesetGBA : this.tilesetTV).drawTile(target, x, y, tileIndex);

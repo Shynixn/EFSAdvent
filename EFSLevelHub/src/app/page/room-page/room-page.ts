@@ -107,6 +107,10 @@ export class RoomPage implements OnInit, OnDestroy {
   readonly layerIndex = signal(0);
   /** Whether the GBA tileset/layer is drawn. */
   readonly gba = signal(false);
+  /** Whether the paired top layer is composited over the base layer. */
+  readonly topLayer = signal(true);
+  /** Whether painting targets the top layer instead of the base layer. */
+  readonly paintTop = signal(false);
   /** Tile value painted by the editor. */
   readonly brushTile = signal(1);
 

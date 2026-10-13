@@ -97,6 +97,35 @@ export class RoomCanvasComponent implements AfterViewInit {
     queueMicrotask(() => void this.redraw());
   }
 
+  private _topLayer = true;
+  /**
+   * When true the paired top layer (`layerIndex + 8`) is composited over the
+   * base layer (matching the game view). Uncheck to see the base layer alone.
+   */
+  @Input()
+  get topLayer(): boolean {
+    return this._topLayer;
+  }
+  set topLayer(value: boolean) {
+    this._topLayer = value;
+    queueMicrotask(() => void this.redraw());
+  }
+
+  private _paintTop = false;
+  /**
+   * When true, painting writes to the paired **top** layer (`layerIndex + 8`)
+   * instead of the base layer. Lets top-layer-only tiles (tree canopies, …) be
+   * drawn directly. Emitted {@link tileChanged} events report the real layer
+   * index that was written.
+   */
+  @Input()
+  get paintTop(): boolean {
+    return this._paintTop;
+  }
+  set paintTop(value: boolean) {
+    this._paintTop = value;
+  }
+
   private _tile = 0;
   /** Tile value painted on left click/drag. */
   @Input()
@@ -138,7 +167,14 @@ export class RoomCanvasComponent implements AfterViewInit {
     const height = canvas.height;
     const buffer = new ImageBuffer(width, height);
     buffer.fill(0, 0, 0, 255);
-    renderer.drawSingleLayer(buffer, this.index, this.layerIndex, this.gba);
+    if (this.topLayer) {
+      // Composite the base layer and its paired top layer (index + 8), matching
+      // the game / EFSAdvent editor — otherwise top-layer-only tiles (tree
+      // canopies, archways, …) would be missing.
+      renderer.drawLayerStack(buffer, this.index, this.layerIndex, this.gba);
+    } else {
+      renderer.drawSingleLayer(buffer, this.index, this.layerIndex, this.gba);
+    }
 
     const ctx = canvas.getContext('2d');
     if (!ctx) {
@@ -196,7 +232,10 @@ export class RoomCanvasComponent implements AfterViewInit {
       return;
     }
 
-    const layer = room.Layers[this.layerIndex];
+    // Paint onto the base layer, or its paired top layer (index + 8) when the
+    // "edit top layer" toggle is on.
+    const targetLayerIndex = this.paintTop ? this.layerIndex + 8 : this.layerIndex;
+    const layer = room.Layers[targetLayerIndex];
     if (!layer) {
       return;
     }
@@ -207,7 +246,7 @@ export class RoomCanvasComponent implements AfterViewInit {
 
     // Mutate the layer in place and repaint the affected tile.
     layer.Tiles[offset] = this.tile;
-    this.tileChanged.emit({ layerIndex: this.layerIndex, x, y, tile: this.tile });
+    this.tileChanged.emit({ layerIndex: targetLayerIndex, x, y, tile: this.tile });
     void this.redraw();
   }
 }
