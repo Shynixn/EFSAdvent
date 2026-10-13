@@ -26,6 +26,7 @@ import { StageData } from '../../entity/fsalib.entity';
   selector: 'app-system-column',
   imports: [MapGridComponent],
   templateUrl: './system-column.component.html',
+  host: { class: 'block h-full w-full' },
 })
 export class SystemColumnComponent {
   /** Parsed stage whose layout is shown. */

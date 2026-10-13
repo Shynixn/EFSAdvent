@@ -117,9 +117,6 @@ export class RoomPage implements OnInit, OnDestroy {
    */
   readonly dirty = computed(() => this.stageEditor.isDirty(this.stageId()));
 
-  /** Whether the "Advanced" toolbox section (manual tile drawing) is expanded. */
-  readonly advancedOpen = signal(false);
-
   /** Whether the theme picker modal is open. */
   readonly themeOpen = signal(false);
 

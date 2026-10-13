@@ -1,0 +1,16 @@
+<div class="space-y-2">
+  <div class="flex items-center gap-2">
+    <h3 class="text-sm font-semibold uppercase tracking-wide text-slate-400">Tiles</h3>
+    <span class="font-mono text-xs text-slate-500">selected: {{ tile }}</span>
+  </div>
+  <div class="block w-full rounded-xl border border-slate-700 bg-slate-900/60 p-2">
+    <canvas
+      #tileset
+      width="256"
+      height="1024"
+      class="block w-full cursor-pointer touch-none"
+      style="image-rendering: pixelated"
+      (click)="onCanvasClick($event)"
+    ></canvas>
+  </div>
+</div>

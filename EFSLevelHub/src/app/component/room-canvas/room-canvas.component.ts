@@ -9,7 +9,7 @@ import {
 } from '@angular/core';
 import { RoomData } from '../../entity/fsalib.entity';
 import { ImageBuffer, TILE_SIZE } from '../../service/render/gba-tile-renderer';
-import { StageRenderer, TILESET_COLUMNS, TILESET_COUNT } from '../../service/render/stage-renderer';
+import { StageRenderer } from '../../service/render/stage-renderer';
 
 /** A tile edit produced by painting on the canvas. */
 export interface RoomTileChange {
@@ -61,7 +61,7 @@ export class RoomCanvasComponent implements AfterViewInit {
   }
   set renderer(value: StageRenderer | null) {
     this._renderer = value;
-    queueMicrotask(() => void this.refreshAll());
+    queueMicrotask(() => void this.redraw());
   }
 
   private _index = -1;
@@ -94,7 +94,7 @@ export class RoomCanvasComponent implements AfterViewInit {
   }
   set gba(value: boolean) {
     this._gba = value;
-    queueMicrotask(() => void this.refreshAll());
+    queueMicrotask(() => void this.redraw());
   }
 
   private _tile = 0;
@@ -107,82 +107,17 @@ export class RoomCanvasComponent implements AfterViewInit {
     this._tile = value;
   }
 
-  /**
-   * Whether the tileset palette (manual tile picker) is shown. The room editor
-   * hides it behind its "Advanced" section for advanced/manual use cases.
-   */
-  @Input() showPalette = true;
-
   /** Emits each tile edit as it is painted. */
   @Output() tileChanged = new EventEmitter<RoomTileChange>();
 
-  /** Emits the tile value whenever the user picks a tile from the palette. */
-  @Output() tilePicked = new EventEmitter<number>();
-
   /** The canvas element the room is drawn onto. */
   private readonly canvasRef = viewChild<ElementRef<HTMLCanvasElement>>('canvas');
-  /** The tileset palette canvas (tile picker). */
-  private readonly tilesetRef = viewChild<ElementRef<HTMLCanvasElement>>('tileset');
 
   /** Whether the left mouse button is held (for drag-painting). */
   private painting = false;
 
   ngAfterViewInit(): void {
-    void this.refreshAll();
-  }
-
-  /** Redraws the room and the tileset sequentially (so palettes load first). */
-  private async refreshAll(): Promise<void> {
-    await this.renderTileset();
-    await this.redraw();
-  }
-
-  /** Renders the whole tileset grid into the palette canvas. */
-  private async renderTileset(): Promise<void> {
-    const canvas = this.tilesetRef()?.nativeElement;
-    const renderer = this.renderer;
-    if (!canvas || !renderer) {
-      return;
-    }
-    await renderer.prepareTileset();
-
-    const buffer = new ImageBuffer(canvas.width, canvas.height);
-    // Neutral mid-grey backdrop so the tiles (which use transparent palette
-    // index 0) read clearly against it.
-    buffer.fill(96, 96, 108, 255);
-    renderer.drawTileset(buffer, this.gba);
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) {
-      return;
-    }
-    ctx.putImageData(
-      new ImageData(new Uint8ClampedArray(buffer.pixels), buffer.width, buffer.height),
-      0,
-      0,
-    );
-  }
-
-  /** Picks the tile under the pointer from the tileset palette. */
-  onTilesetClick(event: MouseEvent): void {
-    const canvas = this.tilesetRef()?.nativeElement;
-    if (!canvas) {
-      return;
-    }
-    const rect = canvas.getBoundingClientRect();
-    const canvasX = ((event.clientX - rect.left) / rect.width) * canvas.width;
-    const canvasY = ((event.clientY - rect.top) / rect.height) * canvas.height;
-    const col = Math.floor(canvasX / TILE_SIZE);
-    const row = Math.floor(canvasY / TILE_SIZE);
-    if (col < 0 || col >= TILESET_COLUMNS || row < 0) {
-      return;
-    }
-    const tileIndex = row * TILESET_COLUMNS + col;
-    if (tileIndex < 0 || tileIndex >= TILESET_COUNT) {
-      return;
-    }
-    this.tile = tileIndex;
-    this.tilePicked.emit(tileIndex);
+    void this.redraw();
   }
 
   /** Re-renders the current layer onto the canvas. */
