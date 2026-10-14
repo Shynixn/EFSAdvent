@@ -4,6 +4,7 @@ import { FSALibService } from './fsalib.service';
 import { LoggingService } from './logging.service';
 import { OpfsCacheService } from './opfs-cache.service';
 import { sha256Hex } from './hash.util';
+import { RoomSmartObjects } from '../entity/smart-object.entity';
 
 /** Key under which stage ids are stored in the editor's `userdata.json`. */
 const STAGES_KEY = 'stages';
@@ -175,6 +176,12 @@ export interface StageFile {
    * saved from the editor (i.e. its archive was written back).
    */
   lastSaved?: string;
+  /**
+   * Smart objects (decorations) placed per room, keyed by room grid position.
+   * Populated only by placing a decoration in the room canvas; never derived
+   * from existing tiles. Absent for stages that have no smart objects.
+   */
+  rooms?: RoomSmartObjects[];
 }
 
 /**
@@ -247,6 +254,63 @@ export class StageService {
 
     this.stageList.update((stages) =>
       stages.map((stage) => (stage.id === id ? { ...stage, lastSaved: file.lastSaved } : stage)),
+    );
+  }
+
+  /**
+   * Reads the smart objects (decorations) placed in one room from the stage's
+   * definition file, or an empty list when none are recorded.
+   *
+   * @param id       Stage id.
+   * @param roomRow  Room row within the stage's grid.
+   * @param roomCol  Room column within the stage's grid.
+   */
+  async getRoomSmartObjects(
+    id: string,
+    roomRow: number,
+    roomCol: number,
+  ): Promise<RoomSmartObjects['smartObjects']> {
+    const file = await this.readStageFile(id);
+    const room = file?.rooms?.find((entry) => entry.row === roomRow && entry.col === roomCol);
+    return room?.smartObjects ?? [];
+  }
+
+  /**
+   * Persists the smart objects (decorations) placed in one room into the stage's
+   * definition file (`/editor/stage/<uuid>.json`), under the room's grid
+   * position in the `rooms` array.
+   *
+   * Passing an empty list removes the room entry entirely (so untouched rooms
+   * leave no trace in the JSON).
+   *
+   * @param id              Stage id.
+   * @param roomRow         Room row within the stage's grid.
+   * @param roomCol         Room column within the stage's grid.
+   * @param smartObjects    The room's placements.
+   */
+  async saveRoomSmartObjects(
+    id: string,
+    roomRow: number,
+    roomCol: number,
+    smartObjects: RoomSmartObjects['smartObjects'],
+  ): Promise<void> {
+    const file = await this.readStageFile(id);
+    if (!file) {
+      this.logger.warn(`StageService: cannot save smart objects for unknown stage "${id}".`);
+      return;
+    }
+
+    const rooms = (file.rooms ?? []).filter(
+      (room) => !(room.row === roomRow && room.col === roomCol),
+    );
+    if (smartObjects.length > 0) {
+      rooms.push({ row: roomRow, col: roomCol, smartObjects });
+    }
+    file.rooms = rooms.length > 0 ? rooms : undefined;
+
+    await this.writeStageFile(file);
+    this.logger.info(
+      `StageService: saved ${smartObjects.length} smart object(s) for room (${roomRow},${roomCol}).`,
     );
   }
 

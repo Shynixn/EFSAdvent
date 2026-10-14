@@ -35,6 +35,7 @@ import {
 import { IsoSourceService } from '../../service/iso-source.service';
 import { LoggingService } from '../../service/logging.service';
 import { RoomData, StageData } from '../../entity/fsalib.entity';
+import { SmartObjectPlacement } from '../../entity/smart-object.entity';
 import { TilesetTheme } from '../../entity/tileset.util';
 import { StageRenderer } from '../../service/render/stage-renderer';
 import { nextPaint } from '../../util/paint';
@@ -113,6 +114,16 @@ export class RoomPage implements OnInit, OnDestroy {
   readonly paintTop = signal(false);
   /** Tile value painted by the editor. */
   readonly brushTile = signal(1);
+
+  /** Active tool: `brush` paints tiles, `hand` moves placed smart objects. */
+  readonly tool = signal<'brush' | 'hand'>('brush');
+
+  /**
+   * Smart objects (decorations) placed in the current room. Populated only by
+   * placing a decoration (never derived from tiles) and persisted to the stage
+   * JSON on save.
+   */
+  readonly smartObjects = signal<SmartObjectPlacement[]>([]);
 
   /**
    * Whether this stage has unsaved edits (tile changes and/or a theme change),
@@ -283,6 +294,12 @@ export class RoomPage implements OnInit, OnDestroy {
       }
       this.room.set(room);
 
+      // Load any smart objects previously recorded for this room.
+      const grid = this.roomGridPosition();
+      this.smartObjects.set(
+        grid ? await this.stageService.getRoomSmartObjects(stageId, grid.row, grid.col) : [],
+      );
+
       // Register this room as an open tab and mark the stage active so the side
       // nav highlights it and the stage page's save picks up the edits.
       this.stageTabs.openRoom(stageId, roomIndex);
@@ -327,6 +344,57 @@ export class RoomPage implements OnInit, OnDestroy {
   onTileChanged(change: RoomTileChange): void {
     this.stageEditor.setDirty(this.stageId(), true);
     this.stageRoom.markLayerDirty(this.roomIndex(), change.layerIndex);
+  }
+
+  /**
+   * Records a placed decoration: its tiles were already stamped onto the room
+   * layers by the canvas, so here we mark both the base and top layers dirty
+   * (they are persisted to the archive on save) and remember the placement so
+   * it can be written to the stage JSON.
+   */
+  onDecorationPlaced(placement: SmartObjectPlacement): void {
+    this.stageEditor.setDirty(this.stageId(), true);
+    const base = this.layerIndex();
+    this.stageRoom.markLayerDirty(this.roomIndex(), base);
+    this.stageRoom.markLayerDirty(this.roomIndex(), base + 8);
+    this.smartObjects.update((list) => [...list, placement]);
+  }
+
+  /**
+   * Records a moved decoration: the canvas already cleared the old tiles and
+   * stamped the new ones, so here we replace the placement in the list and mark
+   * both layers dirty.
+   */
+  onDecorationMoved(event: {
+    from: SmartObjectPlacement;
+    to: SmartObjectPlacement;
+  }): void {
+    this.stageEditor.setDirty(this.stageId(), true);
+    const base = this.layerIndex();
+    this.stageRoom.markLayerDirty(this.roomIndex(), base);
+    this.stageRoom.markLayerDirty(this.roomIndex(), base + 8);
+    this.smartObjects.update((list) =>
+      list.map((placement) =>
+        placement === event.from ? event.to : placement,
+      ),
+    );
+  }
+
+  /**
+   * Room grid position (row/col) of the currently open room, derived from the
+   * map layout's row-major `Rooms` array. Returns null when unknown.
+   */
+  private roomGridPosition(): { row: number; col: number } | null {
+    const layout = this.stageData()?.Map;
+    if (!layout) {
+      return null;
+    }
+    const index = layout.Rooms.indexOf(this.roomIndex());
+    if (index < 0) {
+      return null;
+    }
+    const cols = layout.XDimension || 1;
+    return { row: Math.floor(index / cols), col: index % cols };
   }
 
   /** Swaps to another room via the map grid. */
@@ -384,6 +452,13 @@ export class RoomPage implements OnInit, OnDestroy {
       this.lastSaved.set(result.savedAt.toISOString());
       this.stageRoom.setDirty(false);
       this.stageRoom.clearDirtyLayers();
+
+      // Persist the room's smart objects into the stage JSON (after markSaved,
+      // which also rewrites that file, so the two do not clobber each other).
+      const grid = this.roomGridPosition();
+      if (grid) {
+        await this.stageService.saveRoomSmartObjects(id, grid.row, grid.col, this.smartObjects());
+      }
 
       // Regenerate this room's cached preview so the stage page thumbnail /
       // map grid stay in sync with the edit.

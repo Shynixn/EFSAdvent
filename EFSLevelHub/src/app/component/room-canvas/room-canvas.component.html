@@ -1,17 +1,34 @@
 <div class="flex flex-col gap-3">
-  <!-- Room canvas (editable) -->
-  <div class="inline-block w-fit rounded-lg border border-slate-700 bg-slate-900/60 p-1">
+  <!-- Room canvas (editable; accepts dragged decorations) -->
+  <div
+    class="relative inline-block w-fit rounded-lg border border-slate-700 bg-slate-900/60 p-1"
+    (dragover)="onDragOver($event)"
+    (dragleave)="onDragLeave()"
+    (drop)="onDrop($event)"
+  >
     <canvas
       #canvas
       width="512"
       height="384"
-      class="block cursor-crosshair touch-none"
+      class="block touch-none"
+      [class.cursor-crosshair]="tool !== 'hand'"
+      [class.cursor-grab]="tool === 'hand' && hoveringObject() && !draggingObject()"
+      [class.cursor-grabbing]="tool === 'hand' && draggingObject()"
       style="image-rendering: pixelated; width: 800px; height: 600px"
       (pointerdown)="onPointerDown($event)"
       (pointermove)="onPointerMove($event)"
       (pointerup)="onPointerUp($event)"
       (pointerleave)="onPointerUp($event)"
       (contextmenu)="onContextMenu($event)"
+    ></canvas>
+
+    <!-- Transparent preview overlay for a decoration being dragged/placed. -->
+    <canvas
+      #preview
+      width="512"
+      height="384"
+      class="pointer-events-none absolute left-1 top-1 block"
+      style="image-rendering: pixelated; width: 800px; height: 600px"
     ></canvas>
   </div>
 </div>
