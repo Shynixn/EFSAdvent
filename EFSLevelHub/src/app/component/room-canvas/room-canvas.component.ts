@@ -339,8 +339,7 @@ export class RoomCanvasComponent implements AfterViewInit {
    */
   onDrop(event: DragEvent): void {
     const id =
-      event.dataTransfer?.getData('application/x-smart-object') ??
-      this.dragging?.definition.id;
+      event.dataTransfer?.getData('application/x-smart-object') ?? this.dragging?.definition.id;
     const room = this.room;
     const dragging = this.dragging;
     if (!id || !room) {
@@ -483,11 +482,7 @@ export class RoomCanvasComponent implements AfterViewInit {
 
     // Render the decoration into an offscreen buffer, then blit it at 50% alpha.
     const buffer = renderer.renderSmartObjectPreview(dragging.definition, this.gba);
-    const image = new ImageData(
-      new Uint8ClampedArray(buffer.pixels),
-      buffer.width,
-      buffer.height,
-    );
+    const image = new ImageData(new Uint8ClampedArray(buffer.pixels), buffer.width, buffer.height);
     ctx.globalAlpha = 0.5;
     ctx.putImageData(image, originX, originY);
     ctx.globalAlpha = 1;

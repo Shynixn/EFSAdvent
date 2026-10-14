@@ -365,18 +365,13 @@ export class RoomPage implements OnInit, OnDestroy {
    * stamped the new ones, so here we replace the placement in the list and mark
    * both layers dirty.
    */
-  onDecorationMoved(event: {
-    from: SmartObjectPlacement;
-    to: SmartObjectPlacement;
-  }): void {
+  onDecorationMoved(event: { from: SmartObjectPlacement; to: SmartObjectPlacement }): void {
     this.stageEditor.setDirty(this.stageId(), true);
     const base = this.layerIndex();
     this.stageRoom.markLayerDirty(this.roomIndex(), base);
     this.stageRoom.markLayerDirty(this.roomIndex(), base + 8);
     this.smartObjects.update((list) =>
-      list.map((placement) =>
-        placement === event.from ? event.to : placement,
-      ),
+      list.map((placement) => (placement === event.from ? event.to : placement)),
     );
   }
 

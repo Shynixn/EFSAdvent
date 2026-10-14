@@ -240,5 +240,3 @@ export function renderSmartObjectPreview(
   stamp(definition.topLayerTiles);
   return buffer;
 }
-
-

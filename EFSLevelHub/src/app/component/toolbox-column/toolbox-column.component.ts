@@ -85,8 +85,7 @@ export class ToolboxColumnComponent implements AfterViewInit {
   readonly decorations: SmartObjectDefinition[] = SMART_OBJECT_DEFINITIONS;
 
   /** The per-decoration mini preview canvases. */
-  private readonly previewCanvases =
-    viewChildren<ElementRef<HTMLCanvasElement>>('decoPreview');
+  private readonly previewCanvases = viewChildren<ElementRef<HTMLCanvasElement>>('decoPreview');
 
   constructor() {
     // Redraw the mini previews once the canvases are available.

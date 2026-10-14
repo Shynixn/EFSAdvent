@@ -9,10 +9,7 @@
  * resource archive (read through `FSALibService`).
  */
 import { ActorData, LayerData, RoomData, StageData } from '../../entity/fsalib.entity';
-import {
-  SmartObjectDefinition,
-  renderSmartObjectPreview,
-} from '../../entity/smart-object.entity';
+import { SmartObjectDefinition, renderSmartObjectPreview } from '../../entity/smart-object.entity';
 import { BtiTexture, parseBti } from './bti-texture';
 import { decodeTexture } from './bti-image';
 import {
@@ -322,10 +319,7 @@ export class StageRenderer {
    * Renders a smart-object definition into a fresh RGBA buffer sized to its
    * bounding box, for the toolbox thumbnail. Honours the GBA tileset flag.
    */
-  renderSmartObjectPreview(
-    definition: SmartObjectDefinition,
-    gba = false,
-  ): ImageBuffer {
+  renderSmartObjectPreview(definition: SmartObjectDefinition, gba = false): ImageBuffer {
     return renderSmartObjectPreview(definition, (target, px, py, tileId) =>
       this.drawTilesetTile(target, px, py, tileId, gba),
     );
