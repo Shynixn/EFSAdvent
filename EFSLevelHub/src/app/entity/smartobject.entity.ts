@@ -137,9 +137,7 @@ export function applySmartObject(
     bottomLayerTiles: [],
     topLayerTiles: [],
     // Actor-baked objects record the variable used; tile-baked ones leave it off.
-    ...(definition.baking === 'actor'
-      ? { actorVariable: definition.actorVariable ?? 0 }
-      : {}),
+    ...(definition.baking === 'actor' ? { actorVariable: definition.actorVariable ?? 0 } : {}),
   };
 
   const write = (

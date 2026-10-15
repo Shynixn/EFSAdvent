@@ -9,7 +9,11 @@
  * resource archive (read through `FSALibService`).
  */
 import { ActorData, LayerData, RoomData, StageData } from '../../entity/fsalib.entity';
-import { ActorDefinition, ActorRenderVariant, actorVariants } from '../../entity/actor-definition.entity';
+import {
+  ActorDefinition,
+  ActorRenderVariant,
+  actorVariants,
+} from '../../entity/actor-definition.entity';
 import { SmartObjectDefinition, renderSmartObjectPreview } from '../../entity/smartobject.entity';
 import { BtiTexture, parseBti } from './bti-texture';
 import { decodeTexture } from './bti-image';
@@ -380,13 +384,7 @@ export class StageRenderer {
    * @param offsetX    Extra pixel offset applied after the actor's own position.
    * @param offsetY    Extra pixel offset applied after the actor's own position.
    */
-  drawActorAt(
-    target: ImageBuffer,
-    actor: ActorData,
-    gba = false,
-    offsetX = 0,
-    offsetY = 0,
-  ): void {
+  drawActorAt(target: ImageBuffer, actor: ActorData, gba = false, offsetX = 0, offsetY = 0): void {
     const renderer = gba ? this.spriteGBA : this.spriteTV;
     const variant = this.resolveVariant(actor.Id, actor.Variable);
     if (!variant) {
@@ -443,7 +441,13 @@ export class StageRenderer {
     // plain 16px/+8px offset keeps them roughly centred in the preview.
     this.drawActorAt(
       buffer,
-      { Id: id, Layer: 0, X: Math.round(width / 16), Y: Math.round(height / 16), Variable: variable },
+      {
+        Id: id,
+        Layer: 0,
+        X: Math.round(width / 16),
+        Y: Math.round(height / 16),
+        Variable: variable,
+      },
       gba,
     );
     return buffer;

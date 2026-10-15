@@ -65,10 +65,7 @@ export interface ActorDefinition {
 }
 
 /** Resolves the render variants a variable value selects (bit mask aware). */
-export function actorVariants(
-  definition: ActorDefinition,
-  variable: number,
-): ActorRenderVariant[] {
+export function actorVariants(definition: ActorDefinition, variable: number): ActorRenderVariant[] {
   const keys = definition.Rendering ?? [];
   if (keys.length === 0) {
     return [];

@@ -195,7 +195,7 @@ export class RoomCanvasComponent implements AfterViewInit {
     return actors;
   }
 
-  private _groundTiles: number[] | null = null;  /**
+  private _groundTiles: number[] | null = null; /**
    * Ground grid (row-major tile ids, 0 = empty) for the active base layer,
    * drawn as an underlay beneath the room layers/decorations. `null` disables
    * ground rendering (no ground record for this layer).

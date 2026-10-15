@@ -21,9 +21,7 @@ import { SmartObjectDefinition } from './smartobject.definition';
  * {@link smartObjectBounds} reports a 1×1 cell and hit-testing/outlining work
  * unchanged alongside decorations.
  */
-export function enemyDefinitions(
-  actors: Record<string, ActorDefinition>,
-): SmartObjectDefinition[] {
+export function enemyDefinitions(actors: Record<string, ActorDefinition>): SmartObjectDefinition[] {
   return Object.values(actors)
     .filter((definition) => definition.Category === 'Enemy')
     .map(toEnemySmartObject)
@@ -45,4 +43,3 @@ export function toEnemySmartObject(definition: ActorDefinition): SmartObjectDefi
     noGBASprite: definition.NoGBASprite,
   };
 }
-
