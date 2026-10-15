@@ -145,6 +145,7 @@ export class StageEditorService {
   async save(
     stageId: string,
     dirtyLayers: readonly DirtyLayer[] = [],
+    dirtyActorRooms: readonly number[] = [],
   ): Promise<{ bytes: Uint8Array; savedAt: Date } | null> {
     const loaded = this.cache.get(stageId);
     if (!loaded) {
@@ -172,6 +173,22 @@ export class StageEditorService {
       if (!updated) {
         this.logger.error(
           `StageEditor: failed to serialize layer ${layerIndex} of room ${roomIndex} in "${stageId}".`,
+        );
+        return null;
+      }
+      bytes = updated;
+    }
+
+    // Write back each room whose actor list changed (enemies).
+    for (const roomIndex of dirtyActorRooms) {
+      const actors = loaded.data.Rooms[roomIndex]?.Actors;
+      if (!actors) {
+        continue;
+      }
+      const updated = await this.fsaLib.setRoomActors(bytes, roomIndex, actors);
+      if (!updated) {
+        this.logger.error(
+          `StageEditor: failed to serialize actors of room ${roomIndex} in "${stageId}".`,
         );
         return null;
       }

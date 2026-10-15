@@ -187,6 +187,8 @@ namespace FSALib
     return JsonConvert.DeserializeObject<TValue>(json);
 #else
             var options = new JsonSerializerOptions();
+            options.PropertyNameCaseInsensitive = true;
+            options.NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString;
             options.Converters.Add(new JsonStringEnumConverter());
             options.Converters.Add(new Identifier32Converter());
             return JsonSerializer.Deserialize<TValue>(stream, options);

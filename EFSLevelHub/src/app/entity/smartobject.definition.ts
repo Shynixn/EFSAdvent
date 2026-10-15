@@ -10,8 +10,17 @@
  * negative (e.g. a canopy that overhangs to the left of the anchor).
  */
 
-/** The kind of a smart object. Currently only a placable decoration. */
-export type SmartObjectType = 'decoration';
+/**
+ * What a smart object bakes into when placed.
+ *
+ * - `tile`: stamps tiles onto the room layers (e.g. a tree, a door).
+ * - `actor`: places an **actor** in the room's actor list (`d_enemy_map*.bin`)
+ *   whose sprite is drawn over the tiles; no tiles are written.
+ *
+ * Everything else about a smart object (dragging, previewing, hit-testing,
+ * moving, rotating, deleting) is identical regardless of `baking`.
+ */
+export type SmartObjectBaking = 'tile' | 'actor';
 
 /** A single tile within a smart-object definition, relative to the anchor. */
 export interface SmartObjectTileOffset {
@@ -38,14 +47,14 @@ export interface SmartObjectVariant {
 }
 
 /** Toolbox section a definition belongs to. */
-export type SmartObjectSection = 'Doors' | 'Decorations';
+export type SmartObjectSection = 'Doors' | 'Decorations' | 'Enemies';
 
-/** A hard-coded smart-object (decoration) definition. */
+/** A hard-coded smart-object definition (tile-baked or actor-baked). */
 export interface SmartObjectDefinition {
-  /** Stable id, e.g. `tree`. */
+  /** Stable id, e.g. `tree`. For an actor-baked object this is the actor id. */
   id: string;
-  /** What kind of smart object this is (e.g. `decoration`). */
-  type: SmartObjectType;
+  /** Whether placing this object bakes tiles or an actor. */
+  baking: SmartObjectBaking;
   /** Display name shown in the toolbox. */
   name: string;
   /** Toolbox section this definition is grouped under. */
@@ -53,8 +62,19 @@ export interface SmartObjectDefinition {
   /**
    * The variants (rotation styles) of this object. Single-entry for objects
    * that do not rotate (e.g. a tree); four entries for doors (one per facing).
+   * Actor-baked objects have a single (empty) variant — they bake no tiles.
    */
   set: SmartObjectVariant[];
+  /**
+   * For `baking: 'actor'` objects: the 4-character actor id to place (e.g.
+   * `AMOS`) and the default `Variable` value selecting its render variant.
+   * Undefined for tile-baked objects.
+   */
+  actorId?: string;
+  /** Default actor `Variable` used when placing (actor-baked objects only). */
+  actorVariable?: number;
+  /** Whether the actor has no GBA-variant sprite (actor-baked objects only). */
+  noGBASprite?: boolean;
 }
 
 /**
@@ -69,7 +89,7 @@ export interface SmartObjectDefinition {
 export const SMART_OBJECT_DEFINITIONS: SmartObjectDefinition[] = [
   {
     id: 'closed-door',
-    type: 'decoration',
+    baking: 'tile',
     name: 'Closed door',
     section: 'Doors',
     set: [
@@ -113,7 +133,7 @@ export const SMART_OBJECT_DEFINITIONS: SmartObjectDefinition[] = [
   },
   {
     id: 'door',
-    type: 'decoration',
+    baking: 'tile',
     name: 'Door',
     section: 'Doors',
     set: [
@@ -157,7 +177,7 @@ export const SMART_OBJECT_DEFINITIONS: SmartObjectDefinition[] = [
   },
   {
     id: 'key-door',
-    type: 'decoration',
+    baking: 'tile',
     name: 'Key door',
     section: 'Doors',
     set: [
@@ -201,7 +221,7 @@ export const SMART_OBJECT_DEFINITIONS: SmartObjectDefinition[] = [
   },
   {
     id: 'big-closed-door',
-    type: 'decoration',
+    baking: 'tile',
     name: 'Big Closed door',
     section: 'Doors',
     set: [
@@ -277,7 +297,7 @@ export const SMART_OBJECT_DEFINITIONS: SmartObjectDefinition[] = [
   },
   {
     id: 'big-door',
-    type: 'decoration',
+    baking: 'tile',
     name: 'Big Door',
     section: 'Doors',
     set: [
@@ -353,7 +373,7 @@ export const SMART_OBJECT_DEFINITIONS: SmartObjectDefinition[] = [
   },
   {
     id: 'big-key-door',
-    type: 'decoration',
+    baking: 'tile',
     name: 'Big Key door',
     section: 'Doors',
     set: [
@@ -429,7 +449,7 @@ export const SMART_OBJECT_DEFINITIONS: SmartObjectDefinition[] = [
   },
   {
     id: 'cave-entrance',
-    type: 'decoration',
+    baking: 'tile',
     name: 'Cave entrance',
     section: 'Decorations',
     set: [
@@ -446,7 +466,7 @@ export const SMART_OBJECT_DEFINITIONS: SmartObjectDefinition[] = [
   },
   {
     id: 'fire-house',
-    type: 'decoration',
+    baking: 'tile',
     name: 'Fire House',
     section: 'Decorations',
     set: [
@@ -496,7 +516,7 @@ export const SMART_OBJECT_DEFINITIONS: SmartObjectDefinition[] = [
   },
   {
     id: 'hidden-staircase',
-    type: 'decoration',
+    baking: 'tile',
     name: 'Hidden Staircase',
     section: 'Decorations',
     set: [
@@ -513,7 +533,7 @@ export const SMART_OBJECT_DEFINITIONS: SmartObjectDefinition[] = [
   },
   {
     id: 'house-closed-door',
-    type: 'decoration',
+    baking: 'tile',
     name: 'House closed door',
     section: 'Decorations',
     set: [
@@ -530,7 +550,7 @@ export const SMART_OBJECT_DEFINITIONS: SmartObjectDefinition[] = [
   },
   {
     id: 'house1',
-    type: 'decoration',
+    baking: 'tile',
     name: 'House1',
     section: 'Decorations',
     set: [
@@ -573,7 +593,7 @@ export const SMART_OBJECT_DEFINITIONS: SmartObjectDefinition[] = [
   },
   {
     id: 'house2',
-    type: 'decoration',
+    baking: 'tile',
     name: 'House2',
     section: 'Decorations',
     set: [
@@ -623,7 +643,7 @@ export const SMART_OBJECT_DEFINITIONS: SmartObjectDefinition[] = [
   },
   {
     id: 'lifting-rock-soil',
-    type: 'decoration',
+    baking: 'tile',
     name: 'Lifting rock soil',
     section: 'Decorations',
     set: [
@@ -640,7 +660,7 @@ export const SMART_OBJECT_DEFINITIONS: SmartObjectDefinition[] = [
   },
   {
     id: 'statue',
-    type: 'decoration',
+    baking: 'tile',
     name: 'Statue',
     section: 'Decorations',
     set: [
@@ -657,7 +677,7 @@ export const SMART_OBJECT_DEFINITIONS: SmartObjectDefinition[] = [
   },
   {
     id: 'tree',
-    type: 'decoration',
+    baking: 'tile',
     name: 'Tree',
     section: 'Decorations',
     set: [
@@ -701,7 +721,7 @@ export const SMART_OBJECT_DEFINITIONS: SmartObjectDefinition[] = [
   },
   {
     id: 'treetop',
-    type: 'decoration',
+    baking: 'tile',
     name: 'Treetop',
     section: 'Decorations',
     set: [
@@ -731,7 +751,28 @@ export const SMART_OBJECT_DEFINITIONS: SmartObjectDefinition[] = [
   },
 ];
 
-/** Looks up a smart-object definition by id. */
+/**
+ * Actor-baked (enemy) definitions, registered at runtime from FSALib's actor
+ * catalog. Kept separate from the static catalog because they are loaded
+ * asynchronously; {@link findSmartObjectDefinition} searches both.
+ */
+const ACTOR_SMART_OBJECTS = new Map<string, SmartObjectDefinition>();
+
+/**
+ * Registers actor-baked smart objects (enemies) so placements referring to them
+ * can be resolved by id (for hover, move, delete and rotation).
+ */
+export function registerActorSmartObjects(definitions: SmartObjectDefinition[]): void {
+  ACTOR_SMART_OBJECTS.clear();
+  for (const definition of definitions) {
+    ACTOR_SMART_OBJECTS.set(definition.id, definition);
+  }
+}
+
+/** Looks up a smart-object definition by id (static catalog then actor-baked). */
 export function findSmartObjectDefinition(id: string): SmartObjectDefinition | undefined {
-  return SMART_OBJECT_DEFINITIONS.find((definition) => definition.id === id);
+  return (
+    SMART_OBJECT_DEFINITIONS.find((definition) => definition.id === id) ??
+    ACTOR_SMART_OBJECTS.get(id)
+  );
 }

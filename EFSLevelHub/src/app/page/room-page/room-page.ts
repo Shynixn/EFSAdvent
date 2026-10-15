@@ -21,6 +21,7 @@ import {
 import { ThemePickerComponent } from '../../component/theme-picker/theme-picker.component';
 import { LoadingOverlayComponent } from '../../component/loading-overlay/loading-overlay.component';
 import { StageService, StageFile } from '../../service/stage.service';
+import { FSALibService } from '../../service/fsalib.service';
 import { StageTabsService } from '../../service/stage-tabs.service';
 import { StageEditorService } from '../../service/stage-editor.service';
 import { StagePreviewService } from '../../service/stage-preview.service';
@@ -35,13 +36,18 @@ import {
 } from '../../service/iso-builder.service';
 import { IsoSourceService } from '../../service/iso-source.service';
 import { LoggingService } from '../../service/logging.service';
-import { RoomData, StageData } from '../../entity/fsalib.entity';
+import { ActorData, RoomData, StageData } from '../../entity/fsalib.entity';
 import { GroundDefinition, GroundLayer, createGroundLayer } from '../../entity/ground.entity';
 import {
+  SmartObjectDefinition,
   SmartObjectPlacement,
+  actorToPlacement,
   findSmartObjectDefinition,
+  placementToActor,
+  registerActorSmartObjects,
   smartObjectVariant,
 } from '../../entity/smartobject.entity';
+import { enemyDefinitions } from '../../entity/enemy.definition';
 import { TilesetTheme } from '../../entity/tileset.util';
 import { StageRenderer } from '../../service/render/stage-renderer';
 import { nextPaint } from '../../util/paint';
@@ -79,6 +85,7 @@ import { nextPaint } from '../../util/paint';
 })
 export class RoomPage implements OnInit, OnDestroy {
   private readonly stageService = inject(StageService);
+  private readonly fsaLib = inject(FSALibService);
   private readonly stageTabs = inject(StageTabsService);
   private readonly stageEditor = inject(StageEditorService);
   private readonly stagePreview = inject(StagePreviewService);
@@ -126,11 +133,26 @@ export class RoomPage implements OnInit, OnDestroy {
   readonly tool = signal<'brush' | 'hand' | 'eraser'>('hand');
 
   /**
-   * Smart objects (decorations) placed in the current room. Populated only by
-   * placing a decoration (never derived from tiles) and persisted to the stage
-   * JSON on save.
+   * Smart objects placed in the current room. Populated only by placing one
+   * (never derived from tiles) and persisted to the stage JSON on save.
+   *
+   * Covers both tile-baked objects (decorations) and actor-baked ones
+   * (enemies) — they differ only in what they bake.
    */
   readonly smartObjects = signal<SmartObjectPlacement[]>([]);
+
+  /**
+   * The actor records for this room, derived from the actor-baked placements in
+   * {@link smartObjects}. Written to the archive's `d_enemy_map*.bin` on save.
+   */
+  readonly actors = computed<ActorData[]>(() =>
+    this.smartObjects()
+      .filter((placement) => findSmartObjectDefinition(placement.id)?.baking === 'actor')
+      .map(placementToActor),
+  );
+
+  /** Placable enemies (actor-baked smart objects), shown in the toolbox. */
+  readonly enemies = signal<SmartObjectDefinition[]>([]);
 
   /**
    * Ground layers painted in the current room (one entry per base layer).
@@ -382,7 +404,7 @@ export class RoomPage implements OnInit, OnDestroy {
       this.renderer.set(loaded.renderer);
       // Seed the shared theme service with the stage's current tileset.
       this.themeService.setSelected(stageId, loaded.data.Map.TileSheetId);
-      void this.themeService.ensureLoaded();
+      await this.themeService.ensureLoaded();
 
       const room = loaded.data.Rooms[roomIndex] ?? null;
       if (!room) {
@@ -396,8 +418,18 @@ export class RoomPage implements OnInit, OnDestroy {
       const record = grid
         ? await this.stageService.getRoomRecord(stageId, grid.row, grid.col)
         : null;
-      this.smartObjects.set(record?.smartObjects ?? []);
+      // Actors (enemies) live in the archive, not the stage JSON: turn each one
+      // into an actor-baked placement so they share the smart-object list and
+      // every decoration interaction (hover, move, delete) works on them too.
+      const actorPlacements = (room.Actors ?? []).map((actor) => actorToPlacement(actor));
+      this.smartObjects.set([...(record?.smartObjects ?? []), ...actorPlacements]);
       this.groundLayers.set((record?.ground ?? []).map((layer) => ({ ...layer })));
+
+      // Load the placable enemy catalog (actor category `Enemy`) and the sprite
+      // sheets/thumbnails it needs, so the toolbox is fully populated before the
+      // loading overlay is dismissed.
+      await this.ensureEnemies();
+      await this.prepareEnemySprites();
 
       // Show the stage's current definition file in the System column.
       this.stageFile.set(await this.stageService.getStageFile(stageId));
@@ -409,7 +441,7 @@ export class RoomPage implements OnInit, OnDestroy {
       this.stageRoom.open(stageId, roomIndex);
 
       // Whether a test ISO can be exported (a source disc image must be saved).
-      void this.isoSource.exists().then((has) => this.canExport.set(has));
+      this.canExport.set(await this.isoSource.exists());
     } catch (error) {
       this.loadError.set(error instanceof Error ? error.message : 'Failed to load the room.');
       this.logger.error(`RoomPage: failed to load room ${roomIndex} of "${stageId}"`, error);
@@ -515,9 +547,16 @@ export class RoomPage implements OnInit, OnDestroy {
    */
   onDecorationPlaced(placement: SmartObjectPlacement): void {
     this.stageEditor.setDirty(this.stageId(), true);
-    const base = placement.baseLayerId;
-    this.stageRoom.markLayerDirty(this.roomIndex(), base);
-    this.stageRoom.markLayerDirty(this.roomIndex(), base + 8);
+    const definition = findSmartObjectDefinition(placement.id);
+    if (definition?.baking === 'actor') {
+      // Actor-baked objects are persisted to the archive's enemy list, not the
+      // room's tile layers — only the actor rooms need marking dirty.
+      this.stageRoom.markActorsDirty(this.roomIndex());
+    } else {
+      const base = placement.baseLayerId;
+      this.stageRoom.markLayerDirty(this.roomIndex(), base);
+      this.stageRoom.markLayerDirty(this.roomIndex(), base + 8);
+    }
     this.smartObjects.update((list) => [...list, placement]);
   }
 
@@ -528,9 +567,14 @@ export class RoomPage implements OnInit, OnDestroy {
    */
   onDecorationMoved(event: { from: SmartObjectPlacement; to: SmartObjectPlacement }): void {
     this.stageEditor.setDirty(this.stageId(), true);
-    const base = event.to.baseLayerId;
-    this.stageRoom.markLayerDirty(this.roomIndex(), base);
-    this.stageRoom.markLayerDirty(this.roomIndex(), base + 8);
+    const definition = findSmartObjectDefinition(event.to.id);
+    if (definition?.baking === 'actor') {
+      this.stageRoom.markActorsDirty(this.roomIndex());
+    } else {
+      const base = event.to.baseLayerId;
+      this.stageRoom.markLayerDirty(this.roomIndex(), base);
+      this.stageRoom.markLayerDirty(this.roomIndex(), base + 8);
+    }
     this.smartObjects.update((list) =>
       list.map((placement) => (placement === event.from ? event.to : placement)),
     );
@@ -557,10 +601,61 @@ export class RoomPage implements OnInit, OnDestroy {
    */
   onDecorationDeleted(placement: SmartObjectPlacement): void {
     this.stageEditor.setDirty(this.stageId(), true);
-    const base = placement.baseLayerId;
-    this.stageRoom.markLayerDirty(this.roomIndex(), base);
-    this.stageRoom.markLayerDirty(this.roomIndex(), base + 8);
+    const definition = findSmartObjectDefinition(placement.id);
+    if (definition?.baking === 'actor') {
+      this.stageRoom.markActorsDirty(this.roomIndex());
+    } else {
+      const base = placement.baseLayerId;
+      this.stageRoom.markLayerDirty(this.roomIndex(), base);
+      this.stageRoom.markLayerDirty(this.roomIndex(), base + 8);
+    }
     this.smartObjects.update((list) => list.filter((entry) => entry !== placement));
+  }
+
+  /** Loads the placable enemy catalog (actor-baked smart objects) once. */
+  private async ensureEnemies(): Promise<void> {
+    if (this.enemies().length > 0) {
+      return;
+    }
+    try {
+      const actors = await this.fsaLib.loadActors();
+      const enemies = enemyDefinitions(actors);
+      if (enemies.length === 0) {
+        this.logger.warn(
+          `RoomPage: no enemy actors resolved from ${Object.keys(actors).length} definitions`,
+        );
+      }
+      // Register them as smart objects so placements (from the archive or a
+      // fresh drop) resolve by id for hover/move/delete.
+      registerActorSmartObjects(enemies);
+      this.enemies.set(enemies);
+    } catch (error) {
+      this.logger.warn('RoomPage: failed to load enemy definitions', error);
+    }
+  }
+
+  /**
+   * Loads the actor sprite sheets/attribute lists/palettes the toolbox and canvas
+   * need, so enemy thumbnails and placed actors are ready before the loading
+   * overlay is dismissed.
+   */
+  private async prepareEnemySprites(): Promise<void> {
+    try {
+      await this.renderer()?.prepareActors();
+    } catch (error) {
+      this.logger.warn('RoomPage: failed to load actor sprites', error);
+    }
+  }
+
+  /**
+   * Copies the editor's actor-baked placements onto the room object the archive
+   * is serialized from, so the save writes the current enemies.
+   */
+  private syncRoomActors(): void {
+    const room = this.room();
+    if (room) {
+      room.Actors = this.actors();
+    }
   }
 
   /**
@@ -745,7 +840,14 @@ export class RoomPage implements OnInit, OnDestroy {
       // Stamp the painted ground into the room layers first so it is baked into
       // the archive by the save below (ground otherwise only lives in the JSON).
       this.bakeGroundIntoRoom();
-      const result = await this.stageEditor.save(id, this.stageRoom.dirtyLayers());
+      // Sync the room's in-memory actor list from the editor's placements so the
+      // save writes the current enemies into the archive.
+      this.syncRoomActors();
+      const result = await this.stageEditor.save(
+        id,
+        this.stageRoom.dirtyLayers(),
+        this.stageRoom.dirtyActorRoomIndices(),
+      );
       if (!result) {
         this.loadError.set('Failed to save the room.');
         return;

@@ -15,6 +15,7 @@
  */
 
 import { ImageBuffer, TILE_SIZE } from '../service/render/gba-tile-renderer';
+import { ActorData } from './fsalib.entity';
 import { GroundLayer, ROOM_DIMENSION } from './ground.entity';
 import {
   SmartObjectDefinition,
@@ -22,12 +23,16 @@ import {
   SmartObjectVariant,
 } from './smartobject.definition';
 
-export { SMART_OBJECT_DEFINITIONS, findSmartObjectDefinition } from './smartobject.definition';
+export {
+  SMART_OBJECT_DEFINITIONS,
+  findSmartObjectDefinition,
+  registerActorSmartObjects,
+} from './smartobject.definition';
 export type {
   SmartObjectDefinition,
   SmartObjectSection,
   SmartObjectTileOffset,
-  SmartObjectType,
+  SmartObjectBaking,
   SmartObjectVariant,
 } from './smartobject.definition';
 
@@ -80,6 +85,11 @@ export interface SmartObjectPlacement {
   bottomLayerTiles: SmartObjectTileRef[];
   /** Absolute tile coordinates written to the paired top layer (`baseLayerId + 8`). */
   topLayerTiles: SmartObjectTileRef[];
+  /**
+   * For actor-baked objects (enemies): the actor `Variable` value used when
+   * placed. Undefined for tile-baked objects.
+   */
+  actorVariable?: number;
 }
 
 /**
@@ -126,6 +136,10 @@ export function applySmartObject(
     anchorCol,
     bottomLayerTiles: [],
     topLayerTiles: [],
+    // Actor-baked objects record the variable used; tile-baked ones leave it off.
+    ...(definition.baking === 'actor'
+      ? { actorVariable: definition.actorVariable ?? 0 }
+      : {}),
   };
 
   const write = (
@@ -167,6 +181,38 @@ export function clearSmartObject(
     const layer = layers[baseLayerIndex + 8];
     layer?.Tiles && (layer.Tiles[ref.row * ROOM_DIMENSION + ref.col] = 0);
   }
+}
+
+/**
+ * Converts an actor-baked placement into an {@link ActorData} room record.
+ *
+ * Actors are stored in HALF-TILE coordinates, so the placement's anchor tile is
+ * converted to the centre of its cell (`tile * 2 + 1`).
+ */
+export function placementToActor(placement: SmartObjectPlacement): ActorData {
+  return {
+    Id: placement.id,
+    Layer: placement.baseLayerId,
+    X: placement.anchorCol * 2 + 1,
+    Y: placement.anchorRow * 2 + 1,
+    Variable: placement.actorVariable ?? 0,
+  };
+}
+
+/** The inverse of {@link placementToActor}: an actor record back to a placement. */
+export function actorToPlacement(actor: ActorData): SmartObjectPlacement {
+  const anchorCol = Math.floor(actor.X / 2);
+  const anchorRow = Math.floor(actor.Y / 2);
+  return {
+    id: actor.Id,
+    variantIndex: 0,
+    baseLayerId: actor.Layer & 0x0f,
+    anchorRow,
+    anchorCol,
+    bottomLayerTiles: [],
+    topLayerTiles: [],
+    actorVariable: actor.Variable,
+  };
 }
 
 /**

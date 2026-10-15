@@ -115,3 +115,55 @@ public sealed class StageDefinitionDto
     /// <summary>Texture shown as the stage title card, e.g. <c>w01_03.bti</c>.</summary>
     public string TitleCardGraphic { get; set; } = string.Empty;
 }
+
+/// <summary>
+/// One render variant of an actor, projected from a FSALib
+/// <c>ActorRenderVariant</c>.
+/// </summary>
+public sealed class ActorRenderVariantDto
+{
+    public short XOffset { get; set; }
+    public short YOffset { get; set; }
+    public float XScale { get; set; } = 1;
+    public float YScale { get; set; } = 1;
+    public float Rotation { get; set; }
+    public short SpriteIndex { get; set; } = -1;
+    public ushort SpriteListIndex { get; set; }
+    public sbyte ReplacementPaletteIndex { get; set; } = -1;
+    public sbyte TargetPaletteIndex { get; set; } = -1;
+    public string BtiFile { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// A single variable key of an actor's render definition: the value of
+/// <c>actor.Variable &amp; BitMask</c> and the variants drawn for it.
+/// </summary>
+public sealed class ActorRenderKeyDto
+{
+    public int Key { get; set; }
+    public List<ActorRenderVariantDto> Variants { get; set; } = new();
+}
+
+/// <summary>JSON-serializable projection of a FSALib <c>ActorDefinition</c>.</summary>
+public sealed class ActorDefinitionDto
+{
+    /// <summary>4-character actor id (e.g. <c>AMOS</c>).</summary>
+    public string Id { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public string InternalName { get; set; } = string.Empty;
+
+    /// <summary>Category name (e.g. <c>Enemy</c>, <c>Boss</c>, <c>NPC</c>).</summary>
+    public string Category { get; set; } = string.Empty;
+
+    public bool NoGBASprite { get; set; }
+
+    /// <summary>Level resource names used to locate the actor's sprite files.</summary>
+    public List<string> Resources { get; set; } = new();
+
+    /// <summary>Bit mask applied to <c>actor.Variable</c> to pick a variant key.</summary>
+    public uint BitMask { get; set; }
+
+    /// <summary>Render variants keyed by <c>Variable &amp; BitMask</c>.</summary>
+    public List<ActorRenderKeyDto> Rendering { get; set; } = new();
+}

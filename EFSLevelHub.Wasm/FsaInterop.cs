@@ -2,6 +2,7 @@ using System.Runtime.InteropServices.JavaScript;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using AuroraLib.Compression;
+using AuroraLib.Core.Format.Identifier;
 using AuroraLib.Core.IO;
 using FSALib;
 using FSALib.Structs;
@@ -232,11 +233,78 @@ public static partial class FsaInterop
         }
     }
 
+    /// <summary>
+    /// Replaces a room's actor list (the <c>d_enemy_mapMMM_RR.bin</c> contents) in
+    /// a stage archive and re-serializes it.
+    ///
+    /// Used by the room editor to persist placed/removed enemies (smart objects
+    /// of type <c>enemy</c>). Coordinates are half-tiles, matching FSALib's
+    /// <c>Actor</c> struct.
+    /// </summary>
+    /// <param name="arcData">Raw bytes of the stage archive.</param>
+    /// <param name="roomIndex">Room whose actors are being replaced.</param>
+    /// <param name="actorsJson">
+    /// JSON array of <c>{ id, layer, x, y, variable }</c> objects. Passed as JSON
+    /// because the struct array is not supported by the source-generated interop.
+    /// </param>
+    /// <returns>The re-serialized archive bytes, or an empty array on failure.</returns>
+    [JSExport]
+    public static byte[] SetRoomActors(byte[] arcData, int roomIndex, string actorsJson)
+    {
+        try
+        {
+            List<ActorDto>? actors;
+            try
+            {
+                actors = JsonSerializer.Deserialize<List<ActorDto>>(actorsJson, JsonOptions);
+            }
+            catch
+            {
+                return Array.Empty<byte>();
+            }
+
+            if (actors == null)
+            {
+                return Array.Empty<byte>();
+            }
+
+            using var stream = new MemoryStream(arcData, writable: false);
+            using var rarc = new Rarc(stream);
+            using var stage = new Stage(rarc);
+
+            if (roomIndex < 0 || roomIndex >= stage.Rooms.Length)
+            {
+                return Array.Empty<byte>();
+            }
+            Room? room = stage.Rooms[roomIndex];
+            if (room == null)
+            {
+                return Array.Empty<byte>();
+            }
+
+            room.Actors.Clear();
+            foreach (var dto in actors)
+            {
+                room.Actors.Add(new Actor(
+                    new Identifier32(dto.Id.AsSpan()),
+                    dto.Layer,
+                    dto.X,
+                    dto.Y,
+                    dto.Variable));
+            }
+
+            return SerializeStage(stage);
+        }
+        catch
+        {
+            return Array.Empty<byte>();
+        }
+    }
+
     /// <summary>Liveness probe returning the FSALib version.</summary>
     [JSExport]
     public static string GetVersion()
         => typeof(Stage).Assembly.GetName().Version?.ToString() ?? "unknown";
-    /// <summary>
     /// Merges one stage's *content* (map layout, rooms, actors and layers) into
     /// another stage's archive, keeping the destination's slot structure.
     /// </summary>
@@ -391,6 +459,68 @@ public static partial class FsaInterop
                     TextID = pair.Value.TextID,
                     TitleCardGraphic = pair.Value.TitleCardGraphic,
                 };
+            }
+            return JsonSerializer.Serialize(map, JsonOptions);
+        }
+        catch (Exception ex)
+        {
+            return JsonSerializer.Serialize(new { error = ex.Message }, JsonOptions);
+        }
+    }
+
+    /// <summary>
+    /// Returns the actor definitions loaded by FSALib (<c>Assets.Actors</c>) as
+    /// JSON, keyed by their 4-character id. Lets the Angular editor list enemy
+    /// types and resolve their render variants without shipping a duplicate copy
+    /// of the data.
+    /// </summary>
+    [JSExport]
+    public static string GetActors()
+    {
+        try
+        {
+            var map = new Dictionary<string, ActorDefinitionDto>();
+            foreach (var pair in FSALib.Assets.Actors)
+            {
+                var definition = pair.Value;
+                var dto = new ActorDefinitionDto
+                {
+                    Id = pair.Key.ToString(),
+                    Name = definition.Name,
+                    Description = definition.Description,
+                    InternalName = definition.InternalName,
+                    Category = definition.Category.ToString(),
+                    NoGBASprite = definition.NoGBASprite,
+                    Resources = definition.Resources ?? new List<string>(),
+                };
+
+                if (definition.Rendering != null)
+                {
+                    dto.BitMask = definition.Rendering.BitMask;
+                    foreach (var variant in definition.Rendering.Variants)
+                    {
+                        var key = new ActorRenderKeyDto { Key = variant.Key };
+                        foreach (var render in variant.Value)
+                        {
+                            key.Variants.Add(new ActorRenderVariantDto
+                            {
+                                XOffset = render.XOffset,
+                                YOffset = render.YOffset,
+                                XScale = render.XScale,
+                                YScale = render.YScale,
+                                Rotation = render.Rotation,
+                                SpriteIndex = render.SpriteIndex,
+                                SpriteListIndex = render.SpriteListIndex,
+                                ReplacementPaletteIndex = render.ReplacementPaletteIndex,
+                                TargetPaletteIndex = render.TargetPaletteIndex,
+                                BtiFile = render.BtiFile,
+                            });
+                        }
+                        dto.Rendering.Add(key);
+                    }
+                }
+
+                map[dto.Id] = dto;
             }
             return JsonSerializer.Serialize(map, JsonOptions);
         }

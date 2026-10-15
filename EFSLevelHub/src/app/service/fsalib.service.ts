@@ -2,7 +2,8 @@ import { Injectable, inject } from '@angular/core';
 import UPNG from 'upng-js';
 import { LoggingService } from './logging.service';
 import { OpfsCacheService } from './opfs-cache.service';
-import { StageData } from '../entity/fsalib.entity';
+import { ActorData, StageData } from '../entity/fsalib.entity';
+import { ActorDefinition } from '../entity/actor-definition.entity';
 import { parseBti } from './render/bti-texture';
 import { decodeTexture } from './render/bti-image';
 import { ImageBuffer, loadPalettes } from './render/gba-tile-renderer';
@@ -33,12 +34,14 @@ interface DotnetExports {
           layerIndex: number,
           tilesJson: string,
         ): Uint8Array;
+        SetRoomActors(arcData: Uint8Array, roomIndex: number, actorsJson: string): Uint8Array;
         ListArchiveFiles(arcData: Uint8Array): string;
         ReadArchiveFile(arcData: Uint8Array, path: string): Uint8Array;
         Unzip(zipData: Uint8Array): string;
         EnsureAssets(): string;
         GetTilesets(): string;
         GetStages(): string;
+        GetActors(): string;
         GetVersion(): string;
       };
     };
@@ -122,6 +125,9 @@ export class FSALibService {
 
   /** Cached stage definitions promise. */
   private stagesPromise: Promise<Record<string, StageInfo>> | null = null;
+
+  /** Cached actor definitions promise. */
+  private actorsPromise: Promise<Record<string, ActorDefinition>> | null = null;
 
   /**
    * Cached `data.arc` bytes. The archive is tens of MB and is needed by every
@@ -244,6 +250,35 @@ export class FSALibService {
   ): Promise<Uint8Array | null> {
     const fsa = await this.getFsa();
     const result = fsa.SetRoomLayer(arcData, roomIndex, layerIndex, JSON.stringify(tiles));
+    return result && result.byteLength > 0 ? result : null;
+  }
+
+  /**
+   * Replaces a room's actor list (the `d_enemy_mapMMM_RR.bin` contents) and
+   * re-serializes the archive.
+   *
+   * Used by the room editor to persist placed/removed enemies. Actor coordinates
+   * are **half-tiles**, matching FSALib's `Actor` struct.
+   *
+   * @param arcData   Raw bytes of the stage archive.
+   * @param roomIndex Room whose actors are being replaced.
+   * @param actors    Actor records to write (id/layer/x/y/variable).
+   * @returns The re-serialized archive bytes, or null on failure.
+   */
+  async setRoomActors(
+    arcData: Uint8Array,
+    roomIndex: number,
+    actors: readonly ActorData[],
+  ): Promise<Uint8Array | null> {
+    const fsa = await this.getFsa();
+    const payload = actors.map((actor) => ({
+      id: actor.Id,
+      layer: actor.Layer,
+      x: actor.X,
+      y: actor.Y,
+      variable: actor.Variable,
+    }));
+    const result = fsa.SetRoomActors(arcData, roomIndex, JSON.stringify(payload));
     return result && result.byteLength > 0 ? result : null;
   }
 
@@ -401,6 +436,7 @@ export class FSALibService {
       },
       resolver,
       tilesets ?? (await this.loadTilesets()),
+      await this.loadActors(),
     );
     await renderer.init();
     return renderer;
@@ -715,6 +751,34 @@ export class FSALibService {
         });
     }
     return this.stagesPromise;
+  }
+
+  /**
+   * Loads and caches the actor definitions FSALib has loaded from its assets
+   * (`assets/actors/*.json`), keyed by the 4-character actor id.
+   *
+   * Drives the editor's Enemies toolbox section and the on-canvas actor
+   * rendering.
+   */
+  async loadActors(): Promise<Record<string, ActorDefinition>> {
+    if (!this.actorsPromise) {
+      this.actorsPromise = this.getFsa()
+        .then((fsa) => {
+          fsa.EnsureAssets();
+          const parsed = JSON.parse(fsa.GetActors()) as Record<string, ActorDefinition> & {
+            error?: string;
+          };
+          if (typeof parsed.error === 'string') {
+            throw new Error(parsed.error);
+          }
+          return parsed as Record<string, ActorDefinition>;
+        })
+        .catch((err) => {
+          this.logger.error('FSALib: failed to read actors from wasm', err);
+          return {} as Record<string, ActorDefinition>;
+        });
+    }
+    return this.actorsPromise;
   }
 
   /**

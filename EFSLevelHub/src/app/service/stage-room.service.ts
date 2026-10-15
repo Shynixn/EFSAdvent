@@ -60,6 +60,24 @@ export class StageRoomService {
   /** Clears all pending layer edits (after a successful save). */
   clearDirtyLayers(): void {
     this.dirtyLayerMap.set({});
+    this.dirtyActorRooms.set(new Set());
+  }
+
+  /** Room indices whose actor list changed since the last save. */
+  private readonly dirtyActorRooms = signal<Set<number>>(new Set());
+
+  /** Room indices whose actors should be written when saving. */
+  readonly dirtyActorRoomIndices = computed<number[]>(() =>
+    [...this.dirtyActorRooms()].sort((a, b) => a - b),
+  );
+
+  /** Records that a room's actor list was edited (so save writes it back). */
+  markActorsDirty(roomIndex: number): void {
+    this.dirtyActorRooms.update((set) => {
+      const next = new Set(set);
+      next.add(roomIndex);
+      return next;
+    });
   }
 
   /** Updates the room editor's dirty flag (called by the editor). */

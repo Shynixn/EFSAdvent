@@ -9,6 +9,7 @@
  * resource archive (read through `FSALibService`).
  */
 import { ActorData, LayerData, RoomData, StageData } from '../../entity/fsalib.entity';
+import { ActorDefinition, ActorRenderVariant, actorVariants } from '../../entity/actor-definition.entity';
 import { SmartObjectDefinition, renderSmartObjectPreview } from '../../entity/smartobject.entity';
 import { BtiTexture, parseBti } from './bti-texture';
 import { decodeTexture } from './bti-image';
@@ -120,6 +121,12 @@ export class StageRenderer {
     private readonly readResource: ResourceReader,
     private readonly resolver: ArchivePathResolver,
     private readonly tilesets: Record<string, TilesetInfo>,
+    /**
+     * Actor definitions keyed by 4-character id. When provided, actors render
+     * with their real sprites (SOB tiles) or BTI textures. Empty disables actor
+     * rendering.
+     */
+    private readonly actors: Record<string, ActorDefinition> = {},
   ) {}
 
   /** Loads the shared tile layout (`bg_a_spl.szs`) and TIMG textures. */
@@ -356,6 +363,93 @@ export class StageRenderer {
   }
 
   /**
+   * Loads the sprite sheets, SOB attribute lists and palettes needed to draw
+   * actors for the stage's NPC sheet index. Safe to call repeatedly.
+   */
+  async prepareActors(): Promise<void> {
+    await this.ensureSprites(this.stage.Map.NpcSheetId & 0xff);
+  }
+
+  /**
+   * Draws a single actor at a pixel offset (used by the room editor to overlay
+   * actors on the layer canvas). Coordinates are pixels, not half-tiles.
+   *
+   * @param target     Destination image.
+   * @param actor      Actor record (its `X`/`Y` are half-tiles).
+   * @param gba        Draw the GBA variant (layer level 1) instead of the TV one.
+   * @param offsetX    Extra pixel offset applied after the actor's own position.
+   * @param offsetY    Extra pixel offset applied after the actor's own position.
+   */
+  drawActorAt(
+    target: ImageBuffer,
+    actor: ActorData,
+    gba = false,
+    offsetX = 0,
+    offsetY = 0,
+  ): void {
+    const renderer = gba ? this.spriteGBA : this.spriteTV;
+    const variant = this.resolveVariant(actor.Id, actor.Variable);
+    if (!variant) {
+      return;
+    }
+    if (variant.SpriteIndex !== -1) {
+      renderer.drawSprite(
+        target,
+        actor.X * 8 + variant.XOffset + offsetX,
+        actor.Y * 8 + variant.YOffset + offsetY,
+        variant.SpriteIndex,
+        variant.SpriteListIndex,
+        variant.ReplacementPaletteIndex,
+        variant.TargetPaletteIndex,
+      );
+      return;
+    }
+    if (!variant.BtiFile) {
+      return;
+    }
+    const image = this.images.get(variant.BtiFile);
+    if (!image) {
+      return;
+    }
+    const drawX = actor.X * 8 + variant.XOffset + offsetX;
+    const drawY = actor.Y * 8 + variant.YOffset + offsetY;
+    target.blendFrom(image, drawX, drawY);
+  }
+
+  /**
+   * Renders a single actor into a fresh transparent buffer sized to fit it (for
+   * the toolbox's Enemies thumbnails).
+   *
+   * @param id       Actor id (4 characters).
+   * @param variable Actor variable value selecting the render variant.
+   * @param width    Buffer width in pixels.
+   * @param height   Buffer height in pixels.
+   * @param gba      Use the GBA sprite sheet.
+   */
+  renderActorPreview(
+    id: string,
+    variable = 0,
+    width = 32,
+    height = 32,
+    gba = false,
+  ): ImageBuffer | null {
+    const variant = this.resolveVariant(id, variable);
+    if (!variant) {
+      return null;
+    }
+    const buffer = new ImageBuffer(width, height);
+    buffer.fill(0, 0, 0, 0);
+    // Actor sprites are anchored at the bottom-centre of their 16px cell; a
+    // plain 16px/+8px offset keeps them roughly centred in the preview.
+    this.drawActorAt(
+      buffer,
+      { Id: id, Layer: 0, X: Math.round(width / 16), Y: Math.round(height / 16), Variable: variable },
+      gba,
+    );
+    return buffer;
+  }
+
+  /**
    * Renders a smart-object definition into a fresh RGBA buffer sized to its
    * bounding box, for the toolbox thumbnail. Honours the GBA tileset flag.
    */
@@ -412,30 +506,30 @@ export class StageRenderer {
       return;
     }
 
-    if (variant.spriteIndex !== undefined && variant.spriteIndex !== -1) {
+    if (variant.SpriteIndex !== undefined && variant.SpriteIndex !== -1) {
       renderer.drawSprite(
         target,
-        actorOffsetX + variant.xOffset,
-        actorOffsetY + variant.yOffset,
-        variant.spriteIndex,
-        variant.spriteListIndex,
-        variant.replacementPaletteIndex,
-        variant.targetPaletteIndex,
+        actorOffsetX + variant.XOffset,
+        actorOffsetY + variant.YOffset,
+        variant.SpriteIndex,
+        variant.SpriteListIndex,
+        variant.ReplacementPaletteIndex,
+        variant.TargetPaletteIndex,
       );
       return;
     }
 
     // BTI-rendered actor (TV layer only in the C# renderer).
-    if (layerLevel !== 0 || !variant.btiFile) {
+    if (layerLevel !== 0 || !variant.BtiFile) {
       return;
     }
-    const image = this.images.get(variant.btiFile);
+    const image = this.images.get(variant.BtiFile);
     if (!image) {
       return;
     }
-    const drawX = actorOffsetX + variant.xOffset - Math.floor(image.width / 2);
-    const drawY = actorOffsetY + variant.yOffset - Math.floor(image.height / 2);
-    if (this.isLightTexture(variant.btiFile)) {
+    const drawX = actorOffsetX + variant.XOffset - Math.floor(image.width / 2);
+    const drawY = actorOffsetY + variant.YOffset - Math.floor(image.height / 2);
+    if (this.isLightTexture(variant.BtiFile)) {
       target.addFrom(image, drawX, drawY, 0.6);
     } else {
       target.blendFrom(image, drawX, drawY);
@@ -443,25 +537,17 @@ export class StageRenderer {
   }
 
   /**
-   * Resolves the render variant for an actor.
-   *
-   * The full definition lives in `actors/*.json` (not shipped to the browser),
-   * so this returns null until an actor-render definition source is wired up.
-   * Placeholder keeps the draw path exercised and easy to extend.
+   * Resolves the render variant for an actor from the actor definition catalog
+   * (keyed by the 4-character id), selecting the variant list via
+   * `actor.Variable & bitMask`. Returns the first variant, or null when the
+   * actor/definition is unknown.
    */
-  private resolveVariant(
-    _id: string,
-    _variable: number,
-  ): {
-    spriteIndex?: number;
-    spriteListIndex?: number;
-    replacementPaletteIndex?: number;
-    targetPaletteIndex?: number;
-    xOffset: number;
-    yOffset: number;
-    btiFile?: string;
-  } | null {
-    return null;
+  private resolveVariant(_id: string, _variable: number): ActorRenderVariant | null {
+    const definition = this.actors[_id];
+    if (!definition) {
+      return null;
+    }
+    return actorVariants(definition, _variable)[0] ?? null;
   }
 
   /** Loads the tileset + palette for `index` if not already active. */

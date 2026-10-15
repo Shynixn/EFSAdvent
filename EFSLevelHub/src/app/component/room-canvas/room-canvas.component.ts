@@ -10,12 +10,14 @@ import {
   viewChild,
 } from '@angular/core';
 import { RoomData } from '../../entity/fsalib.entity';
+import { ActorData } from '../../entity/fsalib.entity';
 import { ImageBuffer, TILE_SIZE } from '../../service/render/gba-tile-renderer';
 import { StageRenderer } from '../../service/render/stage-renderer';
 import {
   applySmartObject,
   clearSmartObject,
   findSmartObjectDefinition,
+  placementToActor,
   smartObjectBounds,
   smartObjectVariant,
   SmartObjectDefinition,
@@ -178,8 +180,22 @@ export class RoomCanvasComponent implements AfterViewInit {
     queueMicrotask(() => void this.redraw());
   }
 
-  private _groundTiles: number[] | null = null;
   /**
+   * The actor-baked placements in this room, as {@link ActorData} records —
+   * derived from {@link smartObjects} so enemies need no separate input.
+   */
+  private get actors(): ActorData[] {
+    const actors: ActorData[] = [];
+    for (const placement of this._smartObjects) {
+      const definition = findSmartObjectDefinition(placement.id);
+      if (definition?.baking === 'actor') {
+        actors.push(placementToActor(placement));
+      }
+    }
+    return actors;
+  }
+
+  private _groundTiles: number[] | null = null;  /**
    * Ground grid (row-major tile ids, 0 = empty) for the active base layer,
    * drawn as an underlay beneath the room layers/decorations. `null` disables
    * ground rendering (no ground record for this layer).
@@ -271,8 +287,9 @@ export class RoomCanvasComponent implements AfterViewInit {
   private hoveredPlacement: SmartObjectPlacement | null = null;
 
   /**
-   * Right-click context menu state: the placement it targets plus its position
-   * (in CSS pixels, relative to the canvas wrapper). `null` when closed.
+   * Right-click context menu state: the smart object placement it targets, plus
+   * its position (in CSS pixels, relative to the canvas wrapper). `null` when
+   * closed. Enemies are placements too, so no separate actor target is needed.
    */
   readonly contextMenu = signal<{
     placement: SmartObjectPlacement;
@@ -313,6 +330,17 @@ export class RoomCanvasComponent implements AfterViewInit {
     renderer.drawSingleLayer(buffer, this.index, this.layerIndex, this.gba, skip);
     if (this.topLayer) {
       renderer.drawSingleLayer(buffer, this.index, this.layerIndex + 8, this.gba);
+    }
+
+    // Actors (enemies) on the active layer, drawn over the tiles.
+    if (this.actors.length > 0) {
+      await renderer.prepareActors();
+      for (const actor of this.actors) {
+        if ((actor.Layer & 0x0f) !== this.layerIndex) {
+          continue;
+        }
+        renderer.drawActorAt(buffer, actor, this.gba);
+      }
     }
 
     const ctx = canvas.getContext('2d');
@@ -434,29 +462,25 @@ export class RoomCanvasComponent implements AfterViewInit {
   }
 
   /**
-   * Right-click on the canvas: opens the smart-object context menu when a
-   * placement is under the cursor, otherwise closes any open menu.
+   * Right-click on the canvas: opens the context menu for the smart object
+   * under the cursor, otherwise closes any open menu. Enemies are smart objects
+   * too, so a single placement lookup covers both.
    */
   onCanvasContextMenu(event: MouseEvent): void {
     event.preventDefault();
     const tile = this.tileAt(event);
-    const placement = tile ? this.findPlacementAt(tile) : null;
-    if (!placement) {
-      this.contextMenu.set(null);
-      this.drawHoverOutline();
-      return;
-    }
     // Position the menu relative to the canvas wrapper (its offset parent).
     const wrapper = (event.currentTarget as HTMLElement) ?? undefined;
     const rect = wrapper?.getBoundingClientRect();
     const x = rect ? event.clientX - rect.left : event.offsetX;
     const y = rect ? event.clientY - rect.top : event.offsetY;
-    this.contextMenu.set({ placement, x, y });
-    // Outline the target while the menu is open.
+
+    const placement = tile ? this.findPlacementAt(tile) : null;
+    this.contextMenu.set(placement ? { placement, x, y } : null);
     this.drawHoverOutline();
   }
 
-  /** Closes the smart-object context menu. */
+  /** Closes the context menu. */
   closeContextMenu(): void {
     this.contextMenu.set(null);
     this.drawHoverOutline();
@@ -464,19 +488,19 @@ export class RoomCanvasComponent implements AfterViewInit {
 
   /** Deletes the smart object targeted by the context menu. */
   deleteContextPlacement(): void {
-    const menu = this.contextMenu();
-    if (!menu || !this.room) {
+    const placement = this.contextMenu()?.placement;
+    if (!placement || !this.room) {
       return;
     }
     // Remove the stamped tiles so the object disappears from the canvas, then
     // let the host drop the placement from the stage JSON.
-    clearSmartObject(menu.placement, this.room.Layers, menu.placement.baseLayerId);
+    clearSmartObject(placement, this.room.Layers, placement.baseLayerId);
     // Re-stamp every remaining smart object so tiles that this one had covered
     // (overlapping objects) come back correctly.
-    this.redrawSmartObjects({ list: this.smartObjects, skip: [menu.placement] });
+    this.redrawSmartObjects({ list: this.smartObjects, skip: [placement] });
     this.contextMenu.set(null);
     this.hoveredPlacement = null;
-    this.decorationDeleted.emit(menu.placement);
+    this.decorationDeleted.emit(placement);
     this.drawHoverOutline();
     void this.redraw();
   }
@@ -486,11 +510,11 @@ export class RoomCanvasComponent implements AfterViewInit {
    * its definition has more than one variant in its `set`).
    */
   canRotateContextPlacement(): boolean {
-    const menu = this.contextMenu();
-    if (!menu) {
+    const placement = this.contextMenu()?.placement;
+    if (!placement) {
       return false;
     }
-    return (findSmartObjectDefinition(menu.placement.id)?.set.length ?? 0) > 1;
+    return (findSmartObjectDefinition(placement.id)?.set.length ?? 0) > 1;
   }
 
   /**
@@ -499,16 +523,15 @@ export class RoomCanvasComponent implements AfterViewInit {
    * at the same anchor and emits the change so the host updates the stage JSON.
    */
   rotateContextPlacement(): void {
-    const menu = this.contextMenu();
+    const from = this.contextMenu()?.placement;
     const room = this.room;
-    if (!menu || !room) {
+    if (!from || !room) {
       return;
     }
-    const definition = findSmartObjectDefinition(menu.placement.id);
+    const definition = findSmartObjectDefinition(from.id);
     if (!definition || definition.set.length <= 1) {
       return;
     }
-    const from = menu.placement;
     const nextVariant = ((from.variantIndex ?? 0) + 1) % definition.set.length;
     // Re-stamp the next variant at the same anchor, keeping the same stacking.
     const rotated = { ...from, variantIndex: nextVariant };
@@ -624,7 +647,7 @@ export class RoomCanvasComponent implements AfterViewInit {
 
   // --- Smart object drag & drop (from the toolbox) -------------------------
 
-  /** Allows dropping a decoration onto the canvas, showing a live preview. */
+  /** Allows dropping a smart object onto the canvas, showing a live preview. */
   onDragOver(event: DragEvent): void {
     if (!event.dataTransfer?.types.includes('application/x-smart-object')) {
       return;
@@ -634,7 +657,7 @@ export class RoomCanvasComponent implements AfterViewInit {
 
     // dragover cannot read the data payload, so the toolbox exposes the dragged
     // definition through the shared service.
-    const definition = this.dragService.dragging();
+    const definition = this.dragService.definition();
     if (!definition) {
       return;
     }
@@ -643,7 +666,7 @@ export class RoomCanvasComponent implements AfterViewInit {
       return;
     }
     // Anchor the preview so the object's bounding box is centered under the
-    // cursor (feels natural when dragging a whole decoration).
+    // cursor (feels natural when dragging a whole object).
     const bounds = smartObjectBounds(definition, this.dragService.variantIndex());
     const anchorRow = tile.y - Math.floor((bounds.rows - 1) / 2);
     const anchorCol = tile.x - Math.floor((bounds.cols - 1) / 2);
@@ -669,13 +692,15 @@ export class RoomCanvasComponent implements AfterViewInit {
   }
 
   /**
-   * Places the dragged decoration: stamps its tiles onto the room layers at the
-   * drop position and emits the resulting placement so the host can record it in
-   * the stage JSON.
+   * Places the dragged smart object: bakes its tiles onto the room layers (or,
+   * for an actor-baked object, its actor) at the drop position, and emits the
+   * resulting placement so the host can record it in the stage JSON.
    */
   onDrop(event: DragEvent): void {
     const id =
-      event.dataTransfer?.getData('application/x-smart-object') ?? this.dragging?.definition.id;
+      event.dataTransfer?.getData('application/x-smart-object') ??
+      this.dragging?.definition.id ??
+      this.dragService.definition()?.id;
     const room = this.room;
     const dragging = this.dragging;
     if (!id || !room) {
@@ -701,6 +726,7 @@ export class RoomCanvasComponent implements AfterViewInit {
       this.layerIndex,
       dragging?.variantIndex ?? 0,
     );
+    this.dragService.clear();
     this.dragging = null;
     this.clearPreview();
     this.decorationPlaced.emit(placement);
@@ -819,13 +845,12 @@ export class RoomCanvasComponent implements AfterViewInit {
   }
 
   /**
-   * Draws a black dotted rectangle around the active smart object's bounds. The
+   * Draws a black dotted rectangle around the smart object's bounds. The
    * context-menu target takes precedence (so the selected object stays outlined
-   * while the menu is open); otherwise the hovered object is outlined.
+   * while the menu is open); otherwise the hovered one is outlined.
    */
   private drawHoverOutline(): void {
     const canvas = this.previewRef()?.nativeElement;
-    const placement = this.contextMenu()?.placement ?? this.hoveredPlacement;
     if (!canvas) {
       return;
     }
@@ -834,6 +859,8 @@ export class RoomCanvasComponent implements AfterViewInit {
       return;
     }
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const placement = this.contextMenu()?.placement ?? this.hoveredPlacement;
     if (!placement) {
       return;
     }
@@ -842,11 +869,29 @@ export class RoomCanvasComponent implements AfterViewInit {
       return;
     }
     const bounds = smartObjectBounds(definition, placement.variantIndex ?? 0);
-    const x = (placement.anchorCol + bounds.minCol) * TILE_SIZE;
-    const y = (placement.anchorRow + bounds.minRow) * TILE_SIZE;
-    const w = bounds.cols * TILE_SIZE;
-    const h = bounds.rows * TILE_SIZE;
+    // Actor-baked objects stand on their tile: outline a 2×2 cell so the sprite
+    // (roughly 32×32, bottom-anchored) fits inside the marker.
+    const width = definition.baking === 'actor' ? TILE_SIZE * 2 : bounds.cols * TILE_SIZE;
+    const height = definition.baking === 'actor' ? TILE_SIZE * 2 : bounds.rows * TILE_SIZE;
+    const x =
+      definition.baking === 'actor'
+        ? (placement.anchorCol - (bounds.cols - 1) / 2) * TILE_SIZE
+        : (placement.anchorCol + bounds.minCol) * TILE_SIZE;
+    const y =
+      definition.baking === 'actor'
+        ? (placement.anchorRow - bounds.rows) * TILE_SIZE
+        : (placement.anchorRow + bounds.minRow) * TILE_SIZE;
+    this.strokeOutline(ctx, x, y, width, height);
+  }
 
+  /** Strokes a dotted rectangle (crisp 1px) at the given pixel rectangle. */
+  private strokeOutline(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+  ): void {
     ctx.save();
     ctx.strokeStyle = '#000';
     ctx.lineWidth = 1;
@@ -856,7 +901,7 @@ export class RoomCanvasComponent implements AfterViewInit {
     ctx.restore();
   }
 
-  /** Draws the transparent preview of the dragged decoration on the overlay. */
+  /** Draws the transparent preview of the dragged smart object on the overlay. */
   private drawPreview(): void {
     const canvas = this.previewRef()?.nativeElement;
     const dragging = this.dragging;
@@ -870,11 +915,46 @@ export class RoomCanvasComponent implements AfterViewInit {
     }
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+    // Actor-baked objects draw their actor sprite instead of tiles.
+    if (dragging.definition.baking === 'actor') {
+      const actor = placementToActor({
+        id: dragging.definition.id,
+        baseLayerId: dragging.definition.actorVariable ? 0 : 0,
+        anchorRow: dragging.anchorRow,
+        anchorCol: dragging.anchorCol,
+        bottomLayerTiles: [],
+        topLayerTiles: [],
+        actorVariable: dragging.definition.actorVariable ?? 0,
+      });
+      const buffer = renderer.renderActorPreview(
+        dragging.definition.id,
+        actor.Variable,
+        48,
+        48,
+        this.gba,
+      );
+      if (buffer) {
+        const image = new ImageData(
+          new Uint8ClampedArray(buffer.pixels),
+          buffer.width,
+          buffer.height,
+        );
+        // Actors are drawn centred on the anchor tile, one row up (they stand
+        // on the tile rather than filling it).
+        const originX = dragging.anchorCol * TILE_SIZE - 8;
+        const originY = dragging.anchorRow * TILE_SIZE - 24;
+        ctx.globalAlpha = 0.5;
+        ctx.putImageData(image, originX, originY);
+        ctx.globalAlpha = 1;
+      }
+      return;
+    }
+
     const bounds = smartObjectBounds(dragging.definition, dragging.variantIndex);
     const originX = (dragging.anchorCol + bounds.minCol) * TILE_SIZE;
     const originY = (dragging.anchorRow + bounds.minRow) * TILE_SIZE;
 
-    // Render the decoration into an offscreen buffer, then blit it at 50% alpha.
+    // Render the object into an offscreen buffer, then blit it at 50% alpha.
     const buffer = renderer.renderSmartObjectPreview(
       dragging.definition,
       this.gba,

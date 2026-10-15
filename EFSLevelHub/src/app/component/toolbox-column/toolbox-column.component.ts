@@ -119,6 +119,9 @@ export class ToolboxColumnComponent implements AfterViewInit {
   /** Whether the Decorations section is expanded. */
   readonly decorationsOpen = signal(true);
 
+  /** Whether the Enemies section is expanded. */
+  readonly enemiesOpen = signal(true);
+
   /** Available decoration (smart-object) definitions, shown in the toolbox. */
   readonly decorations: SmartObjectDefinition[] = SMART_OBJECT_DEFINITIONS;
 
@@ -132,6 +135,18 @@ export class ToolboxColumnComponent implements AfterViewInit {
     (definition) => definition.section !== 'Doors',
   );
 
+  /** Placable enemies (actor-baked smart objects), shown in the Enemies section. */
+  private _enemies: SmartObjectDefinition[] = [];
+  @Input()
+  get enemies(): SmartObjectDefinition[] {
+    return this._enemies;
+  }
+  set enemies(value: SmartObjectDefinition[]) {
+    this._enemies = value ?? [];
+    // The catalog arrives asynchronously; repaint the thumbnails once it does.
+    queueMicrotask(() => void this.drawPreviews());
+  }
+
   /** Available ground definitions, shown in the Ground box. */
   readonly grounds: GroundDefinition[] = GROUND_DEFINITIONS;
 
@@ -141,11 +156,15 @@ export class ToolboxColumnComponent implements AfterViewInit {
   /** The per-ground mini preview canvases. */
   private readonly groundCanvases = viewChildren<ElementRef<HTMLCanvasElement>>('groundPreview');
 
+  /** The per-enemy mini preview canvases. */
+  private readonly enemyCanvases = viewChildren<ElementRef<HTMLCanvasElement>>('enemyPreview');
+
   constructor() {
     // Redraw the mini previews once the canvases are available.
     effect(() => {
       this.previewCanvases();
       this.groundCanvases();
+      this.enemyCanvases();
       queueMicrotask(() => void this.drawPreviews());
     });
   }
@@ -210,6 +229,46 @@ export class ToolboxColumnComponent implements AfterViewInit {
         0,
       );
     }
+
+    // Enemy thumbnails: render each actor's default variant into its canvas.
+    const enemyCanvases = this.enemyCanvases();
+    if (enemyCanvases.length > 0) {
+      try {
+        await renderer.prepareActors();
+      } catch {
+        // Sprite sheets may be missing for this stage; skip enemy thumbnails.
+      }
+      for (const ref of enemyCanvases) {
+        const id = ref.nativeElement.dataset['enemyId'];
+        const enemy = this.enemies.find((entry) => entry.id === id);
+        const canvas = ref.nativeElement;
+        if (!enemy) {
+          continue;
+        }
+        const buffer = renderer.renderActorPreview(
+          id ?? '',
+          enemy.actorVariable ?? 0,
+          32,
+          32,
+          this._gba,
+        );
+        if (!buffer) {
+          continue;
+        }
+        canvas.width = buffer.width;
+        canvas.height = buffer.height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          continue;
+        }
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.putImageData(
+          new ImageData(new Uint8ClampedArray(buffer.pixels), buffer.width, buffer.height),
+          0,
+          0,
+        );
+      }
+    }
   }
 
   /** Toggles the Advanced section. */
@@ -232,6 +291,11 @@ export class ToolboxColumnComponent implements AfterViewInit {
   /** Toggles the Decorations section. */
   toggleDecorations(): void {
     this.decorationsOpen.update((open) => !open);
+  }
+
+  /** Toggles the Enemies section. */
+  toggleEnemies(): void {
+    this.enemiesOpen.update((open) => !open);
   }
 
   /** Selects a ground (or deselects it when the same one is clicked again). */
