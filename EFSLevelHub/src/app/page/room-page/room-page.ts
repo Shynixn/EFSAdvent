@@ -37,7 +37,11 @@ import { IsoSourceService } from '../../service/iso-source.service';
 import { LoggingService } from '../../service/logging.service';
 import { RoomData, StageData } from '../../entity/fsalib.entity';
 import { GroundDefinition, GroundLayer, createGroundLayer } from '../../entity/ground.entity';
-import { SmartObjectPlacement } from '../../entity/smartobject.entity';
+import {
+  SmartObjectPlacement,
+  findSmartObjectDefinition,
+  smartObjectVariant,
+} from '../../entity/smartobject.entity';
 import { TilesetTheme } from '../../entity/tileset.util';
 import { StageRenderer } from '../../service/render/stage-renderer';
 import { nextPaint } from '../../util/paint';
@@ -651,14 +655,27 @@ export class RoomPage implements OnInit, OnDestroy {
       let changed = false;
 
       // Tiles a smart object owns on this base layer (its own tiles win over
-      // ground on the base layer; top-layer tiles never hide ground).
+      // ground on the base layer; top-layer tiles never hide ground). Derived
+      // from each placement's definition + anchor + variant — the same source
+      // of truth the canvas composites from — so drifting recorded refs cannot
+      // let ground overwrite a decoration's tiles.
       const owned = new Set<number>();
       for (const placement of this.smartObjects()) {
         if (placement.baseLayerId !== base) {
           continue;
         }
-        for (const ref of placement.bottomLayerTiles) {
-          owned.add(ref.row * DIM + ref.col);
+        const definition = findSmartObjectDefinition(placement.id);
+        if (!definition) {
+          continue;
+        }
+        const variant = smartObjectVariant(definition, placement.variantIndex ?? 0);
+        for (const offset of variant.bottomLayerTiles) {
+          const row = placement.anchorRow + offset.dRow;
+          const col = placement.anchorCol + offset.dCol;
+          if (row < 0 || row >= DIM || col < 0 || col >= DIM) {
+            continue;
+          }
+          owned.add(row * DIM + col);
         }
       }
 

@@ -97,10 +97,6 @@ export class RoomCanvasComponent implements AfterViewInit {
     return this._index;
   }
   set index(value: number) {
-    if (value !== this._index) {
-      // A different room is shown; its stacking order is unrelated.
-      this.zOrder = [];
-    }
     this._index = value;
     queueMicrotask(() => void this.redraw());
   }
@@ -177,9 +173,6 @@ export class RoomCanvasComponent implements AfterViewInit {
   }
   set smartObjects(value: SmartObjectPlacement[]) {
     this._smartObjects = value ?? [];
-    // The host may swap placement objects (move/rotate); keep only the z-order
-    // entries that still exist so the stacking order stays valid.
-    this.zOrder = this.zOrder.filter((placement) => this._smartObjects.includes(placement));
     // A new placement (or a move) changes which base tiles the ground must not
     // hide, so repaint immediately instead of waiting for the next edit.
     queueMicrotask(() => void this.redraw());
@@ -276,15 +269,6 @@ export class RoomCanvasComponent implements AfterViewInit {
 
   /** Smart object currently hovered by the pointer (for its boundary outline). */
   private hoveredPlacement: SmartObjectPlacement | null = null;
-
-  /**
-   * Persistent stacking order of the room's smart objects (last = front). The
-   * compositor stamps survivors in this order so overlaps resolve as the user
-   * arranged them via the context menu's "Bring to front"/"Bring to back".
-   * Placements not present here keep their `smartObjects` order, after the ones
-   * that are.
-   */
-  private zOrder: SmartObjectPlacement[] = [];
 
   /**
    * Right-click context menu state: the placement it targets plus its position
@@ -487,8 +471,6 @@ export class RoomCanvasComponent implements AfterViewInit {
     // Remove the stamped tiles so the object disappears from the canvas, then
     // let the host drop the placement from the stage JSON.
     clearSmartObject(menu.placement, this.room.Layers, menu.placement.baseLayerId);
-    // Drop it from the stacking order too.
-    this.zOrder = this.zOrder.filter((placement) => placement !== menu.placement);
     // Re-stamp every remaining smart object so tiles that this one had covered
     // (overlapping objects) come back correctly.
     this.redrawSmartObjects({ list: this.smartObjects, skip: [menu.placement] });
@@ -531,49 +513,11 @@ export class RoomCanvasComponent implements AfterViewInit {
     // Re-stamp the next variant at the same anchor, keeping the same stacking.
     const rotated = { ...from, variantIndex: nextVariant };
     const list = this.smartObjects.map((placement) => (placement === from ? rotated : placement));
-    this.zOrder = this.zOrder.map((placement) => (placement === from ? rotated : placement));
     this.redrawSmartObjects({ list, skip: [from] });
     this.contextMenu.set(null);
     this.hoveredPlacement = null;
     this.decorationRotated.emit({ from, to: rotated });
     this.drawHoverOutline();
-    void this.redraw();
-  }
-
-  /** Moves the context-menu target to the front of the stacking order. */
-  bringContextToFront(): void {
-    const menu = this.contextMenu();
-    if (!menu) {
-      return;
-    }
-    this.moveToStack(menu.placement, 'front');
-  }
-
-  /** Moves the context-menu target to the back of the stacking order. */
-  bringContextToBack(): void {
-    const menu = this.contextMenu();
-    if (!menu) {
-      return;
-    }
-    this.moveToStack(menu.placement, 'back');
-  }
-
-  /**
-   * Reorders a placement in the persistent z-order (front = stamped last, back =
-   * stamped first) and re-composites the room so the change is visible.
-   */
-  private moveToStack(placement: SmartObjectPlacement, where: 'front' | 'back'): void {
-    if (!this.room) {
-      return;
-    }
-    // Seed the z-order with the current list order the first time it is used.
-    const order = this.zOrder.length
-      ? this.zOrder.filter((entry) => this.smartObjects.includes(entry))
-      : [...this.smartObjects];
-    const filtered = order.filter((entry) => entry !== placement);
-    this.zOrder = where === 'front' ? [...filtered, placement] : [placement, ...filtered];
-    this.redrawSmartObjects();
-    this.closeContextMenu();
     void this.redraw();
   }
 
@@ -595,13 +539,9 @@ export class RoomCanvasComponent implements AfterViewInit {
     }
     const source = override ? override.list : this.smartObjects;
     const skip = override ? override.skip : [];
-    // The placements that will remain stamped, ordered by the persistent z-order
-    // (front-most last). Placements missing from the z-order fall back to their
-    // position in the source list, placed before the explicitly ordered ones.
-    const survivors = source.filter((placement) => !skip.includes(placement));
-    const ordered = this.zOrder.filter((placement) => survivors.includes(placement));
-    const rest = survivors.filter((placement) => !ordered.includes(placement));
-    const stampOrder = [...rest, ...ordered];
+    // The placements that will remain stamped, in their stored order (later
+    // ones draw on top of earlier ones at shared tiles).
+    const stampOrder = source.filter((placement) => !skip.includes(placement));
 
     // Tiles a survivor will (re)stamp, per layer. A tile claimed by any survivor
     // must NOT be cleared while tearing down the old composite, otherwise a
