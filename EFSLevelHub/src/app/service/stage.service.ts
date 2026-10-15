@@ -4,7 +4,7 @@ import { FSALibService } from './fsalib.service';
 import { LoggingService } from './logging.service';
 import { OpfsCacheService } from './opfs-cache.service';
 import { sha256Hex } from './hash.util';
-import { RoomSmartObjects } from '../entity/smart-object.entity';
+import { RoomSmartObjects } from '../entity/smartobject.entity';
 
 /** Key under which stage ids are stored in the editor's `userdata.json`. */
 const STAGES_KEY = 'stages';

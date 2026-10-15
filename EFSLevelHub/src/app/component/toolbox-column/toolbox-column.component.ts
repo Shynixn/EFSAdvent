@@ -13,13 +13,12 @@ import {
 import { TilePaletteComponent } from '../tile-palette/tile-palette.component';
 import { StageRenderer } from '../../service/render/stage-renderer';
 import {
-  GROUND_DEFINITIONS,
-  GroundDefinition,
   SMART_OBJECT_DEFINITIONS,
   SmartObjectDefinition,
   smartObjectBounds,
   renderSmartObjectPreview,
-} from '../../entity/smart-object.entity';
+} from '../../entity/smartobject.entity';
+import { GROUND_DEFINITIONS, GroundDefinition } from '../../entity/ground.entity';
 import { SmartObjectDragService } from '../../service/smart-object-drag.service';
 import { ImageBuffer } from '../../service/render/gba-tile-renderer';
 
@@ -71,6 +70,23 @@ export class ToolboxColumnComponent implements AfterViewInit {
     queueMicrotask(() => void this.drawPreviews());
   }
 
+  /**
+   * Currently selected tileset theme index. Changing it swaps the tileset used
+   * for every preview, so the whole toolbox repaints when this input changes.
+   */
+  @Input()
+  set themeIndex(value: number) {
+    if (value === this._themeIndex) {
+      return;
+    }
+    this._themeIndex = value;
+    queueMicrotask(() => void this.drawPreviews());
+  }
+  get themeIndex(): number {
+    return this._themeIndex;
+  }
+  private _themeIndex = -1;
+
   /** Currently selected brush tile (shown in the Advanced section). */
   @Input() brushTile = 0;
 
@@ -85,6 +101,8 @@ export class ToolboxColumnComponent implements AfterViewInit {
   @Output() groundPicked = new EventEmitter<GroundDefinition>();
   /** Emits when the user clears the selected ground (deselect). */
   @Output() groundCleared = new EventEmitter<void>();
+  /** Emits when a decoration drag starts (host switches to the hand tool). */
+  @Output() decorationDragStarted = new EventEmitter<void>();
 
   private readonly dragService = inject(SmartObjectDragService);
 
@@ -199,6 +217,8 @@ export class ToolboxColumnComponent implements AfterViewInit {
     // dragover cannot read the data payload, so expose it via the shared service
     // for the canvas preview.
     this.dragService.start(definition);
+    // Let the host switch to the hand tool so the decoration can be positioned.
+    this.decorationDragStarted.emit();
   }
 
   /** Clears the shared drag state when the drag ends. */

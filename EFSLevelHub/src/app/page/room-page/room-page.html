@@ -151,11 +151,13 @@
       <app-toolbox-column
         [renderer]="renderer()"
         [gba]="gba()"
+        [themeIndex]="themeIndex()"
         [brushTile]="brushTile()"
         [selectedGroundId]="selectedGroundId()"
         (tilePicked)="brushTile.set($event)"
         (groundPicked)="selectGround($event)"
         (groundCleared)="clearGround()"
+        (decorationDragStarted)="onDecorationDragStarted()"
       />
     </div>
   </div>

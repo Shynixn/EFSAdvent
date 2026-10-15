@@ -36,12 +36,8 @@ import {
 import { IsoSourceService } from '../../service/iso-source.service';
 import { LoggingService } from '../../service/logging.service';
 import { RoomData, StageData } from '../../entity/fsalib.entity';
-import {
-  GroundDefinition,
-  GroundLayer,
-  SmartObjectPlacement,
-  createGroundLayer,
-} from '../../entity/smart-object.entity';
+import { GroundDefinition, GroundLayer, createGroundLayer } from '../../entity/ground.entity';
+import { SmartObjectPlacement } from '../../entity/smartobject.entity';
 import { TilesetTheme } from '../../entity/tileset.util';
 import { StageRenderer } from '../../service/render/stage-renderer';
 import { nextPaint } from '../../util/paint';
@@ -478,6 +474,11 @@ export class RoomPage implements OnInit, OnDestroy {
   /** Clears the selected ground (returns to the tile brush). */
   clearGround(): void {
     this.selectedGround.set(null);
+  }
+
+  /** Switches to the hand tool when the user starts dragging a decoration. */
+  onDecorationDragStarted(): void {
+    this.tool.set('hand');
   }
 
   /**

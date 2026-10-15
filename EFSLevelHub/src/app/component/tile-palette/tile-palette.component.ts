@@ -53,6 +53,23 @@ export class TilePaletteComponent implements AfterViewInit {
     queueMicrotask(() => void this.render());
   }
 
+  private _themeIndex = -1;
+  /**
+   * Currently selected tileset theme index. The tileset graphics change with
+   * it, so the palette re-renders whenever this input changes.
+   */
+  @Input()
+  get themeIndex(): number {
+    return this._themeIndex;
+  }
+  set themeIndex(value: number) {
+    if (value === this._themeIndex) {
+      return;
+    }
+    this._themeIndex = value;
+    queueMicrotask(() => void this.render());
+  }
+
   /** Currently selected tile value (for the label). */
   @Input() tile = 0;
 

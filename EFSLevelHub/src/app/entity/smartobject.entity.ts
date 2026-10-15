@@ -1,38 +1,29 @@
 /**
- * Smart objects (decorations)
- * ---------------------------
- * A smart object is a hard-coded, multi-tile decoration (e.g. a tree) that can
- * be stamped onto a room in one action. Unlike plain tiles, a placement is also
- * recorded in the stage's JSON so the editor keeps a semantic reference to it.
+ * Smart objects
+ * -------------
+ * A smart object is a hard-coded, multi-tile item (e.g. a decoration such as a
+ * tree) that can be stamped onto a room in one action. Unlike plain tiles, a
+ * placement is also recorded in the stage's JSON so the editor keeps a semantic
+ * reference to it.
  *
  * Tile coordinates in a definition are **offsets** relative to the placement
  * anchor (the top-left of the object's bounding box). A tile offset may be
  * negative (e.g. a canopy that overhangs to the left of the anchor).
+ *
+ * The selectable definition catalog lives in `smartobject.definition.ts`; this
+ * module re-exports it so callers have a single import for smart objects.
  */
 
 import { ImageBuffer, TILE_SIZE } from '../service/render/gba-tile-renderer';
+import { GroundLayer, ROOM_DIMENSION } from './ground.entity';
+import { SmartObjectDefinition, SmartObjectTileOffset } from './smartobject.definition';
 
-/** A single tile within a smart-object definition, relative to the anchor. */
-export interface SmartObjectTileOffset {
-  /** Row offset from the anchor (may be negative). */
-  dRow: number;
-  /** Column offset from the anchor (may be negative). */
-  dCol: number;
-  /** Tileset tile id (0-1023) to stamp. */
-  tile: number;
-}
-
-/** A hard-coded smart-object (decoration) definition. */
-export interface SmartObjectDefinition {
-  /** Stable id, e.g. `tree`. */
-  id: string;
-  /** Display name shown in the toolbox. */
-  name: string;
-  /** Tiles stamped onto the base layer. */
-  bottomLayerTiles: SmartObjectTileOffset[];
-  /** Tiles stamped onto the paired top layer (index + 8). */
-  topLayerTiles: SmartObjectTileOffset[];
-}
+export { SMART_OBJECT_DEFINITIONS, findSmartObjectDefinition } from './smartobject.definition';
+export type {
+  SmartObjectDefinition,
+  SmartObjectTileOffset,
+  SmartObjectType,
+} from './smartobject.definition';
 
 /** A tile coordinate recorded for a placed smart object (absolute, in-room). */
 export interface SmartObjectTileRef {
@@ -69,22 +60,6 @@ export interface SmartObjectPlacement {
 }
 
 /**
- * A ground paint record for one base layer of a room.
- *
- * Stores a full room-sized grid of tile ids for both the base and its paired
- * top layer (length {@link ROOM_DIMENSION}²). A value of `0` means the tile has
- * not been painted by the ground brush.
- */
-export interface GroundLayer {
-  /** Base layer this ground belongs to (0-7). Paired top layer is `+ 8`. */
-  baseLayerId: number;
-  /** Full-canvas ground tile ids for the base layer (row-major, 0 = empty). */
-  bottomLayerTiles: number[];
-  /** Full-canvas ground tile ids for the paired top layer (row-major, 0 = empty). */
-  topLayerTiles: number[];
-}
-
-/**
  * Everything recorded for a single room in the stage JSON, keyed by the room's
  * grid position. Mirrors the `rooms` array in the stage JSON.
  */
@@ -98,41 +73,6 @@ export interface RoomSmartObjects {
   /** Ground layers painted in this room, one entry per base layer. */
   ground?: GroundLayer[];
 }
-
-/**
- * Hard-coded catalog of available decorations.
- *
- * The first entry (`tree`) uses the game's tree tiles: trunk/base on the bottom
- * layer (524-526) and canopy on the top layer (508-511), with the canopy
- * overhanging one row up and one column to the left.
- */
-export const SMART_OBJECT_DEFINITIONS: SmartObjectDefinition[] = [
-  {
-    id: 'tree',
-    name: 'Tree',
-    // Base row: trunk tiles 524, 525, 526 at columns 0..2.
-    bottomLayerTiles: [
-      { dRow: 0, dCol: 0, tile: 524 },
-      { dRow: 0, dCol: 1, tile: 525 },
-      { dRow: 0, dCol: 2, tile: 526 },
-    ],
-    // Canopy row (one row above), overhanging one column left: 508..511.
-    topLayerTiles: [
-      { dRow: -1, dCol: -1, tile: 508 },
-      { dRow: -1, dCol: 0, tile: 509 },
-      { dRow: -1, dCol: 1, tile: 510 },
-      { dRow: -1, dCol: 2, tile: 511 },
-    ],
-  },
-];
-
-/** Looks up a smart-object definition by id. */
-export function findSmartObjectDefinition(id: string): SmartObjectDefinition | undefined {
-  return SMART_OBJECT_DEFINITIONS.find((definition) => definition.id === id);
-}
-
-/** Room layer grid dimension (32×32 tiles). */
-const ROOM_DIMENSION = 32;
 
 /** The 16 tile layers of a room (indices 0-7 base, 8-15 top). */
 export interface SmartObjectTargetLayer {
@@ -264,91 +204,4 @@ export function renderSmartObjectPreview(
   stamp(definition.bottomLayerTiles);
   stamp(definition.topLayerTiles);
   return buffer;
-}
-
-// --- Ground -----------------------------------------------------------------
-
-/** Room layer grid dimension (32×32), exported for ground grids. */
-export const GROUND_DIMENSION = ROOM_DIMENSION;
-
-/**
- * A selectable "ground" for the ground brush.
- *
- * A ground is a repeating pattern of tiles (drawn by `pattern` below). Unlike a
- * smart object, a ground is painted tile-by-tile with the brush, never dragged.
- */
-export interface GroundDefinition {
-  /** Stable id, e.g. `grass`. */
-  id: string;
-  /** Representative tile id (used for the preview swatch and as a fallback). */
-  tile: number;
-  /**
-   * Tile id for a given in-room (row, col). Defaults to a constant fill using
-   * {@link tile} when omitted; may be overridden to produce a pattern.
-   */
-  pattern?: (row: number, col: number) => number;
-}
-
-/**
- * Hard-coded catalog of available grounds.
- *
- * Each entry maps to a game ground tile id (see `FSALib/assets/tileproperties.json`).
- * Grounds fill the room tile-by-tile with a single tile.
- */
-export const GROUND_DEFINITIONS: GroundDefinition[] = [
-  { id: 'default-ground', tile: 443 },
-  { id: 'ground-variance', tile: 435 },
-  { id: 'ground-flower', tile: 436 },
-  { id: 'ground-to-rock-438', tile: 438 },
-  {
-    id: 'ground-to-rock-437-453',
-    tile: 437,
-    pattern: (row, col) => ((row + col) % 2 === 0 ? 437 : 453),
-  },
-  {
-    id: 'ground-to-rock-439-442',
-    tile: 439,
-    pattern: (row, col) => ((row + col) % 2 === 0 ? 439 : 442),
-  },
-  {
-    id: 'ground-to-rock-440-441',
-    tile: 440,
-    pattern: (row, col) => ((row + col) % 2 === 0 ? 440 : 441),
-  },
-  {
-    id: 'ground-to-rock-455-458',
-    tile: 455,
-    pattern: (row, col) => ((row + col) % 2 === 0 ? 455 : 458),
-  },
-  {
-    id: 'ground-to-rock-456-457',
-    tile: 456,
-    pattern: (row, col) => ((row + col) % 2 === 0 ? 456 : 457),
-  },
-  { id: 'ground-to-rock-454', tile: 454 },
-  { id: 'rock-ground-444', tile: 444 },
-  { id: 'rock-ground-445', tile: 445 },
-  { id: 'rock-ground-459', tile: 459 },
-  { id: 'rock-ground-460', tile: 460 },
-  { id: 'rock-ground-461', tile: 461 },
-  { id: 'tall-grass', tile: 116 },
-];
-
-/** Looks up a ground definition by id. */
-export function findGroundDefinition(id: string): GroundDefinition | undefined {
-  return GROUND_DEFINITIONS.find((definition) => definition.id === id);
-}
-
-/** Resolves the tile a ground paints at a given in-room coordinate. */
-export function groundTileAt(definition: GroundDefinition, row: number, col: number): number {
-  return definition.pattern ? definition.pattern(row, col) : definition.tile;
-}
-
-/** Creates an empty (all-zero) ground grid for one layer. */
-export function createGroundLayer(baseLayerId: number): GroundLayer {
-  return {
-    baseLayerId,
-    bottomLayerTiles: new Array<number>(ROOM_DIMENSION * ROOM_DIMENSION).fill(0),
-    topLayerTiles: new Array<number>(ROOM_DIMENSION * ROOM_DIMENSION).fill(0),
-  };
 }

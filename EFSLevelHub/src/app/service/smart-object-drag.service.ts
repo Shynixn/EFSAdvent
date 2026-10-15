@@ -1,5 +1,5 @@
 import { Injectable, signal } from '@angular/core';
-import { SmartObjectDefinition } from '../entity/smart-object.entity';
+import { SmartObjectDefinition } from '../entity/smartobject.entity';
 
 /**
  * SmartObjectDragService

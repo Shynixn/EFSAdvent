@@ -63,7 +63,12 @@
             For reference only — tiles can no longer be selected directly. Pick a ground above to
             paint with the brush.
           </p>
-          <app-tile-palette [renderer]="renderer" [gba]="gba" [tile]="brushTile" />
+          <app-tile-palette
+            [renderer]="renderer"
+            [gba]="gba"
+            [themeIndex]="themeIndex"
+            [tile]="brushTile"
+          />
         </div>
       }
     </div>

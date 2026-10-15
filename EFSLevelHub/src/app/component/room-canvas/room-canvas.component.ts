@@ -19,7 +19,7 @@ import {
   smartObjectBounds,
   SmartObjectDefinition,
   SmartObjectPlacement,
-} from '../../entity/smart-object.entity';
+} from '../../entity/smartobject.entity';
 import { SmartObjectDragService } from '../../service/smart-object-drag.service';
 
 /** A tile edit produced by painting on the canvas. */

@@ -9,7 +9,7 @@
  * resource archive (read through `FSALibService`).
  */
 import { ActorData, LayerData, RoomData, StageData } from '../../entity/fsalib.entity';
-import { SmartObjectDefinition, renderSmartObjectPreview } from '../../entity/smart-object.entity';
+import { SmartObjectDefinition, renderSmartObjectPreview } from '../../entity/smartobject.entity';
 import { BtiTexture, parseBti } from './bti-texture';
 import { decodeTexture } from './bti-image';
 import {
