@@ -33,7 +33,9 @@ export function enemyDefinitions(actors: Record<string, ActorDefinition>): Smart
  * Builds actor smart objects for **every** actor in the catalog, so any actor
  * found in a room (regardless of category) resolves by id.
  */
-export function actorSmartObjects(actors: Record<string, ActorDefinition>): SmartObjectDefinition[] {
+export function actorSmartObjects(
+  actors: Record<string, ActorDefinition>,
+): SmartObjectDefinition[] {
   return Object.values(actors).map(toActorSmartObject);
 }
 
