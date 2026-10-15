@@ -47,7 +47,7 @@ import {
   registerActorSmartObjects,
   smartObjectVariant,
 } from '../../entity/smartobject.entity';
-import { enemyDefinitions } from '../../entity/enemy.definition';
+import { actorSmartObjects, enemyDefinitions } from '../../entity/enemy.definition';
 import { TilesetTheme } from '../../entity/tileset.util';
 import { StageRenderer } from '../../service/render/stage-renderer';
 import { nextPaint } from '../../util/paint';
@@ -212,11 +212,9 @@ export class RoomPage implements OnInit, OnDestroy {
    * and ground merged into its `rooms` array (reflecting unsaved edits).
    */
   private composeRoomRecord(file: StageFile, grid: { row: number; col: number }): StageFile {
-    // Actor-baked objects (enemies) are not part of the stage JSON — they live in
-    // the archive's enemy list — so exclude them here to match what is written.
-    const placements = this.smartObjects().filter(
-      (placement) => findSmartObjectDefinition(placement.id)?.baking !== 'actor',
-    );
+    // `smartObjects` is the single source of truth for everything placed in the
+    // room — tile-baked decorations AND actor-baked enemies alike.
+    const placements = this.smartObjects();
     const ground = this.groundLayers().filter(
       (layer) =>
         layer.bottomLayerTiles.some((t) => t !== 0) || layer.topLayerTiles.some((t) => t !== 0),
@@ -422,11 +420,16 @@ export class RoomPage implements OnInit, OnDestroy {
       const record = grid
         ? await this.stageService.getRoomRecord(stageId, grid.row, grid.col)
         : null;
-      // Actors (enemies) live in the archive, not the stage JSON: turn each one
-      // into an actor-baked placement so they share the smart-object list and
-      // every decoration interaction (hover, move, delete) works on them too.
+      // A room's placements come from two sources with a clear split:
+      //  - tile-baked objects (decorations) from the stage JSON, and
+      //  - actor-baked objects (enemies) from the ARCHIVE's enemy list.
+      // Enemies are also mirrored into the JSON for readability, so drop any
+      // actor-baked entry that came from the JSON to avoid duplicating them.
+      const tilePlacements = (record?.smartObjects ?? []).filter(
+        (placement) => findSmartObjectDefinition(placement.id)?.baking !== 'actor',
+      );
       const actorPlacements = (room.Actors ?? []).map((actor) => actorToPlacement(actor));
-      this.smartObjects.set([...(record?.smartObjects ?? []), ...actorPlacements]);
+      this.smartObjects.set([...tilePlacements, ...actorPlacements]);
       this.groundLayers.set((record?.ground ?? []).map((layer) => ({ ...layer })));
 
       // Load the placable enemy catalog (actor category `Enemy`) and the sprite
@@ -632,9 +635,10 @@ export class RoomPage implements OnInit, OnDestroy {
           `RoomPage: no enemy actors resolved from ${Object.keys(actors).length} definitions`,
         );
       }
-      // Register them as smart objects so placements (from the archive or a
-      // fresh drop) resolve by id for hover/move/delete.
-      registerActorSmartObjects(enemies);
+      // Register EVERY actor as a smart object (not just the Enemy toolbox
+      // subset), so actors already present in a room — Objects, Properties,
+      // NPCs, … — resolve by id for rendering, hover, move and delete.
+      registerActorSmartObjects(actorSmartObjects(actors));
       this.enemies.set(enemies);
     } catch (error) {
       this.logger.warn('RoomPage: failed to load enemy definitions', error);
@@ -877,12 +881,10 @@ export class RoomPage implements OnInit, OnDestroy {
           id,
           grid.row,
           grid.col,
-          // Only tile-baked objects go in the stage JSON: actor-baked ones
-          // (enemies) live in the archive's enemy list, and are rebuilt from it
-          // on load — persisting them here too would duplicate them.
-          this.smartObjects().filter(
-            (placement) => findSmartObjectDefinition(placement.id)?.baking !== 'actor',
-          ),
+          // All placements go in the stage JSON — enemies included. They are also
+          // written to the archive's enemy list below (syncRoomActors), so the
+          // room keeps one authoritative placement list.
+          this.smartObjects(),
           ground,
         );
       }

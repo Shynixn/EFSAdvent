@@ -357,6 +357,10 @@ export class RoomCanvasComponent implements AfterViewInit {
     }
     const image = new ImageData(new Uint8ClampedArray(buffer.pixels), buffer.width, buffer.height);
     ctx.putImageData(image, 0, 0);
+
+    // The overlay shares the canvas with the actor markers + hover outline, so
+    // repaint it whenever the room is redrawn.
+    this.drawHoverOutline();
   }
 
   /**
@@ -869,9 +873,10 @@ export class RoomCanvasComponent implements AfterViewInit {
   }
 
   /**
-   * Draws a black dotted rectangle around the smart object's bounds. The
-   * context-menu target takes precedence (so the selected object stays outlined
-   * while the menu is open); otherwise the hovered one is outlined.
+   * Repaints the overlay: a red box around EVERY placed actor (enemies are easy
+   * to lose among the tiles), plus a black dotted outline for the hovered /
+   * context-menu target. The overlay is shared with the drag preview, so this is
+   * only drawn while nothing is being dragged.
    */
   private drawHoverOutline(): void {
     const canvas = this.previewRef()?.nativeElement;
@@ -884,6 +889,22 @@ export class RoomCanvasComponent implements AfterViewInit {
     }
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+    // While dragging, the overlay belongs to the drag preview (see drawPreview).
+    if (this.dragging) {
+      return;
+    }
+
+    // Red markers for every actor in the room.
+    for (const placement of this._smartObjects) {
+      const definition = findSmartObjectDefinition(placement.id);
+      if (definition?.baking !== 'actor') {
+        continue;
+      }
+      const { x, y } = this.actorBox(placement);
+      this.strokeOutline(ctx, x, y, TILE_SIZE, TILE_SIZE, { color: '#ef4444', dash: [] });
+    }
+
+    // Black dotted outline for the hovered / selected placement.
     const placement = this.contextMenu()?.placement ?? this.hoveredPlacement;
     if (!placement) {
       return;
@@ -892,41 +913,48 @@ export class RoomCanvasComponent implements AfterViewInit {
     if (!definition) {
       return;
     }
-    // Actor-baked objects: the sprite is drawn at exactly (X*8 + 8, Y*8 - 8) —
-    // the same anchor (and same +8/-8 nudge) `drawActorAt` uses — and occupies
-    // one 16px cell from there. Box that cell so the outline sits on the sprite.
     if (definition.baking === 'actor') {
-      const actor = placementToActor(placement);
-      this.strokeOutline(
-        ctx,
-        actor.X * 8 + 8 - TILE_SIZE / 2,
-        actor.Y * 8 - 8 - TILE_SIZE / 2,
-        TILE_SIZE,
-        TILE_SIZE,
-      );
+      const { x, y } = this.actorBox(placement);
+      this.strokeOutline(ctx, x, y, TILE_SIZE, TILE_SIZE, { color: '#000', dash: [3, 3] });
       return;
     }
     const bounds = smartObjectBounds(definition, placement.variantIndex ?? 0);
-    const width = bounds.cols * TILE_SIZE;
-    const height = bounds.rows * TILE_SIZE;
-    const x = (placement.anchorCol + bounds.minCol) * TILE_SIZE;
-    const y = (placement.anchorRow + bounds.minRow) * TILE_SIZE;
-    this.strokeOutline(ctx, x, y, width, height);
+    this.strokeOutline(
+      ctx,
+      (placement.anchorCol + bounds.minCol) * TILE_SIZE,
+      (placement.anchorRow + bounds.minRow) * TILE_SIZE,
+      bounds.cols * TILE_SIZE,
+      bounds.rows * TILE_SIZE,
+    );
   }
 
-  /** Strokes a dotted rectangle (crisp 1px) at the given pixel rectangle. */
+  /**
+   * Top-left pixel of an actor placement's marker box: the sprite is drawn at
+   * `(X*8 + 8, Y*8 - 8)`, so the box is centred half a tile up/left of it to sit
+   * on the sprite.
+   */
+  private actorBox(placement: SmartObjectPlacement): { x: number; y: number } {
+    const actor = placementToActor(placement);
+    return {
+      x: actor.X * 8 + 8 - TILE_SIZE / 2,
+      y: actor.Y * 8 - 8 - TILE_SIZE / 2,
+    };
+  }
+
+  /** Strokes a rectangle (crisp 1px) at the given pixel rectangle. */
   private strokeOutline(
     ctx: CanvasRenderingContext2D,
     x: number,
     y: number,
     w: number,
     h: number,
+    style: { color?: string; dash?: number[] } = {},
   ): void {
     ctx.save();
-    ctx.strokeStyle = '#000';
+    ctx.strokeStyle = style.color ?? '#000';
     ctx.lineWidth = 1;
-    ctx.setLineDash([3, 3]);
-    // Offset by 0.5px so the 1px dotted line lands on a pixel centre (crisp).
+    ctx.setLineDash(style.dash ?? [3, 3]);
+    // Offset by 0.5px so the 1px line lands on a pixel centre (crisp).
     ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
     ctx.restore();
   }
@@ -944,6 +972,20 @@ export class RoomCanvasComponent implements AfterViewInit {
       return;
     }
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Keep the red actor markers visible while dragging (the dragged actor is
+    // excluded — its ghost follows the cursor instead).
+    for (const placement of this._smartObjects) {
+      if (placement === dragging.source) {
+        continue;
+      }
+      const definition = findSmartObjectDefinition(placement.id);
+      if (definition?.baking !== 'actor') {
+        continue;
+      }
+      const { x, y } = this.actorBox(placement);
+      this.strokeOutline(ctx, x, y, TILE_SIZE, TILE_SIZE, { color: '#ef4444', dash: [] });
+    }
 
     // Actor-baked objects draw their actor sprite instead of tiles.
     if (dragging.definition.baking === 'actor') {
@@ -989,11 +1031,12 @@ export class RoomCanvasComponent implements AfterViewInit {
     ctx.globalAlpha = 1;
   }
 
-  /** Clears the drag preview overlay. */
+  /** Clears the drag preview overlay, restoring the actor markers/hover outline. */
   private clearPreview(): void {
     const canvas = this.previewRef()?.nativeElement;
     const ctx = canvas?.getContext('2d');
     ctx?.clearRect(0, 0, canvas!.width, canvas!.height);
+    this.drawHoverOutline();
   }
 
   /** Maps a pointer/drag event to the tile coordinate under it, or null. */

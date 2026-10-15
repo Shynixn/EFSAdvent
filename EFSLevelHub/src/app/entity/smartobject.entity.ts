@@ -101,7 +101,11 @@ export interface RoomSmartObjects {
   row: number;
   /** Room column within the stage's room grid. */
   col: number;
-  /** Smart objects (decorations) placed in this room. */
+  /**
+   * Everything placed in this room — tile-baked decorations **and** actor-baked
+   * enemies. Enemies live in the archive's enemy list (written on save) but are
+   * recorded here too, so the room has a single, truthful placement list.
+   */
   smartObjects: SmartObjectPlacement[];
   /** Ground layers painted in this room, one entry per base layer. */
   ground?: GroundLayer[];
