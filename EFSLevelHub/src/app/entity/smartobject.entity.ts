@@ -184,15 +184,16 @@ export function clearSmartObject(
 /**
  * Converts an actor-baked placement into an {@link ActorData} room record.
  *
- * Actors are stored in HALF-TILE coordinates, so the placement's anchor tile is
- * converted to the centre of its cell (`tile * 2 + 1`).
+ * Actors are stored in HALF-TILE coordinates. The actor's coordinate is the
+ * **top-left** of its anchor tile (`tile * 2`), matching EFSAdvent; the sprite
+ * itself is drawn bottom-centre anchored from there.
  */
 export function placementToActor(placement: SmartObjectPlacement): ActorData {
   return {
     Id: placement.id,
     Layer: placement.baseLayerId,
-    X: placement.anchorCol * 2 + 1,
-    Y: placement.anchorRow * 2 + 1,
+    X: placement.anchorCol * 2,
+    Y: placement.anchorRow * 2,
     Variable: placement.actorVariable ?? 0,
   };
 }

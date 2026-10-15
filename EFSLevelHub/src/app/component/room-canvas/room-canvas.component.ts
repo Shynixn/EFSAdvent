@@ -183,10 +183,18 @@ export class RoomCanvasComponent implements AfterViewInit {
   /**
    * The actor-baked placements in this room, as {@link ActorData} records —
    * derived from {@link smartObjects} so enemies need no separate input.
+   *
+   * The placement currently being dragged with the hand tool is omitted, so the
+   * grabbed sprite disappears from its old cell while it follows the cursor
+   * (tile-baked objects achieve the same by clearing their stamped tiles).
    */
   private get actors(): ActorData[] {
+    const draggingSource = this.dragging?.source ?? null;
     const actors: ActorData[] = [];
     for (const placement of this._smartObjects) {
+      if (placement === draggingSource) {
+        continue;
+      }
       const definition = findSmartObjectDefinition(placement.id);
       if (definition?.baking === 'actor') {
         actors.push(placementToActor(placement));
@@ -752,7 +760,9 @@ export class RoomCanvasComponent implements AfterViewInit {
     // Use the placement's OWN base layer (not the viewed layer) so grabbing an
     // object on another base layer does not wipe tiles on the wrong layers.
     clearSmartObject(placement, room.Layers, placement.baseLayerId);
-    void this.redraw();
+    // Set `dragging` BEFORE redrawing: the actor-baked sprite is excluded from
+    // the rendered actor list while it is being dragged (tile-baked objects
+    // disappear via the tile clear above).
     this.dragging = {
       definition,
       source: placement,
@@ -763,6 +773,7 @@ export class RoomCanvasComponent implements AfterViewInit {
       variantIndex: placement.variantIndex ?? 0,
       active: true,
     };
+    void this.redraw();
     this.draggingObject.set(true);
     this.hoveringObject.set(false);
     this.drawPreview();
@@ -774,6 +785,19 @@ export class RoomCanvasComponent implements AfterViewInit {
       const placement = this.smartObjects[i];
       const definition = findSmartObjectDefinition(placement.id);
       if (!definition) {
+        continue;
+      }
+      // Actor-baked objects bake no tiles: their sprite straddles the anchor
+      // tile's right/bottom halves (drawn at +8/-8), so hit-test the 2×2 cells
+      // around the anchor — the sprite is always inside that area, matching
+      // where the user sees and grabs it.
+      if (definition.baking === 'actor') {
+        if (
+          (tile.x === placement.anchorCol || tile.x === placement.anchorCol + 1) &&
+          (tile.y === placement.anchorRow || tile.y === placement.anchorRow - 1)
+        ) {
+          return placement;
+        }
         continue;
       }
       const bounds = smartObjectBounds(definition, placement.variantIndex ?? 0);
@@ -868,19 +892,25 @@ export class RoomCanvasComponent implements AfterViewInit {
     if (!definition) {
       return;
     }
+    // Actor-baked objects: the sprite is drawn at exactly (X*8 + 8, Y*8 - 8) —
+    // the same anchor (and same +8/-8 nudge) `drawActorAt` uses — and occupies
+    // one 16px cell from there. Box that cell so the outline sits on the sprite.
+    if (definition.baking === 'actor') {
+      const actor = placementToActor(placement);
+      this.strokeOutline(
+        ctx,
+        actor.X * 8 + 8 - TILE_SIZE / 2,
+        actor.Y * 8 - 8 - TILE_SIZE / 2,
+        TILE_SIZE,
+        TILE_SIZE,
+      );
+      return;
+    }
     const bounds = smartObjectBounds(definition, placement.variantIndex ?? 0);
-    // Actor-baked objects stand on their tile: outline a 2×2 cell so the sprite
-    // (roughly 32×32, bottom-anchored) fits inside the marker.
-    const width = definition.baking === 'actor' ? TILE_SIZE * 2 : bounds.cols * TILE_SIZE;
-    const height = definition.baking === 'actor' ? TILE_SIZE * 2 : bounds.rows * TILE_SIZE;
-    const x =
-      definition.baking === 'actor'
-        ? (placement.anchorCol - (bounds.cols - 1) / 2) * TILE_SIZE
-        : (placement.anchorCol + bounds.minCol) * TILE_SIZE;
-    const y =
-      definition.baking === 'actor'
-        ? (placement.anchorRow - bounds.rows) * TILE_SIZE
-        : (placement.anchorRow + bounds.minRow) * TILE_SIZE;
+    const width = bounds.cols * TILE_SIZE;
+    const height = bounds.rows * TILE_SIZE;
+    const x = (placement.anchorCol + bounds.minCol) * TILE_SIZE;
+    const y = (placement.anchorRow + bounds.minRow) * TILE_SIZE;
     this.strokeOutline(ctx, x, y, width, height);
   }
 
@@ -917,36 +947,29 @@ export class RoomCanvasComponent implements AfterViewInit {
 
     // Actor-baked objects draw their actor sprite instead of tiles.
     if (dragging.definition.baking === 'actor') {
+      // Build the exact actor record the drop would create and draw it through
+      // the same renderer path — so the ghost lines up pixel-for-pixel with the
+      // placed result (sprites are bottom-centre anchored and may use offsets).
       const actor = placementToActor({
         id: dragging.definition.id,
-        baseLayerId: dragging.definition.actorVariable ? 0 : 0,
+        baseLayerId: dragging.source?.baseLayerId ?? 0,
         anchorRow: dragging.anchorRow,
         anchorCol: dragging.anchorCol,
         bottomLayerTiles: [],
         topLayerTiles: [],
-        actorVariable: dragging.definition.actorVariable ?? 0,
+        actorVariable: dragging.source?.actorVariable ?? dragging.definition.actorVariable ?? 0,
       });
-      const buffer = renderer.renderActorPreview(
-        dragging.definition.id,
-        actor.Variable,
-        48,
-        48,
-        this.gba,
+      const scratch = new ImageBuffer(canvas.width, canvas.height);
+      scratch.fill(0, 0, 0, 0);
+      renderer.drawActorAt(scratch, actor, this.gba);
+      const image = new ImageData(
+        new Uint8ClampedArray(scratch.pixels),
+        scratch.width,
+        scratch.height,
       );
-      if (buffer) {
-        const image = new ImageData(
-          new Uint8ClampedArray(buffer.pixels),
-          buffer.width,
-          buffer.height,
-        );
-        // Actors are drawn centred on the anchor tile, one row up (they stand
-        // on the tile rather than filling it).
-        const originX = dragging.anchorCol * TILE_SIZE - 8;
-        const originY = dragging.anchorRow * TILE_SIZE - 24;
-        ctx.globalAlpha = 0.5;
-        ctx.putImageData(image, originX, originY);
-        ctx.globalAlpha = 1;
-      }
+      ctx.globalAlpha = 0.5;
+      ctx.putImageData(image, 0, 0);
+      ctx.globalAlpha = 1;
       return;
     }
 
@@ -990,11 +1013,10 @@ export class RoomCanvasComponent implements AfterViewInit {
     return { x, y };
   }
 
-  /** Paints the selected tile at the canvas position of the pointer event. */
+  /** Paints the selected ground at the canvas position of the pointer event. */
   private paintAt(event: PointerEvent): void {
     const canvas = this.canvasRef()?.nativeElement;
-    const room = this.room;
-    if (!canvas || !room) {
+    if (!canvas) {
       return;
     }
 
@@ -1010,38 +1032,25 @@ export class RoomCanvasComponent implements AfterViewInit {
     // is still recorded in the stage JSON) — the decoration just keeps drawing
     // on top of it. The grid may not exist yet for this layer, so the host
     // creates it from the emitted change.
-    if (this.groundMode && this.groundTile > 0) {
-      if (this._groundTiles?.[offset] === this.groundTile) {
-        return;
-      }
-      if (this._groundTiles) {
-        // Mutate in place when the grid already exists.
-        this._groundTiles[offset] = this.groundTile;
-      }
-      this.groundChanged.emit({
-        baseLayerId: this.groundBaseLayerId,
-        x,
-        y,
-        tile: this.groundTile,
-      });
-      void this.redraw();
+    //
+    // The brush ONLY paints ground: with no ground selected (or a 0 tile) it is
+    // a no-op, so a stray click never stamps a tile.
+    if (!this.groundMode || this.groundTile <= 0) {
       return;
     }
-
-    // Paint onto the base layer, or its paired top layer (index + 8) when the
-    // "edit top layer" toggle is on.
-    const targetLayerIndex = this.paintTop ? this.layerIndex + 8 : this.layerIndex;
-    const layer = room.Layers[targetLayerIndex];
-    if (!layer) {
+    if (this._groundTiles?.[offset] === this.groundTile) {
       return;
     }
-    if (layer.Tiles[offset] === this.tile) {
-      return;
+    if (this._groundTiles) {
+      // Mutate in place when the grid already exists.
+      this._groundTiles[offset] = this.groundTile;
     }
-
-    // Mutate the layer in place and repaint the affected tile.
-    layer.Tiles[offset] = this.tile;
-    this.tileChanged.emit({ layerIndex: targetLayerIndex, x, y, tile: this.tile });
+    this.groundChanged.emit({
+      baseLayerId: this.groundBaseLayerId,
+      x,
+      y,
+      tile: this.groundTile,
+    });
     void this.redraw();
   }
 

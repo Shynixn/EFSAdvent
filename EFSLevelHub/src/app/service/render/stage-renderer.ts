@@ -117,6 +117,9 @@ export class StageRenderer {
   private currentSobIndex = -1;
   private layoutLoaded = false;
 
+  /** In-flight sprite-sheet load, so concurrent callers await the same load. */
+  private spritesPromise: Promise<void> | null = null;
+
   /** In-flight tileset load, so concurrent callers await the same load. */
   private tilesetPromise: Promise<void> | null = null;
 
@@ -390,11 +393,17 @@ export class StageRenderer {
     if (!variant) {
       return;
     }
+    // EFSAdvent draws actor sprites at (X*8 + 8, Y*8 - 8): the actor's half-tile
+    // coordinate is the bottom-centre anchor, so the sprite is nudged right half
+    // a tile and up half a tile to sit on the cell. Variant offsets are applied
+    // on top of that base.
+    const drawX = actor.X * 8 + 8 + variant.XOffset + offsetX;
+    const drawY = actor.Y * 8 - 8 + variant.YOffset + offsetY;
     if (variant.SpriteIndex !== -1) {
       renderer.drawSprite(
         target,
-        actor.X * 8 + variant.XOffset + offsetX,
-        actor.Y * 8 + variant.YOffset + offsetY,
+        drawX,
+        drawY,
         variant.SpriteIndex,
         variant.SpriteListIndex,
         variant.ReplacementPaletteIndex,
@@ -409,8 +418,6 @@ export class StageRenderer {
     if (!image) {
       return;
     }
-    const drawX = actor.X * 8 + variant.XOffset + offsetX;
-    const drawY = actor.Y * 8 + variant.YOffset + offsetY;
     target.blendFrom(image, drawX, drawY);
   }
 
@@ -598,10 +605,23 @@ export class StageRenderer {
   /** Loads the sprite sheet + palettes for an NPC sheet index. */
   private async ensureSprites(index: number): Promise<void> {
     if (this.currentSobIndex === index) {
+      // A load for this index is done or in flight; await it if needed. Without
+      // this, a concurrent caller (e.g. `prepareActors()` racing `init()`)
+      // would return immediately while the sheet is still loading, and actors
+      // would silently draw nothing until some later redraw.
+      if (this.spritesPromise) {
+        await this.spritesPromise;
+      }
       return;
     }
     this.currentSobIndex = index;
+    this.spritesPromise = this.loadSprites(index);
+    await this.spritesPromise;
+    this.spritesPromise = null;
+  }
 
+  /** Performs the actual sprite-sheet/attribute-list/palette load. */
+  private async loadSprites(index: number): Promise<void> {
     const base = await this.tryRead('SCH/gb_ch_obj_base_sch.szs');
     if (base) {
       this.spriteTV.loadInto(base.subarray(0, 0x7000), 0);

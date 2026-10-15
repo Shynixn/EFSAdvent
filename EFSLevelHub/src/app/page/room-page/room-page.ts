@@ -517,9 +517,12 @@ export class RoomPage implements OnInit, OnDestroy {
     this.tool.set('brush');
   }
 
-  /** Clears the selected ground (returns to the tile brush). */
+  /** Clears the selected ground and returns to the hand tool (nothing to paint). */
   clearGround(): void {
     this.selectedGround.set(null);
+    // With no ground selected there is nothing to paint, so fall back to the
+    // hand tool for moving objects rather than leaving a no-op brush active.
+    this.tool.set('hand');
   }
 
   /** Switches to the hand tool when the user starts dragging a decoration. */
