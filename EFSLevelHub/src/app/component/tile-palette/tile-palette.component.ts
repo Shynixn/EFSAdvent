@@ -5,6 +5,7 @@ import {
   EventEmitter,
   Input,
   Output,
+  signal,
   viewChild,
 } from '@angular/core';
 import { ImageBuffer, TILE_SIZE } from '../../service/render/gba-tile-renderer';
@@ -14,7 +15,9 @@ import { StageRenderer, TILESET_COLUMNS, TILESET_COUNT } from '../../service/ren
  * TilePaletteComponent
  * --------------------
  * Renders the stage's tileset as a pickable palette (16×64 tiles of 16px) onto a
- * `<canvas>`. Clicking a tile selects it and emits {@link tilePicked}.
+ * `<canvas>`. Clicking a tile selects it locally (to show its id) and emits
+ * {@link tilePicked} — the host may ignore that event to keep the palette
+ * reference-only (no brush change).
  *
  * Extracted from {@link RoomCanvasComponent} so the palette can live in the room
  * page's Toolbox "Advanced" section rather than under the room canvas.
@@ -52,6 +55,18 @@ export class TilePaletteComponent implements AfterViewInit {
 
   /** Currently selected tile value (for the label). */
   @Input() tile = 0;
+
+  /**
+   * Tile id most recently clicked in this palette. Shown in the label so the
+   * user can read the id even when the host ignores {@link tilePicked} (i.e.
+   * the palette is reference-only and does not set the brush).
+   */
+  readonly pickedTile = signal<number | null>(null);
+
+  /** Tile id to label: the local click wins, else the host-provided `tile`. */
+  labelTile(): number {
+    return this.pickedTile() ?? this.tile;
+  }
 
   /** Emits the tile value when the user picks a tile. */
   @Output() tilePicked = new EventEmitter<number>();
@@ -107,6 +122,9 @@ export class TilePaletteComponent implements AfterViewInit {
     if (tileIndex < 0 || tileIndex >= TILESET_COUNT) {
       return;
     }
+    // Remember the click locally so the label shows the id even when the host
+    // ignores the event (reference-only palette).
+    this.pickedTile.set(tileIndex);
     this.tilePicked.emit(tileIndex);
   }
 }

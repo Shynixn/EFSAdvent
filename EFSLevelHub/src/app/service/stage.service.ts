@@ -258,6 +258,35 @@ export class StageService {
   }
 
   /**
+   * Reads a stage's definition file (`/editor/stage/<uuid>.json`) and returns
+   * its parsed contents, or `null` when the file is missing/invalid.
+   *
+   * Used by the room editor's System column to show the stage content (merged
+   * with unsaved edits).
+   *
+   * @param id Stage id.
+   */
+  async getStageFile(id: string): Promise<StageFile | null> {
+    return this.readStageFile(id);
+  }
+
+  /**
+   * Reads a stage's definition file (`/editor/stage/<uuid>.json`) and returns
+   * its pretty-printed JSON text, or `null` when the file is missing/invalid.
+   *
+   * Used by the room editor's System column to show the current stage content.
+   *
+   * @param id Stage id.
+   */
+  async getStageJson(id: string): Promise<string | null> {
+    const file = await this.readStageFile(id);
+    if (!file) {
+      return null;
+    }
+    return JSON.stringify(file, null, 2);
+  }
+
+  /**
    * Reads the smart objects (decorations) placed in one room from the stage's
    * definition file, or an empty list when none are recorded.
    *
@@ -276,23 +305,42 @@ export class StageService {
   }
 
   /**
-   * Persists the smart objects (decorations) placed in one room into the stage's
-   * definition file (`/editor/stage/<uuid>.json`), under the room's grid
+   * Reads the full recorded room entry (smart objects + ground) for one room
+   * from the stage's definition file, or `null` when the room has no record.
+   *
+   * @param id       Stage id.
+   * @param roomRow  Room row within the stage's grid.
+   * @param roomCol  Room column within the stage's grid.
+   */
+  async getRoomRecord(
+    id: string,
+    roomRow: number,
+    roomCol: number,
+  ): Promise<RoomSmartObjects | null> {
+    const file = await this.readStageFile(id);
+    return file?.rooms?.find((entry) => entry.row === roomRow && entry.col === roomCol) ?? null;
+  }
+
+  /**
+   * Persists a room's smart objects (decorations) and ground layers into the
+   * stage's definition file (`/editor/stage/<uuid>.json`), under the room's grid
    * position in the `rooms` array.
    *
-   * Passing an empty list removes the room entry entirely (so untouched rooms
-   * leave no trace in the JSON).
+   * When the room has no smart objects and no ground, the room entry is removed
+   * entirely (so untouched rooms leave no trace in the JSON).
    *
    * @param id              Stage id.
    * @param roomRow         Room row within the stage's grid.
    * @param roomCol         Room column within the stage's grid.
    * @param smartObjects    The room's placements.
+   * @param ground          The room's ground layers (optional).
    */
   async saveRoomSmartObjects(
     id: string,
     roomRow: number,
     roomCol: number,
     smartObjects: RoomSmartObjects['smartObjects'],
+    ground: RoomSmartObjects['ground'] = [],
   ): Promise<void> {
     const file = await this.readStageFile(id);
     if (!file) {
@@ -303,14 +351,19 @@ export class StageService {
     const rooms = (file.rooms ?? []).filter(
       (room) => !(room.row === roomRow && room.col === roomCol),
     );
-    if (smartObjects.length > 0) {
-      rooms.push({ row: roomRow, col: roomCol, smartObjects });
+    if (smartObjects.length > 0 || (ground && ground.length > 0)) {
+      const entry: RoomSmartObjects = { row: roomRow, col: roomCol, smartObjects };
+      if (ground && ground.length > 0) {
+        entry.ground = ground;
+      }
+      rooms.push(entry);
     }
     file.rooms = rooms.length > 0 ? rooms : undefined;
 
     await this.writeStageFile(file);
     this.logger.info(
-      `StageService: saved ${smartObjects.length} smart object(s) for room (${roomRow},${roomCol}).`,
+      `StageService: saved ${smartObjects.length} smart object(s) and ` +
+        `${ground?.length ?? 0} ground layer(s) for room (${roomRow},${roomCol}).`,
     );
   }
 

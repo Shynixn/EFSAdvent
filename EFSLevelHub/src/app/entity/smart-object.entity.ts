@@ -52,27 +52,51 @@ export interface SmartObjectTileRef {
 export interface SmartObjectPlacement {
   /** Definition id (see {@link SMART_OBJECT_DEFINITIONS}). */
   id: string;
+  /**
+   * Base layer the object was placed on (0-7). Its paired top layer is
+   * `baseLayerId + 8`. Recorded so the object can be resolved, moved or
+   * removed independently of the editor's currently active layer.
+   */
+  baseLayerId: number;
   /** Anchor tile row the object was placed at (offsets are relative to this). */
   anchorRow: number;
   /** Anchor tile column the object was placed at. */
   anchorCol: number;
-  /** Absolute tile coordinates written to the base layer. */
+  /** Absolute tile coordinates written to the base layer (`baseLayerId`). */
   bottomLayerTiles: SmartObjectTileRef[];
-  /** Absolute tile coordinates written to the paired top layer. */
+  /** Absolute tile coordinates written to the paired top layer (`baseLayerId + 8`). */
   topLayerTiles: SmartObjectTileRef[];
 }
 
 /**
- * Smart objects placed within a single room, keyed by the room's grid position.
- * Mirrors the `rooms` array in the stage JSON.
+ * A ground paint record for one base layer of a room.
+ *
+ * Stores a full room-sized grid of tile ids for both the base and its paired
+ * top layer (length {@link ROOM_DIMENSION}²). A value of `0` means the tile has
+ * not been painted by the ground brush.
+ */
+export interface GroundLayer {
+  /** Base layer this ground belongs to (0-7). Paired top layer is `+ 8`. */
+  baseLayerId: number;
+  /** Full-canvas ground tile ids for the base layer (row-major, 0 = empty). */
+  bottomLayerTiles: number[];
+  /** Full-canvas ground tile ids for the paired top layer (row-major, 0 = empty). */
+  topLayerTiles: number[];
+}
+
+/**
+ * Everything recorded for a single room in the stage JSON, keyed by the room's
+ * grid position. Mirrors the `rooms` array in the stage JSON.
  */
 export interface RoomSmartObjects {
   /** Room row within the stage's room grid. */
   row: number;
   /** Room column within the stage's room grid. */
   col: number;
-  /** Smart objects placed in this room. */
+  /** Smart objects (decorations) placed in this room. */
   smartObjects: SmartObjectPlacement[];
+  /** Ground layers painted in this room, one entry per base layer. */
+  ground?: GroundLayer[];
 }
 
 /**
@@ -131,6 +155,7 @@ export function applySmartObject(
 ): SmartObjectPlacement {
   const placement: SmartObjectPlacement = {
     id: definition.id,
+    baseLayerId: baseLayerIndex,
     anchorRow,
     anchorCol,
     bottomLayerTiles: [],
@@ -166,7 +191,7 @@ export function applySmartObject(
 export function clearSmartObject(
   placement: SmartObjectPlacement,
   layers: SmartObjectTargetLayer[],
-  baseLayerIndex = 0,
+  baseLayerIndex = placement.baseLayerId ?? 0,
 ): void {
   for (const ref of placement.bottomLayerTiles) {
     const layer = layers[baseLayerIndex];
@@ -239,4 +264,91 @@ export function renderSmartObjectPreview(
   stamp(definition.bottomLayerTiles);
   stamp(definition.topLayerTiles);
   return buffer;
+}
+
+// --- Ground -----------------------------------------------------------------
+
+/** Room layer grid dimension (32×32), exported for ground grids. */
+export const GROUND_DIMENSION = ROOM_DIMENSION;
+
+/**
+ * A selectable "ground" for the ground brush.
+ *
+ * A ground is a repeating pattern of tiles (drawn by `pattern` below). Unlike a
+ * smart object, a ground is painted tile-by-tile with the brush, never dragged.
+ */
+export interface GroundDefinition {
+  /** Stable id, e.g. `grass`. */
+  id: string;
+  /** Representative tile id (used for the preview swatch and as a fallback). */
+  tile: number;
+  /**
+   * Tile id for a given in-room (row, col). Defaults to a constant fill using
+   * {@link tile} when omitted; may be overridden to produce a pattern.
+   */
+  pattern?: (row: number, col: number) => number;
+}
+
+/**
+ * Hard-coded catalog of available grounds.
+ *
+ * Each entry maps to a game ground tile id (see `FSALib/assets/tileproperties.json`).
+ * Grounds fill the room tile-by-tile with a single tile.
+ */
+export const GROUND_DEFINITIONS: GroundDefinition[] = [
+  { id: 'default-ground', tile: 443 },
+  { id: 'ground-variance', tile: 435 },
+  { id: 'ground-flower', tile: 436 },
+  { id: 'ground-to-rock-438', tile: 438 },
+  {
+    id: 'ground-to-rock-437-453',
+    tile: 437,
+    pattern: (row, col) => ((row + col) % 2 === 0 ? 437 : 453),
+  },
+  {
+    id: 'ground-to-rock-439-442',
+    tile: 439,
+    pattern: (row, col) => ((row + col) % 2 === 0 ? 439 : 442),
+  },
+  {
+    id: 'ground-to-rock-440-441',
+    tile: 440,
+    pattern: (row, col) => ((row + col) % 2 === 0 ? 440 : 441),
+  },
+  {
+    id: 'ground-to-rock-455-458',
+    tile: 455,
+    pattern: (row, col) => ((row + col) % 2 === 0 ? 455 : 458),
+  },
+  {
+    id: 'ground-to-rock-456-457',
+    tile: 456,
+    pattern: (row, col) => ((row + col) % 2 === 0 ? 456 : 457),
+  },
+  { id: 'ground-to-rock-454', tile: 454 },
+  { id: 'rock-ground-444', tile: 444 },
+  { id: 'rock-ground-445', tile: 445 },
+  { id: 'rock-ground-459', tile: 459 },
+  { id: 'rock-ground-460', tile: 460 },
+  { id: 'rock-ground-461', tile: 461 },
+  { id: 'tall-grass', tile: 116 },
+];
+
+/** Looks up a ground definition by id. */
+export function findGroundDefinition(id: string): GroundDefinition | undefined {
+  return GROUND_DEFINITIONS.find((definition) => definition.id === id);
+}
+
+/** Resolves the tile a ground paints at a given in-room coordinate. */
+export function groundTileAt(definition: GroundDefinition, row: number, col: number): number {
+  return definition.pattern ? definition.pattern(row, col) : definition.tile;
+}
+
+/** Creates an empty (all-zero) ground grid for one layer. */
+export function createGroundLayer(baseLayerId: number): GroundLayer {
+  return {
+    baseLayerId,
+    bottomLayerTiles: new Array<number>(ROOM_DIMENSION * ROOM_DIMENSION).fill(0),
+    topLayerTiles: new Array<number>(ROOM_DIMENSION * ROOM_DIMENSION).fill(0),
+  };
 }

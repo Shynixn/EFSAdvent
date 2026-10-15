@@ -57,8 +57,18 @@
         [stage]="stageData()"
         [selectedRoom]="roomIndex()"
         [themeName]="themeName()"
+        [stageJson]="stageJson()"
+        [layerIndex]="layerIndex()"
+        [gba]="gba()"
+        [topLayer]="topLayer()"
+        [paintTop]="paintTop()"
         (roomSelected)="selectRoom($event)"
         (themeClicked)="openTheme()"
+        (layerIndexChange)="layerIndex.set($event)"
+        (gbaChange)="gba.set($event)"
+        (topLayerChange)="topLayer.set($event)"
+        (paintTopChange)="paintTop.set($event)"
+        (clearRoomData)="clearRoomData()"
       />
     </div>
 
@@ -108,49 +118,6 @@
               </button>
             </div>
 
-            <label class="flex items-center gap-2">
-              <span class="text-xs uppercase tracking-wide text-slate-400">Base layer</span>
-              <select
-                [value]="layerIndex()"
-                (change)="layerIndex.set(+$any($event.target).value)"
-                class="cursor-pointer rounded-lg border border-slate-700 bg-slate-800/70 px-2 py-1 text-slate-100"
-              >
-                @for (l of [0, 1, 2, 3, 4, 5, 6, 7]; track l) {
-                  <option [value]="l">{{ l }}</option>
-                }
-              </select>
-            </label>
-
-            <label class="flex cursor-pointer items-center gap-2">
-              <input
-                type="checkbox"
-                class="accent-indigo-500"
-                [checked]="gba()"
-                (change)="gba.set($any($event.target).checked)"
-              />
-              <span class="text-xs uppercase tracking-wide text-slate-400">GBA layer</span>
-            </label>
-
-            <label class="flex cursor-pointer items-center gap-2">
-              <input
-                type="checkbox"
-                class="accent-indigo-500"
-                [checked]="topLayer()"
-                (change)="topLayer.set($any($event.target).checked)"
-              />
-              <span class="text-xs uppercase tracking-wide text-slate-400">Top layer</span>
-            </label>
-
-            <label class="flex cursor-pointer items-center gap-2">
-              <input
-                type="checkbox"
-                class="accent-indigo-500"
-                [checked]="paintTop()"
-                (change)="paintTop.set($any($event.target).checked)"
-              />
-              <span class="text-xs uppercase tracking-wide text-slate-400">Edit top layer</span>
-            </label>
-
             <span class="ml-auto font-mono text-xs text-slate-500">Room {{ roomIndex() }}</span>
           </div>
 
@@ -166,7 +133,12 @@
             [tile]="brushTile()"
             [tool]="tool()"
             [smartObjects]="smartObjects()"
+            [groundTiles]="activeGroundTiles()"
+            [groundTile]="groundTile()"
+            [groundMode]="groundMode()"
+            [groundBaseLayerId]="layerIndex()"
             (tileChanged)="onTileChanged($event)"
+            (groundChanged)="onGroundChanged($event)"
             (decorationPlaced)="onDecorationPlaced($event)"
             (decorationMoved)="onDecorationMoved($event)"
           />
@@ -180,7 +152,10 @@
         [renderer]="renderer()"
         [gba]="gba()"
         [brushTile]="brushTile()"
+        [selectedGroundId]="selectedGroundId()"
         (tilePicked)="brushTile.set($event)"
+        (groundPicked)="selectGround($event)"
+        (groundCleared)="clearGround()"
       />
     </div>
   </div>

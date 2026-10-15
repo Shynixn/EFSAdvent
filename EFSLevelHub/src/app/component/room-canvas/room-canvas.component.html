@@ -18,11 +18,11 @@
       (pointerdown)="onPointerDown($event)"
       (pointermove)="onPointerMove($event)"
       (pointerup)="onPointerUp($event)"
-      (pointerleave)="onPointerUp($event)"
+      (pointerleave)="onPointerLeaveCanvas($event)"
       (contextmenu)="onContextMenu($event)"
     ></canvas>
 
-    <!-- Transparent preview overlay for a decoration being dragged/placed. -->
+    <!-- Transparent overlay: decoration drag preview + hovered-object outline. -->
     <canvas
       #preview
       width="512"

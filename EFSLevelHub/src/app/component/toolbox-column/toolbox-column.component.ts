@@ -13,12 +13,15 @@ import {
 import { TilePaletteComponent } from '../tile-palette/tile-palette.component';
 import { StageRenderer } from '../../service/render/stage-renderer';
 import {
+  GROUND_DEFINITIONS,
+  GroundDefinition,
   SMART_OBJECT_DEFINITIONS,
   SmartObjectDefinition,
   smartObjectBounds,
   renderSmartObjectPreview,
 } from '../../entity/smart-object.entity';
 import { SmartObjectDragService } from '../../service/smart-object-drag.service';
+import { ImageBuffer } from '../../service/render/gba-tile-renderer';
 
 /**
  * ToolboxColumnComponent
@@ -71,10 +74,17 @@ export class ToolboxColumnComponent implements AfterViewInit {
   /** Currently selected brush tile (shown in the Advanced section). */
   @Input() brushTile = 0;
 
+  /** Id of the currently selected ground (none selected when empty). */
+  @Input() selectedGroundId = '';
+
   /** Emits the Advanced section's open state whenever it changes. */
   @Output() advancedOpenChange = new EventEmitter<boolean>();
   /** Emits the tile value when the user picks a tile from the palette. */
   @Output() tilePicked = new EventEmitter<number>();
+  /** Emits the ground definition when the user picks a ground. */
+  @Output() groundPicked = new EventEmitter<GroundDefinition>();
+  /** Emits when the user clears the selected ground (deselect). */
+  @Output() groundCleared = new EventEmitter<void>();
 
   private readonly dragService = inject(SmartObjectDragService);
 
@@ -84,13 +94,20 @@ export class ToolboxColumnComponent implements AfterViewInit {
   /** Available decoration (smart-object) definitions, shown in the toolbox. */
   readonly decorations: SmartObjectDefinition[] = SMART_OBJECT_DEFINITIONS;
 
+  /** Available ground definitions, shown in the Ground box. */
+  readonly grounds: GroundDefinition[] = GROUND_DEFINITIONS;
+
   /** The per-decoration mini preview canvases. */
   private readonly previewCanvases = viewChildren<ElementRef<HTMLCanvasElement>>('decoPreview');
+
+  /** The per-ground mini preview canvases. */
+  private readonly groundCanvases = viewChildren<ElementRef<HTMLCanvasElement>>('groundPreview');
 
   constructor() {
     // Redraw the mini previews once the canvases are available.
     effect(() => {
       this.previewCanvases();
+      this.groundCanvases();
       queueMicrotask(() => void this.drawPreviews());
     });
   }
@@ -127,6 +144,28 @@ export class ToolboxColumnComponent implements AfterViewInit {
         0,
       );
     }
+
+    // Ground swatches: a single representative tile per ground.
+    const groundCanvases = this.groundCanvases();
+    for (let i = 0; i < this.grounds.length && i < groundCanvases.length; i++) {
+      const ground = this.grounds[i];
+      const canvas = groundCanvases[i].nativeElement;
+      canvas.width = 16;
+      canvas.height = 16;
+      const buffer = new ImageBuffer(16, 16);
+      buffer.fill(0, 0, 0, 0);
+      renderer.drawTilesetTile(buffer, 0, 0, ground.tile, this._gba);
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        continue;
+      }
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.putImageData(
+        new ImageData(new Uint8ClampedArray(buffer.pixels), buffer.width, buffer.height),
+        0,
+        0,
+      );
+    }
   }
 
   /** Toggles the Advanced section. */
@@ -134,6 +173,15 @@ export class ToolboxColumnComponent implements AfterViewInit {
     const open = !this.advancedOpen();
     this.advancedOpen.set(open);
     this.advancedOpenChange.emit(open);
+  }
+
+  /** Selects a ground (or deselects it when the same one is clicked again). */
+  selectGround(ground: GroundDefinition): void {
+    if (this.selectedGroundId === ground.id) {
+      this.groundCleared.emit();
+      return;
+    }
+    this.groundPicked.emit(ground);
   }
 
   /** Starts a native drag carrying the decoration id. */

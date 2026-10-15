@@ -15,11 +15,12 @@ import { SystemColumnComponent } from '../../component/system-column/system-colu
 import { ToolboxColumnComponent } from '../../component/toolbox-column/toolbox-column.component';
 import {
   RoomCanvasComponent,
+  RoomGroundChange,
   RoomTileChange,
 } from '../../component/room-canvas/room-canvas.component';
 import { ThemePickerComponent } from '../../component/theme-picker/theme-picker.component';
 import { LoadingOverlayComponent } from '../../component/loading-overlay/loading-overlay.component';
-import { StageService } from '../../service/stage.service';
+import { StageService, StageFile } from '../../service/stage.service';
 import { StageTabsService } from '../../service/stage-tabs.service';
 import { StageEditorService } from '../../service/stage-editor.service';
 import { StagePreviewService } from '../../service/stage-preview.service';
@@ -35,7 +36,12 @@ import {
 import { IsoSourceService } from '../../service/iso-source.service';
 import { LoggingService } from '../../service/logging.service';
 import { RoomData, StageData } from '../../entity/fsalib.entity';
-import { SmartObjectPlacement } from '../../entity/smart-object.entity';
+import {
+  GroundDefinition,
+  GroundLayer,
+  SmartObjectPlacement,
+  createGroundLayer,
+} from '../../entity/smart-object.entity';
 import { TilesetTheme } from '../../entity/tileset.util';
 import { StageRenderer } from '../../service/render/stage-renderer';
 import { nextPaint } from '../../util/paint';
@@ -124,6 +130,86 @@ export class RoomPage implements OnInit, OnDestroy {
    * JSON on save.
    */
   readonly smartObjects = signal<SmartObjectPlacement[]>([]);
+
+  /**
+   * Ground layers painted in the current room (one entry per base layer).
+   * Persisted to the stage JSON on save; `0` tiles mean "unpainted".
+   */
+  readonly groundLayers = signal<GroundLayer[]>([]);
+
+  /** Currently selected ground for the ground brush (null = tile brush). */
+  readonly selectedGround = signal<GroundDefinition | null>(null);
+
+  /** Selected ground's id (bound to the toolbox Ground box). */
+  readonly selectedGroundId = computed(() => this.selectedGround()?.id ?? '');
+
+  /**
+   * The ground grid for the active base layer (row-major tile ids, `null` when
+   * this layer has no ground painted yet). Drawn under the room layers.
+   */
+  readonly activeGroundTiles = computed<number[] | null>(() => {
+    const base = this.layerIndex();
+    const layer = this.groundLayers().find((entry) => entry.baseLayerId === base);
+    return layer ? layer.bottomLayerTiles : null;
+  });
+
+  /** Whether the brush currently paints ground (a ground is selected). */
+  readonly groundMode = computed(() => this.selectedGround() !== null);
+
+  /** Tile id painted by the ground brush (0 when no ground is selected). */
+  readonly groundTile = computed(() => this.selectedGround()?.tile ?? 0);
+
+  /**
+   * The stage's definition file as last read from disk (null while loading).
+   * The displayed {@link stageJson} is derived from this plus the current
+   * room's in-memory smart objects, so the preview reflects unsaved edits.
+   */
+  private readonly stageFile = signal<StageFile | null>(null);
+
+  /**
+   * Live, pretty-printed JSON of the stage's definition file with the current
+   * room's in-memory smart objects and ground merged in — so newly placed/
+   * moved decorations and painted ground show here immediately, before a save.
+   */
+  readonly stageJson = computed<string | null>(() => {
+    const file = this.stageFile();
+    if (!file) {
+      return null;
+    }
+    const grid = this.roomGridPosition();
+    if (!grid) {
+      return JSON.stringify(file, null, 2);
+    }
+    const merged = this.composeRoomRecord(file, grid);
+    return JSON.stringify(merged, null, 2);
+  });
+
+  /**
+   * Returns a copy of the stage file with this room's in-memory smart objects
+   * and ground merged into its `rooms` array (reflecting unsaved edits).
+   */
+  private composeRoomRecord(file: StageFile, grid: { row: number; col: number }): StageFile {
+    const placements = this.smartObjects();
+    const ground = this.groundLayers().filter(
+      (layer) =>
+        layer.bottomLayerTiles.some((t) => t !== 0) || layer.topLayerTiles.some((t) => t !== 0),
+    );
+    const rooms = (file.rooms ?? []).filter(
+      (room) => !(room.row === grid.row && room.col === grid.col),
+    );
+    if (placements.length > 0 || ground.length > 0) {
+      const entry: (typeof rooms)[number] = {
+        row: grid.row,
+        col: grid.col,
+        smartObjects: placements,
+      };
+      if (ground.length > 0) {
+        entry.ground = ground;
+      }
+      rooms.push(entry);
+    }
+    return { ...file, rooms: rooms.length > 0 ? rooms : undefined };
+  }
 
   /**
    * Whether this stage has unsaved edits (tile changes and/or a theme change),
@@ -252,6 +338,7 @@ export class RoomPage implements OnInit, OnDestroy {
       this.layerIndex.set(0);
       this.gba.set(false);
       this.room.set(null);
+      this.selectedGround.set(null);
     }
 
     this.isLoading.set(needsOverlay);
@@ -294,11 +381,16 @@ export class RoomPage implements OnInit, OnDestroy {
       }
       this.room.set(room);
 
-      // Load any smart objects previously recorded for this room.
+      // Load any smart objects + ground previously recorded for this room.
       const grid = this.roomGridPosition();
-      this.smartObjects.set(
-        grid ? await this.stageService.getRoomSmartObjects(stageId, grid.row, grid.col) : [],
-      );
+      const record = grid
+        ? await this.stageService.getRoomRecord(stageId, grid.row, grid.col)
+        : null;
+      this.smartObjects.set(record?.smartObjects ?? []);
+      this.groundLayers.set((record?.ground ?? []).map((layer) => ({ ...layer })));
+
+      // Show the stage's current definition file in the System column.
+      this.stageFile.set(await this.stageService.getStageFile(stageId));
 
       // Register this room as an open tab and mark the stage active so the side
       // nav highlights it and the stage page's save picks up the edits.
@@ -347,6 +439,60 @@ export class RoomPage implements OnInit, OnDestroy {
   }
 
   /**
+   * Records a ground edit: the canvas already wrote the tile into the active
+   * ground grid, so here we just flag the stage dirty and remember the change.
+   * Ground lives in the stage JSON (not the room archive), so no archive layer
+   * needs re-serializing.
+   */
+  onGroundChanged(change: RoomGroundChange): void {
+    this.stageEditor.setDirty(this.stageId(), true);
+    this.groundLayers.update((layers) => {
+      const existing = layers.find((layer) => layer.baseLayerId === change.baseLayerId);
+      if (existing) {
+        // Clone so the signal value changes identity and dependent computed
+        // values (e.g. the live stage JSON preview) re-evaluate.
+        return layers.map((layer) =>
+          layer === existing
+            ? {
+                ...layer,
+                bottomLayerTiles: [...layer.bottomLayerTiles],
+                topLayerTiles: [...layer.topLayerTiles],
+              }
+            : layer,
+        );
+      }
+      // First paint on this layer: create its ground grids and copy in the tile.
+      const created = createGroundLayer(change.baseLayerId);
+      created.bottomLayerTiles[change.y * 32 + change.x] = change.tile;
+      return [...layers, created];
+    });
+  }
+
+  /** Selects a ground for the ground brush and switches to the brush tool. */
+  selectGround(ground: GroundDefinition): void {
+    this.selectedGround.set(ground);
+    // Painting ground requires the brush, so select it automatically.
+    this.tool.set('brush');
+  }
+
+  /** Clears the selected ground (returns to the tile brush). */
+  clearGround(): void {
+    this.selectedGround.set(null);
+  }
+
+  /**
+   * Removes every smart object (decoration) and all ground painted in the
+   * current room from the stage JSON. The room's tile layers are left as-is
+   * (decorations already stamped their tiles into the archive on save), so this
+   * only clears the semantic records in the stage definition file.
+   */
+  clearRoomData(): void {
+    this.stageEditor.setDirty(this.stageId(), true);
+    this.smartObjects.set([]);
+    this.groundLayers.set([]);
+  }
+
+  /**
    * Records a placed decoration: its tiles were already stamped onto the room
    * layers by the canvas, so here we mark both the base and top layers dirty
    * (they are persisted to the archive on save) and remember the placement so
@@ -354,7 +500,7 @@ export class RoomPage implements OnInit, OnDestroy {
    */
   onDecorationPlaced(placement: SmartObjectPlacement): void {
     this.stageEditor.setDirty(this.stageId(), true);
-    const base = this.layerIndex();
+    const base = placement.baseLayerId;
     this.stageRoom.markLayerDirty(this.roomIndex(), base);
     this.stageRoom.markLayerDirty(this.roomIndex(), base + 8);
     this.smartObjects.update((list) => [...list, placement]);
@@ -367,7 +513,7 @@ export class RoomPage implements OnInit, OnDestroy {
    */
   onDecorationMoved(event: { from: SmartObjectPlacement; to: SmartObjectPlacement }): void {
     this.stageEditor.setDirty(this.stageId(), true);
-    const base = this.layerIndex();
+    const base = event.to.baseLayerId;
     this.stageRoom.markLayerDirty(this.roomIndex(), base);
     this.stageRoom.markLayerDirty(this.roomIndex(), base + 8);
     this.smartObjects.update((list) =>
@@ -448,12 +594,26 @@ export class RoomPage implements OnInit, OnDestroy {
       this.stageRoom.setDirty(false);
       this.stageRoom.clearDirtyLayers();
 
-      // Persist the room's smart objects into the stage JSON (after markSaved,
-      // which also rewrites that file, so the two do not clobber each other).
+      // Persist the room's smart objects + ground into the stage JSON (after
+      // markSaved, which also rewrites that file, so the two do not clobber
+      // each other).
       const grid = this.roomGridPosition();
       if (grid) {
-        await this.stageService.saveRoomSmartObjects(id, grid.row, grid.col, this.smartObjects());
+        const ground = this.groundLayers().filter(
+          (layer) =>
+            layer.bottomLayerTiles.some((t) => t !== 0) || layer.topLayerTiles.some((t) => t !== 0),
+        );
+        await this.stageService.saveRoomSmartObjects(
+          id,
+          grid.row,
+          grid.col,
+          this.smartObjects(),
+          ground,
+        );
       }
+
+      // Refresh the displayed stage JSON now that it has been rewritten.
+      this.stageFile.set(await this.stageService.getStageFile(id));
 
       // Regenerate this room's cached preview so the stage page thumbnail /
       // map grid stay in sync with the edit.

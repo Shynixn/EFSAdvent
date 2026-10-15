@@ -33,6 +33,17 @@ export interface RoomTileChange {
   tile: number;
 }
 
+/** A ground edit produced by painting the ground brush on the canvas. */
+export interface RoomGroundChange {
+  /** Base layer the ground belongs to (0-7). */
+  baseLayerId: number;
+  /** Tile coordinate that changed. */
+  x: number;
+  y: number;
+  /** New ground tile value (0 clears the tile). */
+  tile: number;
+}
+
 /** Room layer grid dimension (32×32 tiles). */
 const DIMENSION = 32;
 
@@ -152,11 +163,55 @@ export class RoomCanvasComponent implements AfterViewInit {
   /** Active tool: `brush` paints tiles, `hand` moves placed smart objects. */
   @Input() tool: 'brush' | 'hand' = 'brush';
 
-  /** Smart objects placed in this room (for hand-tool hit-testing/dragging). */
-  @Input() smartObjects: SmartObjectPlacement[] = [];
+  private _smartObjects: SmartObjectPlacement[] = [];
+  /** Smart objects placed in this room (for hit-testing, dragging, ground skip). */
+  @Input()
+  get smartObjects(): SmartObjectPlacement[] {
+    return this._smartObjects;
+  }
+  set smartObjects(value: SmartObjectPlacement[]) {
+    this._smartObjects = value ?? [];
+    // A new placement (or a move) changes which base tiles the ground must not
+    // hide, so repaint immediately instead of waiting for the next edit.
+    queueMicrotask(() => void this.redraw());
+  }
+
+  private _groundTiles: number[] | null = null;
+  /**
+   * Ground grid (row-major tile ids, 0 = empty) for the active base layer,
+   * drawn as an underlay beneath the room layers/decorations. `null` disables
+   * ground rendering (no ground record for this layer).
+   */
+  @Input()
+  get groundTiles(): number[] | null {
+    return this._groundTiles;
+  }
+  set groundTiles(value: number[] | null) {
+    this._groundTiles = value;
+    queueMicrotask(() => void this.redraw());
+  }
+
+  /**
+   * Ground tile to paint with the brush while a ground is selected. When > 0,
+   * the brush paints ground instead of tiles (see {@link groundMode}).
+   */
+  @Input() groundTile = 0;
+
+  /**
+   * Whether the brush paints ground. When true, painting writes to
+   * {@link groundTiles} and emits {@link groundChanged} instead of
+   * {@link tileChanged}.
+   */
+  @Input() groundMode = false;
+
+  /** Base layer id the ground brush targets (0-7). */
+  @Input() groundBaseLayerId = 0;
 
   /** Emits each tile edit as it is painted. */
   @Output() tileChanged = new EventEmitter<RoomTileChange>();
+
+  /** Emits each ground edit as it is painted. */
+  @Output() groundChanged = new EventEmitter<RoomGroundChange>();
 
   /** Emits when a decoration (smart object) is dropped onto the canvas. */
   @Output() decorationPlaced = new EventEmitter<SmartObjectPlacement>();
@@ -199,6 +254,9 @@ export class RoomCanvasComponent implements AfterViewInit {
   /** True while a smart object is being dragged with the hand tool. */
   readonly draggingObject = signal(false);
 
+  /** Smart object currently hovered by the pointer (for its boundary outline). */
+  private hoveredPlacement: SmartObjectPlacement | null = null;
+
   ngAfterViewInit(): void {
     void this.redraw();
   }
@@ -221,13 +279,17 @@ export class RoomCanvasComponent implements AfterViewInit {
     const height = canvas.height;
     const buffer = new ImageBuffer(width, height);
     buffer.fill(0, 0, 0, 255);
+
+    // Ground acts as the base layer: it is drawn first, and the room's base
+    // tiles are skipped wherever ground is painted — except on tiles covered by
+    // a smart object (a decoration always keeps its own stamped tiles).
+    const skip = this.groundTiles ? this.groundSkipSet() : undefined;
+    if (this.groundTiles) {
+      renderer.drawGround(buffer, this.groundTiles, this.gba);
+    }
+    renderer.drawSingleLayer(buffer, this.index, this.layerIndex, this.gba, skip);
     if (this.topLayer) {
-      // Composite the base layer and its paired top layer (index + 8), matching
-      // the game / EFSAdvent editor — otherwise top-layer-only tiles (tree
-      // canopies, archways, …) would be missing.
-      renderer.drawLayerStack(buffer, this.index, this.layerIndex, this.gba);
-    } else {
-      renderer.drawSingleLayer(buffer, this.index, this.layerIndex, this.gba);
+      renderer.drawSingleLayer(buffer, this.index, this.layerIndex + 8, this.gba);
     }
 
     const ctx = canvas.getContext('2d');
@@ -236,6 +298,36 @@ export class RoomCanvasComponent implements AfterViewInit {
     }
     const image = new ImageData(new Uint8ClampedArray(buffer.pixels), buffer.width, buffer.height);
     ctx.putImageData(image, 0, 0);
+  }
+
+  /**
+   * Tile offsets (row*32+col) where the base layer must be hidden so the ground
+   * shows through: every painted ground tile that is **not** covered by a smart
+   * object (decorations keep their stamped base tiles on top of the ground).
+   */
+  private groundSkipSet(): Set<number> {
+    const ground = this.groundTiles;
+    const skip = new Set<number>();
+    if (!ground) {
+      return skip;
+    }
+    // Collect the tiles owned by smart objects on the active base layer, so the
+    // ground never hides a decoration.
+    const owned = new Set<number>();
+    for (const placement of this.smartObjects) {
+      if (placement.baseLayerId !== this.groundBaseLayerId) {
+        continue;
+      }
+      for (const ref of placement.bottomLayerTiles) {
+        owned.add(ref.row * DIMENSION + ref.col);
+      }
+    }
+    for (let offset = 0; offset < ground.length; offset++) {
+      if (ground[offset] !== 0 && !owned.has(offset)) {
+        skip.add(offset);
+      }
+    }
+    return skip;
   }
 
   /** Starts painting, or grabs a smart object when the hand tool is active. */
@@ -261,13 +353,14 @@ export class RoomCanvasComponent implements AfterViewInit {
       return;
     }
     if (this.painting) {
+      this.updateHover(event);
       this.paintAt(event);
       return;
     }
+    // Keep the hovered-object boundary outline in sync with the pointer.
+    this.updateHover(event);
     if (this.tool === 'hand') {
-      // Show a grab cursor while hovering a placed smart object.
-      const tile = this.tileAt(event);
-      this.hoveringObject.set(tile ? this.findPlacementAt(tile) !== null : false);
+      this.hoveringObject.set(this.hoveredPlacement !== null);
     }
   }
 
@@ -280,6 +373,14 @@ export class RoomCanvasComponent implements AfterViewInit {
     }
     this.painting = false;
     this.hoveringObject.set(false);
+  }
+
+  /** Hides the hover outline when the pointer leaves the canvas. */
+  onPointerLeaveCanvas(event: PointerEvent): void {
+    this.hoveredPlacement = null;
+    this.hoveringObject.set(false);
+    this.clearPreview();
+    this.onPointerUp(event);
   }
 
   /** Prevents the browser context menu on right click. */
@@ -462,6 +563,54 @@ export class RoomCanvasComponent implements AfterViewInit {
 
   // --- Drag preview --------------------------------------------------------
 
+  /**
+   * Updates which smart object is hovered and repaints the boundary outline on
+   * the overlay. The overlay is shared with the drag preview, so the outline is
+   * only drawn while nothing is being dragged.
+   */
+  private updateHover(event: PointerEvent): void {
+    if (this.dragging) {
+      return;
+    }
+    const tile = this.tileAt(event);
+    this.hoveredPlacement = tile ? this.findPlacementAt(tile) : null;
+    this.drawHoverOutline();
+  }
+
+  /** Draws a black dotted rectangle around the hovered smart object's bounds. */
+  private drawHoverOutline(): void {
+    const canvas = this.previewRef()?.nativeElement;
+    const placement = this.hoveredPlacement;
+    if (!canvas) {
+      return;
+    }
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      return;
+    }
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!placement) {
+      return;
+    }
+    const definition = findSmartObjectDefinition(placement.id);
+    if (!definition) {
+      return;
+    }
+    const bounds = smartObjectBounds(definition);
+    const x = (placement.anchorCol + bounds.minCol) * TILE_SIZE;
+    const y = (placement.anchorRow + bounds.minRow) * TILE_SIZE;
+    const w = bounds.cols * TILE_SIZE;
+    const h = bounds.rows * TILE_SIZE;
+
+    ctx.save();
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
+    // Offset by 0.5px so the 1px dotted line lands on a pixel centre (crisp).
+    ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+    ctx.restore();
+  }
+
   /** Draws the transparent preview of the dragged decoration on the overlay. */
   private drawPreview(): void {
     const canvas = this.previewRef()?.nativeElement;
@@ -525,6 +674,30 @@ export class RoomCanvasComponent implements AfterViewInit {
       return;
     }
     const { x, y } = tile;
+    const offset = y * DIMENSION + x;
+
+    // Ground brush: paints the selected ground tile into the ground grid for
+    // the active base layer. Painting over a decoration is allowed (the ground
+    // is still recorded in the stage JSON) — the decoration just keeps drawing
+    // on top of it. The grid may not exist yet for this layer, so the host
+    // creates it from the emitted change.
+    if (this.groundMode && this.groundTile > 0) {
+      if (this._groundTiles?.[offset] === this.groundTile) {
+        return;
+      }
+      if (this._groundTiles) {
+        // Mutate in place when the grid already exists.
+        this._groundTiles[offset] = this.groundTile;
+      }
+      this.groundChanged.emit({
+        baseLayerId: this.groundBaseLayerId,
+        x,
+        y,
+        tile: this.groundTile,
+      });
+      void this.redraw();
+      return;
+    }
 
     // Paint onto the base layer, or its paired top layer (index + 8) when the
     // "edit top layer" toggle is on.
@@ -533,7 +706,6 @@ export class RoomCanvasComponent implements AfterViewInit {
     if (!layer) {
       return;
     }
-    const offset = y * DIMENSION + x;
     if (layer.Tiles[offset] === this.tile) {
       return;
     }

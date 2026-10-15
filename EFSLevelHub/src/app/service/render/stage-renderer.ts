@@ -239,10 +239,19 @@ export class StageRenderer {
   }
 
   /** Draws a 32×32 tile layer. */
-  private drawLayer(target: ImageBuffer, renderer: TilesetRenderer, layer: LayerData): void {
+  private drawLayer(
+    target: ImageBuffer,
+    renderer: TilesetRenderer,
+    layer: LayerData,
+    skip?: ReadonlySet<number>,
+  ): void {
     for (let y = 0; y < LAYER_DIMENSION; y++) {
       for (let x = 0; x < LAYER_DIMENSION; x++) {
-        const tile = layer.Tiles[y * LAYER_DIMENSION + x];
+        const offset = y * LAYER_DIMENSION + x;
+        if (skip?.has(offset)) {
+          continue;
+        }
+        const tile = layer.Tiles[offset];
         if (!tile) {
           continue;
         }
@@ -268,14 +277,22 @@ export class StageRenderer {
    * @param roomIndex  Room to draw.
    * @param layerIndex 0-7 = base layers, 8-15 = top layers.
    * @param gba        Use the GBA tileset (layer level 1) instead of the TV one.
+   * @param skip       Tile offsets (row*32+col) to leave untouched — used to let
+   *                   the ground grid show through where it is painted.
    */
-  drawSingleLayer(target: ImageBuffer, roomIndex: number, layerIndex: number, gba = false): void {
+  drawSingleLayer(
+    target: ImageBuffer,
+    roomIndex: number,
+    layerIndex: number,
+    gba = false,
+    skip?: ReadonlySet<number>,
+  ): void {
     const room = this.stage.Rooms[roomIndex];
     const layer = room?.Layers[layerIndex];
     if (!layer) {
       return;
     }
-    this.drawLayer(target, gba ? this.tilesetGBA : this.tilesetTV, layer);
+    this.drawLayer(target, gba ? this.tilesetGBA : this.tilesetTV, layer, skip);
   }
 
   /**
@@ -313,6 +330,29 @@ export class StageRenderer {
   /** Draws one 16×16 tile from the tileset at (x, y) — used for tile previews. */
   drawTilesetTile(target: ImageBuffer, x: number, y: number, tileIndex: number, gba = false): void {
     (gba ? this.tilesetGBA : this.tilesetTV).drawTile(target, x, y, tileIndex);
+  }
+
+  /**
+   * Draws a full-canvas ground grid (row-major tile ids, 0 = empty) for editing.
+   *
+   * Used as the ground brush underlay in the room editor: ground tiles are drawn
+   * first, then the room layers/decorations composite over them.
+   *
+   * @param target     Destination image.
+   * @param tiles      Row-major tile ids (length 32×32). `0` entries are skipped.
+   * @param gba        Use the GBA tileset (layer level 1) instead of the TV one.
+   */
+  drawGround(target: ImageBuffer, tiles: number[], gba = false): void {
+    const renderer = gba ? this.tilesetGBA : this.tilesetTV;
+    for (let y = 0; y < LAYER_DIMENSION; y++) {
+      for (let x = 0; x < LAYER_DIMENSION; x++) {
+        const tile = tiles[y * LAYER_DIMENSION + x];
+        if (!tile) {
+          continue;
+        }
+        renderer.drawTile(target, x * TILE_SIZE, y * TILE_SIZE, tile);
+      }
+    }
   }
 
   /**
