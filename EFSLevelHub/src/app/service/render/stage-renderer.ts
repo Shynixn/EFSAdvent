@@ -359,9 +359,15 @@ export class StageRenderer {
    * Renders a smart-object definition into a fresh RGBA buffer sized to its
    * bounding box, for the toolbox thumbnail. Honours the GBA tileset flag.
    */
-  renderSmartObjectPreview(definition: SmartObjectDefinition, gba = false): ImageBuffer {
-    return renderSmartObjectPreview(definition, (target, px, py, tileId) =>
-      this.drawTilesetTile(target, px, py, tileId, gba),
+  renderSmartObjectPreview(
+    definition: SmartObjectDefinition,
+    gba = false,
+    variantIndex = 0,
+  ): ImageBuffer {
+    return renderSmartObjectPreview(
+      definition,
+      (target, px, py, tileId) => this.drawTilesetTile(target, px, py, tileId, gba),
+      variantIndex,
     );
   }
 

@@ -225,6 +225,12 @@ export class RoomCanvasComponent implements AfterViewInit {
   /** Emits when a placed decoration is deleted from the context menu. */
   @Output() decorationDeleted = new EventEmitter<SmartObjectPlacement>();
 
+  /** Emits when a placed decoration is rotated to the next variant. */
+  @Output() decorationRotated = new EventEmitter<{
+    from: SmartObjectPlacement;
+    to: SmartObjectPlacement;
+  }>();
+
   /** The canvas element the room is drawn onto. */
   private readonly canvasRef = viewChild<ElementRef<HTMLCanvasElement>>('canvas');
   /** The transparent overlay canvas used for drag previews. */
@@ -247,6 +253,8 @@ export class RoomCanvasComponent implements AfterViewInit {
     /** Current anchor tile. */
     anchorRow: number;
     anchorCol: number;
+    /** Active variant (rotation style) index within the definition's `set`. */
+    variantIndex: number;
     /** True while the pointer is over the canvas. */
     active: boolean;
   } | null = null;
@@ -460,6 +468,56 @@ export class RoomCanvasComponent implements AfterViewInit {
   }
 
   /**
+   * Whether the smart object targeted by the context menu can be rotated (i.e.
+   * its definition has more than one variant in its `set`).
+   */
+  canRotateContextPlacement(): boolean {
+    const menu = this.contextMenu();
+    if (!menu) {
+      return false;
+    }
+    return (findSmartObjectDefinition(menu.placement.id)?.set.length ?? 0) > 1;
+  }
+
+  /**
+   * Rotates the smart object targeted by the context menu to the next variant in
+   * its definition's `set`. Clears the current tiles, re-stamps the next variant
+   * at the same anchor and emits the change so the host updates the stage JSON.
+   */
+  rotateContextPlacement(): void {
+    const menu = this.contextMenu();
+    const room = this.room;
+    if (!menu || !room) {
+      return;
+    }
+    const definition = findSmartObjectDefinition(menu.placement.id);
+    if (!definition || definition.set.length <= 1) {
+      return;
+    }
+    const from = menu.placement;
+    const nextVariant = ((from.variantIndex ?? 0) + 1) % definition.set.length;
+    // Remove the old variant's tiles, then stamp the next one at the same anchor.
+    clearSmartObject(from, room.Layers, from.baseLayerId);
+    const rotated = applySmartObject(
+      definition,
+      from.anchorRow,
+      from.anchorCol,
+      room.Layers,
+      from.baseLayerId,
+      nextVariant,
+    );
+    // Re-stamp every other object so any tiles this one overlapped come back.
+    // Skip the stale `from` placement too — the host replaces it with `rotated`
+    // asynchronously, so it must not re-stamp its previous variant on top.
+    this.redrawSmartObjects(rotated, from);
+    this.contextMenu.set(null);
+    this.hoveredPlacement = null;
+    this.decorationRotated.emit({ from, to: rotated });
+    this.drawHoverOutline();
+    void this.redraw();
+  }
+
+  /**
    * Re-stamps every placed smart object onto the room layers, except `skip`.
    *
    * Each placement records its own definition id + anchor + absolute tiles, so
@@ -467,13 +525,13 @@ export class RoomCanvasComponent implements AfterViewInit {
    * deletion, where the removed object's tiles must not leave holes in objects
    * that overlapped it).
    */
-  private redrawSmartObjects(skip?: SmartObjectPlacement): void {
+  private redrawSmartObjects(...skip: SmartObjectPlacement[]): void {
     const room = this.room;
     if (!room) {
       return;
     }
     for (const placement of this.smartObjects) {
-      if (placement === skip) {
+      if (skip.includes(placement)) {
         continue;
       }
       const definition = findSmartObjectDefinition(placement.id);
@@ -487,6 +545,7 @@ export class RoomCanvasComponent implements AfterViewInit {
         placement.anchorCol,
         room.Layers,
         placement.baseLayerId,
+        placement.variantIndex ?? 0,
       );
     }
   }
@@ -513,7 +572,7 @@ export class RoomCanvasComponent implements AfterViewInit {
     }
     // Anchor the preview so the object's bounding box is centered under the
     // cursor (feels natural when dragging a whole decoration).
-    const bounds = smartObjectBounds(definition);
+    const bounds = smartObjectBounds(definition, this.dragService.variantIndex());
     const anchorRow = tile.y - Math.floor((bounds.rows - 1) / 2);
     const anchorCol = tile.x - Math.floor((bounds.cols - 1) / 2);
     this.dragging = {
@@ -523,6 +582,7 @@ export class RoomCanvasComponent implements AfterViewInit {
       grabCol: 0,
       anchorRow,
       anchorCol,
+      variantIndex: this.dragService.variantIndex(),
       active: true,
     };
     this.drawPreview();
@@ -567,6 +627,7 @@ export class RoomCanvasComponent implements AfterViewInit {
       anchorCol,
       room.Layers,
       this.layerIndex,
+      dragging?.variantIndex ?? 0,
     );
     this.dragging = null;
     this.clearPreview();
@@ -599,6 +660,7 @@ export class RoomCanvasComponent implements AfterViewInit {
       grabCol: tile.x - placement.anchorCol,
       anchorRow: placement.anchorRow,
       anchorCol: placement.anchorCol,
+      variantIndex: placement.variantIndex ?? 0,
       active: true,
     };
     this.draggingObject.set(true);
@@ -614,7 +676,7 @@ export class RoomCanvasComponent implements AfterViewInit {
       if (!definition) {
         continue;
       }
-      const bounds = smartObjectBounds(definition);
+      const bounds = smartObjectBounds(definition, placement.variantIndex ?? 0);
       if (
         tile.y >= placement.anchorRow + bounds.minRow &&
         tile.y <= placement.anchorRow + bounds.maxRow &&
@@ -658,6 +720,7 @@ export class RoomCanvasComponent implements AfterViewInit {
         dragging.anchorCol,
         room.Layers,
         this.layerIndex,
+        dragging.variantIndex,
       );
       this.decorationMoved.emit({ from: dragging.source, to: moved });
     }
@@ -703,7 +766,7 @@ export class RoomCanvasComponent implements AfterViewInit {
     if (!definition) {
       return;
     }
-    const bounds = smartObjectBounds(definition);
+    const bounds = smartObjectBounds(definition, placement.variantIndex ?? 0);
     const x = (placement.anchorCol + bounds.minCol) * TILE_SIZE;
     const y = (placement.anchorRow + bounds.minRow) * TILE_SIZE;
     const w = bounds.cols * TILE_SIZE;
@@ -732,12 +795,16 @@ export class RoomCanvasComponent implements AfterViewInit {
     }
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    const bounds = smartObjectBounds(dragging.definition);
+    const bounds = smartObjectBounds(dragging.definition, dragging.variantIndex);
     const originX = (dragging.anchorCol + bounds.minCol) * TILE_SIZE;
     const originY = (dragging.anchorRow + bounds.minRow) * TILE_SIZE;
 
     // Render the decoration into an offscreen buffer, then blit it at 50% alpha.
-    const buffer = renderer.renderSmartObjectPreview(dragging.definition, this.gba);
+    const buffer = renderer.renderSmartObjectPreview(
+      dragging.definition,
+      this.gba,
+      dragging.variantIndex,
+    );
     const image = new ImageData(new Uint8ClampedArray(buffer.pixels), buffer.width, buffer.height);
     ctx.globalAlpha = 0.5;
     ctx.putImageData(image, originX, originY);

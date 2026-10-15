@@ -18,13 +18,18 @@ export class SmartObjectDragService {
   /** The decoration currently being dragged from the toolbox, if any. */
   readonly dragging = signal<SmartObjectDefinition | null>(null);
 
-  /** Records the decoration being dragged. */
-  start(definition: SmartObjectDefinition): void {
+  /** Variant (rotation style) index the dragged decoration uses. */
+  readonly variantIndex = signal(0);
+
+  /** Records the decoration being dragged (and the chosen variant). */
+  start(definition: SmartObjectDefinition, variantIndex = 0): void {
     this.dragging.set(definition);
+    this.variantIndex.set(variantIndex);
   }
 
   /** Clears the dragged decoration. */
   clear(): void {
     this.dragging.set(null);
+    this.variantIndex.set(0);
   }
 }

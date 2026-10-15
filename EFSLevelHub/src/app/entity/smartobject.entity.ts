@@ -16,14 +16,32 @@
 
 import { ImageBuffer, TILE_SIZE } from '../service/render/gba-tile-renderer';
 import { GroundLayer, ROOM_DIMENSION } from './ground.entity';
-import { SmartObjectDefinition, SmartObjectTileOffset } from './smartobject.definition';
+import {
+  SmartObjectDefinition,
+  SmartObjectTileOffset,
+  SmartObjectVariant,
+} from './smartobject.definition';
 
 export { SMART_OBJECT_DEFINITIONS, findSmartObjectDefinition } from './smartobject.definition';
 export type {
   SmartObjectDefinition,
+  SmartObjectSection,
   SmartObjectTileOffset,
   SmartObjectType,
+  SmartObjectVariant,
 } from './smartobject.definition';
+
+/**
+ * Returns the variant (rotation style) a definition uses for the given index,
+ * falling back to the first variant (the default, e.g. north for a door) when
+ * the index is missing or out of range.
+ */
+export function smartObjectVariant(
+  definition: SmartObjectDefinition,
+  variantIndex = 0,
+): SmartObjectVariant {
+  return definition.set[variantIndex] ?? definition.set[0];
+}
 
 /** A tile coordinate recorded for a placed smart object (absolute, in-room). */
 export interface SmartObjectTileRef {
@@ -43,6 +61,11 @@ export interface SmartObjectTileRef {
 export interface SmartObjectPlacement {
   /** Definition id (see {@link SMART_OBJECT_DEFINITIONS}). */
   id: string;
+  /**
+   * Index of the variant (rotation style) within the definition's `set` that
+   * was stamped. Defaults to 0 (the object's default rotation, e.g. north).
+   */
+  variantIndex?: number;
   /**
    * Base layer the object was placed on (0-7). Its paired top layer is
    * `baseLayerId + 8`. Recorded so the object can be resolved, moved or
@@ -92,9 +115,12 @@ export function applySmartObject(
   anchorCol: number,
   layers: SmartObjectTargetLayer[],
   baseLayerIndex = 0,
+  variantIndex = 0,
 ): SmartObjectPlacement {
+  const variant = smartObjectVariant(definition, variantIndex);
   const placement: SmartObjectPlacement = {
     id: definition.id,
+    variantIndex,
     baseLayerId: baseLayerIndex,
     anchorRow,
     anchorCol,
@@ -122,8 +148,8 @@ export function applySmartObject(
     }
   };
 
-  write(definition.bottomLayerTiles, baseLayerIndex, placement.bottomLayerTiles);
-  write(definition.topLayerTiles, baseLayerIndex + 8, placement.topLayerTiles);
+  write(variant.bottomLayerTiles, baseLayerIndex, placement.bottomLayerTiles);
+  write(variant.topLayerTiles, baseLayerIndex + 8, placement.topLayerTiles);
   return placement;
 }
 
@@ -147,7 +173,10 @@ export function clearSmartObject(
  * Bounding box (in tiles) of a definition's tiles relative to its anchor,
  * including negative offsets. Used to size previews and hit-test drags.
  */
-export function smartObjectBounds(definition: SmartObjectDefinition): {
+export function smartObjectBounds(
+  definition: SmartObjectDefinition,
+  variantIndex = 0,
+): {
   minRow: number;
   minCol: number;
   maxRow: number;
@@ -155,7 +184,8 @@ export function smartObjectBounds(definition: SmartObjectDefinition): {
   rows: number;
   cols: number;
 } {
-  const all = [...definition.bottomLayerTiles, ...definition.topLayerTiles];
+  const variant = smartObjectVariant(definition, variantIndex);
+  const all = [...variant.bottomLayerTiles, ...variant.topLayerTiles];
   let minRow = 0;
   let minCol = 0;
   let maxRow = 0;
@@ -186,8 +216,10 @@ export function smartObjectBounds(definition: SmartObjectDefinition): {
 export function renderSmartObjectPreview(
   definition: SmartObjectDefinition,
   drawTile: (target: ImageBuffer, px: number, py: number, tileId: number) => void,
+  variantIndex = 0,
 ): ImageBuffer {
-  const bounds = smartObjectBounds(definition);
+  const variant = smartObjectVariant(definition, variantIndex);
+  const bounds = smartObjectBounds(definition, variantIndex);
   const width = bounds.cols * TILE_SIZE;
   const height = bounds.rows * TILE_SIZE;
   const buffer = new ImageBuffer(width, height);
@@ -201,7 +233,7 @@ export function renderSmartObjectPreview(
     }
   };
 
-  stamp(definition.bottomLayerTiles);
-  stamp(definition.topLayerTiles);
+  stamp(variant.bottomLayerTiles);
+  stamp(variant.topLayerTiles);
   return buffer;
 }

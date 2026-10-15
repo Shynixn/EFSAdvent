@@ -523,6 +523,21 @@ export class RoomPage implements OnInit, OnDestroy {
   }
 
   /**
+   * Records a rotated decoration: the canvas already cleared the old variant's
+   * tiles and stamped the next one, so here we replace the placement and mark
+   * both layers dirty.
+   */
+  onDecorationRotated(event: { from: SmartObjectPlacement; to: SmartObjectPlacement }): void {
+    this.stageEditor.setDirty(this.stageId(), true);
+    const base = event.to.baseLayerId;
+    this.stageRoom.markLayerDirty(this.roomIndex(), base);
+    this.stageRoom.markLayerDirty(this.roomIndex(), base + 8);
+    this.smartObjects.update((list) =>
+      list.map((placement) => (placement === event.from ? event.to : placement)),
+    );
+  }
+
+  /**
    * Records a deleted decoration: the canvas already cleared its stamped tiles,
    * so here we drop the placement from the room list and mark both layers dirty.
    */

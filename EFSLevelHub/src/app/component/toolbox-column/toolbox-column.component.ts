@@ -112,6 +112,16 @@ export class ToolboxColumnComponent implements AfterViewInit {
   /** Available decoration (smart-object) definitions, shown in the toolbox. */
   readonly decorations: SmartObjectDefinition[] = SMART_OBJECT_DEFINITIONS;
 
+  /** Definitions in the "Doors" section. */
+  readonly doorDefinitions: SmartObjectDefinition[] = SMART_OBJECT_DEFINITIONS.filter(
+    (definition) => definition.section === 'Doors',
+  );
+
+  /** Definitions in the "Decorations" section. */
+  readonly otherDefinitions: SmartObjectDefinition[] = SMART_OBJECT_DEFINITIONS.filter(
+    (definition) => definition.section !== 'Doors',
+  );
+
   /** Available ground definitions, shown in the Ground box. */
   readonly grounds: GroundDefinition[] = GROUND_DEFINITIONS;
 
@@ -215,8 +225,8 @@ export class ToolboxColumnComponent implements AfterViewInit {
       event.dataTransfer.setDragImage(blank, 0, 0);
     }
     // dragover cannot read the data payload, so expose it via the shared service
-    // for the canvas preview.
-    this.dragService.start(definition);
+    // for the canvas preview. Start from the default variant (index 0).
+    this.dragService.start(definition, 0);
     // Let the host switch to the hand tool so the decoration can be positioned.
     this.decorationDragStarted.emit();
   }

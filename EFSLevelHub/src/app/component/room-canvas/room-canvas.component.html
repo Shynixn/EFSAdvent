@@ -46,6 +46,22 @@
         [style.left.px]="contextMenu()!.x"
         [style.top.px]="contextMenu()!.y"
       >
+        @if (canRotateContextPlacement()) {
+          <button
+            type="button"
+            (click)="rotateContextPlacement()"
+            class="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-slate-200 transition hover:bg-slate-700"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+              <path
+                fill-rule="evenodd"
+                d="M4 2a1 1 0 011 1v1.6a7 7 0 119.2 10.4 1 1 0 11-1.2-1.6A5 5 0 106 6.7V8a1 1 0 11-2 0V3a1 1 0 011-1z"
+                clip-rule="evenodd"
+              />
+            </svg>
+            <span>Rotate</span>
+          </button>
+        }
         <button
           type="button"
           (click)="deleteContextPlacement()"
