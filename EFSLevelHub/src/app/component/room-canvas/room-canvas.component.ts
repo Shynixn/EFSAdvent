@@ -160,8 +160,8 @@ export class RoomCanvasComponent implements AfterViewInit {
     this._tile = value;
   }
 
-  /** Active tool: `brush` paints tiles, `hand` moves placed smart objects. */
-  @Input() tool: 'brush' | 'hand' = 'brush';
+  /** Active tool: `brush` paints, `eraser` clears tiles/ground, `hand` moves objects. */
+  @Input() tool: 'brush' | 'hand' | 'eraser' = 'brush';
 
   private _smartObjects: SmartObjectPlacement[] = [];
   /** Smart objects placed in this room (for hit-testing, dragging, ground skip). */
@@ -222,6 +222,9 @@ export class RoomCanvasComponent implements AfterViewInit {
     to: SmartObjectPlacement;
   }>();
 
+  /** Emits when a placed decoration is deleted from the context menu. */
+  @Output() decorationDeleted = new EventEmitter<SmartObjectPlacement>();
+
   /** The canvas element the room is drawn onto. */
   private readonly canvasRef = viewChild<ElementRef<HTMLCanvasElement>>('canvas');
   /** The transparent overlay canvas used for drag previews. */
@@ -256,6 +259,16 @@ export class RoomCanvasComponent implements AfterViewInit {
 
   /** Smart object currently hovered by the pointer (for its boundary outline). */
   private hoveredPlacement: SmartObjectPlacement | null = null;
+
+  /**
+   * Right-click context menu state: the placement it targets plus its position
+   * (in CSS pixels, relative to the canvas wrapper). `null` when closed.
+   */
+  readonly contextMenu = signal<{
+    placement: SmartObjectPlacement;
+    x: number;
+    y: number;
+  } | null>(null);
 
   ngAfterViewInit(): void {
     void this.redraw();
@@ -330,7 +343,7 @@ export class RoomCanvasComponent implements AfterViewInit {
     return skip;
   }
 
-  /** Starts painting, or grabs a smart object when the hand tool is active. */
+  /** Starts painting/erasing, or grabs a smart object when the hand tool is active. */
   onPointerDown(event: PointerEvent): void {
     if (event.button !== 0) {
       return;
@@ -343,7 +356,11 @@ export class RoomCanvasComponent implements AfterViewInit {
     }
 
     this.painting = true;
-    this.paintAt(event);
+    if (this.tool === 'eraser') {
+      this.eraseAt(event);
+    } else {
+      this.paintAt(event);
+    }
   }
 
   /** Continues painting / moves a grabbed smart object. */
@@ -354,7 +371,11 @@ export class RoomCanvasComponent implements AfterViewInit {
     }
     if (this.painting) {
       this.updateHover(event);
-      this.paintAt(event);
+      if (this.tool === 'eraser') {
+        this.eraseAt(event);
+      } else {
+        this.paintAt(event);
+      }
       return;
     }
     // Keep the hovered-object boundary outline in sync with the pointer.
@@ -379,13 +400,95 @@ export class RoomCanvasComponent implements AfterViewInit {
   onPointerLeaveCanvas(event: PointerEvent): void {
     this.hoveredPlacement = null;
     this.hoveringObject.set(false);
-    this.clearPreview();
+    // Repaint the outline (keeps the context-menu target outlined if the menu
+    // is still open; otherwise clears it since nothing is hovered).
+    this.drawHoverOutline();
     this.onPointerUp(event);
   }
 
   /** Prevents the browser context menu on right click. */
   onContextMenu(event: MouseEvent): void {
     event.preventDefault();
+  }
+
+  /**
+   * Right-click on the canvas: opens the smart-object context menu when a
+   * placement is under the cursor, otherwise closes any open menu.
+   */
+  onCanvasContextMenu(event: MouseEvent): void {
+    event.preventDefault();
+    const tile = this.tileAt(event);
+    const placement = tile ? this.findPlacementAt(tile) : null;
+    if (!placement) {
+      this.contextMenu.set(null);
+      this.drawHoverOutline();
+      return;
+    }
+    // Position the menu relative to the canvas wrapper (its offset parent).
+    const wrapper = (event.currentTarget as HTMLElement) ?? undefined;
+    const rect = wrapper?.getBoundingClientRect();
+    const x = rect ? event.clientX - rect.left : event.offsetX;
+    const y = rect ? event.clientY - rect.top : event.offsetY;
+    this.contextMenu.set({ placement, x, y });
+    // Outline the target while the menu is open.
+    this.drawHoverOutline();
+  }
+
+  /** Closes the smart-object context menu. */
+  closeContextMenu(): void {
+    this.contextMenu.set(null);
+    this.drawHoverOutline();
+  }
+
+  /** Deletes the smart object targeted by the context menu. */
+  deleteContextPlacement(): void {
+    const menu = this.contextMenu();
+    if (!menu || !this.room) {
+      return;
+    }
+    // Remove the stamped tiles so the object disappears from the canvas, then
+    // let the host drop the placement from the stage JSON.
+    clearSmartObject(menu.placement, this.room.Layers, menu.placement.baseLayerId);
+    // Re-stamp every remaining smart object so tiles that this one had covered
+    // (overlapping objects) come back correctly.
+    this.redrawSmartObjects(menu.placement);
+    this.contextMenu.set(null);
+    this.hoveredPlacement = null;
+    this.decorationDeleted.emit(menu.placement);
+    this.drawHoverOutline();
+    void this.redraw();
+  }
+
+  /**
+   * Re-stamps every placed smart object onto the room layers, except `skip`.
+   *
+   * Each placement records its own definition id + anchor + absolute tiles, so
+   * clearing and re-applying them restores the correct composite (useful after a
+   * deletion, where the removed object's tiles must not leave holes in objects
+   * that overlapped it).
+   */
+  private redrawSmartObjects(skip?: SmartObjectPlacement): void {
+    const room = this.room;
+    if (!room) {
+      return;
+    }
+    for (const placement of this.smartObjects) {
+      if (placement === skip) {
+        continue;
+      }
+      const definition = findSmartObjectDefinition(placement.id);
+      if (!definition) {
+        continue;
+      }
+      clearSmartObject(placement, room.Layers, placement.baseLayerId);
+      applySmartObject(
+        definition,
+        placement.anchorRow,
+        placement.anchorCol,
+        room.Layers,
+        placement.baseLayerId,
+      );
+    }
   }
 
   // --- Smart object drag & drop (from the toolbox) -------------------------
@@ -577,10 +680,14 @@ export class RoomCanvasComponent implements AfterViewInit {
     this.drawHoverOutline();
   }
 
-  /** Draws a black dotted rectangle around the hovered smart object's bounds. */
+  /**
+   * Draws a black dotted rectangle around the active smart object's bounds. The
+   * context-menu target takes precedence (so the selected object stays outlined
+   * while the menu is open); otherwise the hovered object is outlined.
+   */
   private drawHoverOutline(): void {
     const canvas = this.previewRef()?.nativeElement;
-    const placement = this.hoveredPlacement;
+    const placement = this.contextMenu()?.placement ?? this.hoveredPlacement;
     if (!canvas) {
       return;
     }
@@ -714,5 +821,54 @@ export class RoomCanvasComponent implements AfterViewInit {
     layer.Tiles[offset] = this.tile;
     this.tileChanged.emit({ layerIndex: targetLayerIndex, x, y, tile: this.tile });
     void this.redraw();
+  }
+
+  /**
+   * Erases the tile under the pointer: both the base layer (`layerIndex`) and
+   * its paired top layer (`layerIndex + 8`), plus any ground painted on the
+   * active base layer. Smart objects are never erased — a tile owned by a
+   * decoration is left untouched.
+   */
+  private eraseAt(event: PointerEvent): void {
+    const canvas = this.canvasRef()?.nativeElement;
+    const room = this.room;
+    if (!canvas || !room) {
+      return;
+    }
+
+    const tile = this.tileAt(event);
+    if (!tile) {
+      return;
+    }
+    const { x, y } = tile;
+    const offset = y * DIMENSION + x;
+
+    // Never erase a tile occupied by a smart object.
+    if (this.findPlacementAt(tile)) {
+      return;
+    }
+
+    let changed = false;
+
+    // Base + paired top layer tiles.
+    for (const layerIndex of [this.layerIndex, this.layerIndex + 8]) {
+      const layer = room.Layers[layerIndex];
+      if (layer && layer.Tiles[offset] !== 0) {
+        layer.Tiles[offset] = 0;
+        this.tileChanged.emit({ layerIndex, x, y, tile: 0 });
+        changed = true;
+      }
+    }
+
+    // Ground painted on the active base layer.
+    if (this._groundTiles && this._groundTiles[offset] !== 0) {
+      this._groundTiles[offset] = 0;
+      this.groundChanged.emit({ baseLayerId: this.groundBaseLayerId, x, y, tile: 0 });
+      changed = true;
+    }
+
+    if (changed) {
+      void this.redraw();
+    }
   }
 }

@@ -118,7 +118,7 @@ export class RoomPage implements OnInit, OnDestroy {
   readonly brushTile = signal(1);
 
   /** Active tool: `brush` paints tiles, `hand` moves placed smart objects. */
-  readonly tool = signal<'brush' | 'hand'>('brush');
+  readonly tool = signal<'brush' | 'hand' | 'eraser'>('brush');
 
   /**
    * Smart objects (decorations) placed in the current room. Populated only by
@@ -520,6 +520,18 @@ export class RoomPage implements OnInit, OnDestroy {
     this.smartObjects.update((list) =>
       list.map((placement) => (placement === event.from ? event.to : placement)),
     );
+  }
+
+  /**
+   * Records a deleted decoration: the canvas already cleared its stamped tiles,
+   * so here we drop the placement from the room list and mark both layers dirty.
+   */
+  onDecorationDeleted(placement: SmartObjectPlacement): void {
+    this.stageEditor.setDirty(this.stageId(), true);
+    const base = placement.baseLayerId;
+    this.stageRoom.markLayerDirty(this.roomIndex(), base);
+    this.stageRoom.markLayerDirty(this.roomIndex(), base + 8);
+    this.smartObjects.update((list) => list.filter((entry) => entry !== placement));
   }
 
   /**
