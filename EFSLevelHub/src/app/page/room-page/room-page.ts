@@ -284,6 +284,13 @@ export class RoomPage implements OnInit, OnDestroy {
   /** The room canvas (used to force a redraw after a theme change). */
   private readonly roomCanvas = viewChild(RoomCanvasComponent);
 
+  /**
+   * Snapshot of the ground grids baked into the room layers at the last save,
+   * keyed by base layer id. Used to revert ground tiles that were removed since
+   * the previous save (the room layer would otherwise keep them forever).
+   */
+  private bakedGround = new Map<number, { bottom: number[]; top: number[] }>();
+
   constructor() {
     // Mirror this room's dirty state into the shared service so the stage page
     // and side nav can reflect a single "unsaved changes" indicator.
@@ -335,6 +342,8 @@ export class RoomPage implements OnInit, OnDestroy {
       this.gba.set(false);
       this.room.set(null);
       this.selectedGround.set(null);
+      // A different room's layers are about to be shown; forget what we baked.
+      this.bakedGround.clear();
     }
 
     this.isLoading.set(needsOverlay);
@@ -599,6 +608,109 @@ export class RoomPage implements OnInit, OnDestroy {
   }
 
   /**
+   * Bakes the painted ground into the room's tile layers so it is written into
+   * the stage archive (.arc) on save.
+   *
+   * Ground is stored separately from the room layers (in the stage JSON) so the
+   * canvas can draw it as an underlay. On save each ground grid is composed into
+   * the room's base layer (and its paired top layer):
+   *
+   * - where ground is painted and no smart object covers the tile, the ground
+   *   tile is written (ground acts as the room's base layer);
+   * - where ground was painted at the **previous** save but is now empty, the
+   *   stale baked tile is cleared, so erasing ground actually removes it from the
+   *   archive;
+   * - **intersections**: a smart object wins. Its base-layer tiles are written
+   *   over the ground, and the ground that sat under them is not baked (one tile
+   *   can only hold one value). Decoration tiles on the paired top layer never
+   *   hide ground, so the ground underneath them is still baked.
+   *
+   * Marks the affected layers dirty so {@link StageEditorService.save} writes
+   * them back.
+   */
+  private bakeGroundIntoRoom(): void {
+    const room = this.room();
+    const roomIndex = this.roomIndex();
+    if (!room) {
+      return;
+    }
+    const DIM = 32;
+    const groundLayers = this.groundLayers();
+    const bases = new Set<number>([
+      ...groundLayers.map((layer) => layer.baseLayerId),
+      ...this.bakedGround.keys(),
+    ]);
+
+    for (const base of bases) {
+      const bottomLayer = room.Layers[base];
+      const topLayer = room.Layers[base + 8];
+      const ground = groundLayers.find((layer) => layer.baseLayerId === base);
+      const baked = this.bakedGround.get(base);
+      const nextBottom = new Array<number>(DIM * DIM).fill(0);
+      const nextTop = new Array<number>(DIM * DIM).fill(0);
+      let changed = false;
+
+      // Tiles a smart object owns on this base layer (its own tiles win over
+      // ground on the base layer; top-layer tiles never hide ground).
+      const owned = new Set<number>();
+      for (const placement of this.smartObjects()) {
+        if (placement.baseLayerId !== base) {
+          continue;
+        }
+        for (const ref of placement.bottomLayerTiles) {
+          owned.add(ref.row * DIM + ref.col);
+        }
+      }
+
+      for (let offset = 0; offset < DIM * DIM; offset++) {
+        const tile = ground ? ground.bottomLayerTiles[offset] : 0;
+        const top = ground ? ground.topLayerTiles[offset] : 0;
+        const hadGround = (baked?.bottom[offset] ?? 0) !== 0 || (baked?.top[offset] ?? 0) !== 0;
+
+        // Base tile: ground wins unless a smart object owns the tile.
+        if (tile !== 0 && !owned.has(offset)) {
+          if (bottomLayer && bottomLayer.Tiles[offset] !== tile) {
+            bottomLayer.Tiles[offset] = tile;
+            changed = true;
+          }
+          nextBottom[offset] = tile;
+        } else if (hadGround && !owned.has(offset)) {
+          // Ground was baked here before but is gone now: clear the stale tile.
+          if (bottomLayer && bottomLayer.Tiles[offset] !== 0) {
+            bottomLayer.Tiles[offset] = 0;
+            changed = true;
+          }
+        }
+
+        // Paired top layer: ground top tiles are always baked (nothing hides
+        // them except a ground top tile at the same spot).
+        if (top !== 0) {
+          if (topLayer && topLayer.Tiles[offset] !== top) {
+            topLayer.Tiles[offset] = top;
+            changed = true;
+          }
+          nextTop[offset] = top;
+        } else if (baked && baked.top[offset] !== 0) {
+          if (topLayer && topLayer.Tiles[offset] !== 0) {
+            topLayer.Tiles[offset] = 0;
+            changed = true;
+          }
+        }
+      }
+
+      if (ground) {
+        this.bakedGround.set(base, { bottom: nextBottom, top: nextTop });
+      } else {
+        this.bakedGround.delete(base);
+      }
+      if (changed) {
+        this.stageRoom.markLayerDirty(roomIndex, base);
+        this.stageRoom.markLayerDirty(roomIndex, base + 8);
+      }
+    }
+  }
+
+  /**
    * Saves the stage (which also persists this room's dirty layers) and refreshes
    * the room from the re-parsed archive.
    */
@@ -612,6 +724,9 @@ export class RoomPage implements OnInit, OnDestroy {
     // Let the "Saving..." overlay paint before the (blocking) serialization.
     await nextPaint();
     try {
+      // Stamp the painted ground into the room layers first so it is baked into
+      // the archive by the save below (ground otherwise only lives in the JSON).
+      this.bakeGroundIntoRoom();
       const result = await this.stageEditor.save(id, this.stageRoom.dirtyLayers());
       if (!result) {
         this.loadError.set('Failed to save the room.');

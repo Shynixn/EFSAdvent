@@ -17,8 +17,10 @@ import {
   clearSmartObject,
   findSmartObjectDefinition,
   smartObjectBounds,
+  smartObjectVariant,
   SmartObjectDefinition,
   SmartObjectPlacement,
+  SmartObjectTileOffset,
 } from '../../entity/smartobject.entity';
 import { SmartObjectDragService } from '../../service/smart-object-drag.service';
 
@@ -95,6 +97,10 @@ export class RoomCanvasComponent implements AfterViewInit {
     return this._index;
   }
   set index(value: number) {
+    if (value !== this._index) {
+      // A different room is shown; its stacking order is unrelated.
+      this.zOrder = [];
+    }
     this._index = value;
     queueMicrotask(() => void this.redraw());
   }
@@ -171,6 +177,9 @@ export class RoomCanvasComponent implements AfterViewInit {
   }
   set smartObjects(value: SmartObjectPlacement[]) {
     this._smartObjects = value ?? [];
+    // The host may swap placement objects (move/rotate); keep only the z-order
+    // entries that still exist so the stacking order stays valid.
+    this.zOrder = this.zOrder.filter((placement) => this._smartObjects.includes(placement));
     // A new placement (or a move) changes which base tiles the ground must not
     // hide, so repaint immediately instead of waiting for the next edit.
     queueMicrotask(() => void this.redraw());
@@ -269,6 +278,15 @@ export class RoomCanvasComponent implements AfterViewInit {
   private hoveredPlacement: SmartObjectPlacement | null = null;
 
   /**
+   * Persistent stacking order of the room's smart objects (last = front). The
+   * compositor stamps survivors in this order so overlaps resolve as the user
+   * arranged them via the context menu's "Bring to front"/"Bring to back".
+   * Placements not present here keep their `smartObjects` order, after the ones
+   * that are.
+   */
+  private zOrder: SmartObjectPlacement[] = [];
+
+  /**
    * Right-click context menu state: the placement it targets plus its position
    * (in CSS pixels, relative to the canvas wrapper). `null` when closed.
    */
@@ -333,14 +351,26 @@ export class RoomCanvasComponent implements AfterViewInit {
       return skip;
     }
     // Collect the tiles owned by smart objects on the active base layer, so the
-    // ground never hides a decoration.
+    // ground never hides a decoration. Derived from each placement's definition
+    // + anchor + variant (the same source of truth the compositor stamps from)
+    // rather than the recorded refs, which can drift after a rotate/move.
     const owned = new Set<number>();
     for (const placement of this.smartObjects) {
       if (placement.baseLayerId !== this.groundBaseLayerId) {
         continue;
       }
-      for (const ref of placement.bottomLayerTiles) {
-        owned.add(ref.row * DIMENSION + ref.col);
+      const definition = findSmartObjectDefinition(placement.id);
+      if (!definition) {
+        continue;
+      }
+      const variant = smartObjectVariant(definition, placement.variantIndex ?? 0);
+      for (const offset of variant.bottomLayerTiles) {
+        const row = placement.anchorRow + offset.dRow;
+        const col = placement.anchorCol + offset.dCol;
+        if (row < 0 || row >= DIMENSION || col < 0 || col >= DIMENSION) {
+          continue;
+        }
+        owned.add(row * DIMENSION + col);
       }
     }
     for (let offset = 0; offset < ground.length; offset++) {
@@ -457,9 +487,11 @@ export class RoomCanvasComponent implements AfterViewInit {
     // Remove the stamped tiles so the object disappears from the canvas, then
     // let the host drop the placement from the stage JSON.
     clearSmartObject(menu.placement, this.room.Layers, menu.placement.baseLayerId);
+    // Drop it from the stacking order too.
+    this.zOrder = this.zOrder.filter((placement) => placement !== menu.placement);
     // Re-stamp every remaining smart object so tiles that this one had covered
     // (overlapping objects) come back correctly.
-    this.redrawSmartObjects(menu.placement);
+    this.redrawSmartObjects({ list: this.smartObjects, skip: [menu.placement] });
     this.contextMenu.set(null);
     this.hoveredPlacement = null;
     this.decorationDeleted.emit(menu.placement);
@@ -496,24 +528,53 @@ export class RoomCanvasComponent implements AfterViewInit {
     }
     const from = menu.placement;
     const nextVariant = ((from.variantIndex ?? 0) + 1) % definition.set.length;
-    // Remove the old variant's tiles, then stamp the next one at the same anchor.
-    clearSmartObject(from, room.Layers, from.baseLayerId);
-    const rotated = applySmartObject(
-      definition,
-      from.anchorRow,
-      from.anchorCol,
-      room.Layers,
-      from.baseLayerId,
-      nextVariant,
-    );
-    // Re-stamp every other object so any tiles this one overlapped come back.
-    // Skip the stale `from` placement too — the host replaces it with `rotated`
-    // asynchronously, so it must not re-stamp its previous variant on top.
-    this.redrawSmartObjects(rotated, from);
+    // Re-stamp the next variant at the same anchor, keeping the same stacking.
+    const rotated = { ...from, variantIndex: nextVariant };
+    const list = this.smartObjects.map((placement) => (placement === from ? rotated : placement));
+    this.zOrder = this.zOrder.map((placement) => (placement === from ? rotated : placement));
+    this.redrawSmartObjects({ list, skip: [from] });
     this.contextMenu.set(null);
     this.hoveredPlacement = null;
     this.decorationRotated.emit({ from, to: rotated });
     this.drawHoverOutline();
+    void this.redraw();
+  }
+
+  /** Moves the context-menu target to the front of the stacking order. */
+  bringContextToFront(): void {
+    const menu = this.contextMenu();
+    if (!menu) {
+      return;
+    }
+    this.moveToStack(menu.placement, 'front');
+  }
+
+  /** Moves the context-menu target to the back of the stacking order. */
+  bringContextToBack(): void {
+    const menu = this.contextMenu();
+    if (!menu) {
+      return;
+    }
+    this.moveToStack(menu.placement, 'back');
+  }
+
+  /**
+   * Reorders a placement in the persistent z-order (front = stamped last, back =
+   * stamped first) and re-composites the room so the change is visible.
+   */
+  private moveToStack(placement: SmartObjectPlacement, where: 'front' | 'back'): void {
+    if (!this.room) {
+      return;
+    }
+    // Seed the z-order with the current list order the first time it is used.
+    const order = this.zOrder.length
+      ? this.zOrder.filter((entry) => this.smartObjects.includes(entry))
+      : [...this.smartObjects];
+    const filtered = order.filter((entry) => entry !== placement);
+    this.zOrder =
+      where === 'front' ? [...filtered, placement] : [placement, ...filtered];
+    this.redrawSmartObjects();
+    this.closeContextMenu();
     void this.redraw();
   }
 
@@ -525,20 +586,91 @@ export class RoomCanvasComponent implements AfterViewInit {
    * deletion, where the removed object's tiles must not leave holes in objects
    * that overlapped it).
    */
-  private redrawSmartObjects(...skip: SmartObjectPlacement[]): void {
+  private redrawSmartObjects(
+    override?: { list: SmartObjectPlacement[]; skip: SmartObjectPlacement[] },
+  ): void {
     const room = this.room;
     if (!room) {
       return;
     }
-    for (const placement of this.smartObjects) {
-      if (skip.includes(placement)) {
-        continue;
-      }
+    const source = override ? override.list : this.smartObjects;
+    const skip = override ? override.skip : [];
+    // The placements that will remain stamped, ordered by the persistent z-order
+    // (front-most last). Placements missing from the z-order fall back to their
+    // position in the source list, placed before the explicitly ordered ones.
+    const survivors = source.filter((placement) => !skip.includes(placement));
+    const ordered = this.zOrder.filter((placement) => survivors.includes(placement));
+    const rest = survivors.filter((placement) => !ordered.includes(placement));
+    const stampOrder = [...rest, ...ordered];
+
+    // Tiles a survivor will (re)stamp, per layer. A tile claimed by any survivor
+    // must NOT be cleared while tearing down the old composite, otherwise a
+    // shared tile — e.g. the top-layer tiles of an object that overlaps another
+    // — would be zeroed and never restored.
+    const claimed = new Map<number, Set<number>>();
+    for (const placement of stampOrder) {
       const definition = findSmartObjectDefinition(placement.id);
       if (!definition) {
         continue;
       }
-      clearSmartObject(placement, room.Layers, placement.baseLayerId);
+      const variant = smartObjectVariant(definition, placement.variantIndex ?? 0);
+      const add = (layerIndex: number, offsets: SmartObjectTileOffset[]): void => {
+        let set = claimed.get(layerIndex);
+        if (!set) {
+          set = new Set<number>();
+          claimed.set(layerIndex, set);
+        }
+        for (const offset of offsets) {
+          const row = placement.anchorRow + offset.dRow;
+          const col = placement.anchorCol + offset.dCol;
+          if (row < 0 || row >= DIMENSION || col < 0 || col >= DIMENSION) {
+            continue;
+          }
+          set.add(row * DIMENSION + col);
+        }
+      };
+      add(placement.baseLayerId, variant.bottomLayerTiles);
+      add(placement.baseLayerId + 8, variant.topLayerTiles);
+    }
+
+    // Tear down every placement being replaced/removed, but keep any tile a
+    // survivor still claims. The footprint is derived from each placement's
+    // definition (same as `claimed`), NOT its recorded refs, so the two stay
+    // consistent even when the refs have drifted (rotate/move/loaded JSON).
+    for (const placement of source) {
+      const definition = findSmartObjectDefinition(placement.id);
+      if (!definition) {
+        continue;
+      }
+      const variant = smartObjectVariant(definition, placement.variantIndex ?? 0);
+      const clear = (layerIndex: number, offsets: SmartObjectTileOffset[]): void => {
+        const layer = room.Layers[layerIndex];
+        if (!layer) {
+          return;
+        }
+        for (const offset of offsets) {
+          const row = placement.anchorRow + offset.dRow;
+          const col = placement.anchorCol + offset.dCol;
+          if (row < 0 || row >= DIMENSION || col < 0 || col >= DIMENSION) {
+            continue;
+          }
+          const index = row * DIMENSION + col;
+          if (!claimed.get(layerIndex)?.has(index)) {
+            layer.Tiles[index] = 0;
+          }
+        }
+      };
+      clear(placement.baseLayerId, variant.bottomLayerTiles);
+      clear(placement.baseLayerId + 8, variant.topLayerTiles);
+    }
+
+    // Re-stamp every survivor in order so the composite matches the placement
+    // stacking (decorations on top of what they overlap).
+    for (const placement of stampOrder) {
+      const definition = findSmartObjectDefinition(placement.id);
+      if (!definition) {
+        continue;
+      }
       applySmartObject(
         definition,
         placement.anchorRow,
@@ -651,7 +783,9 @@ export class RoomCanvasComponent implements AfterViewInit {
     }
     // Clear the original tiles right away so the object is *grabbed* in the
     // view (it follows the cursor) rather than copied and removed on drop.
-    clearSmartObject(placement, room.Layers, this.layerIndex);
+    // Use the placement's OWN base layer (not the viewed layer) so grabbing an
+    // object on another base layer does not wipe tiles on the wrong layers.
+    clearSmartObject(placement, room.Layers, placement.baseLayerId);
     void this.redraw();
     this.dragging = {
       definition,
@@ -713,13 +847,14 @@ export class RoomCanvasComponent implements AfterViewInit {
     }
     if (dragging.source) {
       // The old tiles were already cleared when the grab started, so just
-      // re-stamp at the new anchor and report the move.
+      // re-stamp at the new anchor (on the placement's own base layer) and
+      // report the move.
       const moved = applySmartObject(
         dragging.definition,
         dragging.anchorRow,
         dragging.anchorCol,
         room.Layers,
-        this.layerIndex,
+        dragging.source.baseLayerId,
         dragging.variantIndex,
       );
       this.decorationMoved.emit({ from: dragging.source, to: moved });

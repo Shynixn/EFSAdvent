@@ -9,42 +9,49 @@
   <div class="min-h-0 flex-1 overflow-y-auto p-4">
     <!-- Ground: pick a ground, then paint it onto the room with the brush -->
     <div class="rounded-lg border border-slate-800">
-      <div class="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-        Ground
-      </div>
-      <div class="space-y-2 border-t border-slate-800 px-3 py-3">
-        <p class="text-[11px] text-slate-500">
-          Pick a ground, then paint it onto the room with the brush. Grounds cannot be dragged.
-          Paint over decorations freely — a decoration always draws on top.
-        </p>
-        <div class="flex flex-wrap gap-2">
-          @for (ground of grounds; track ground.id) {
-            <button
-              type="button"
-              (click)="selectGround(ground)"
-              class="flex cursor-pointer flex-col items-center gap-2 rounded-lg border px-3 py-2 text-xs transition"
-              [class.border-indigo-400]="selectedGroundId === ground.id"
-              [class.bg-indigo-500/20]="selectedGroundId === ground.id"
-              [class.text-white]="selectedGroundId === ground.id"
-              [class.border-slate-700]="selectedGroundId !== ground.id"
-              [class.bg-slate-800/70]="selectedGroundId !== ground.id"
-              [class.text-slate-200]="selectedGroundId !== ground.id"
-              [class.hover:border-indigo-400]="selectedGroundId !== ground.id"
-              [title]="'Paint ground #' + ground.tile + ' with the brush'"
-            >
-              <span
-                class="flex h-10 w-10 items-center justify-center overflow-hidden rounded border border-slate-700 bg-slate-950/60"
+      <button
+        type="button"
+        (click)="toggleGround()"
+        class="flex w-full cursor-pointer items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400"
+      >
+        <span>Ground</span>
+        <span class="text-slate-500">{{ groundOpen() ? '▾' : '▸' }}</span>
+      </button>
+      @if (groundOpen()) {
+        <div class="space-y-2 border-t border-slate-800 px-3 py-3">
+          <p class="text-[11px] text-slate-500">
+            Pick a ground, then paint it onto the room with the brush. Grounds cannot be dragged.
+            Paint over decorations freely — a decoration always draws on top.
+          </p>
+          <div class="flex flex-wrap gap-2">
+            @for (ground of grounds; track ground.id) {
+              <button
+                type="button"
+                (click)="selectGround(ground)"
+                class="flex cursor-pointer flex-col items-center gap-2 rounded-lg border px-3 py-2 text-xs transition"
+                [class.border-indigo-400]="selectedGroundId === ground.id"
+                [class.bg-indigo-500/20]="selectedGroundId === ground.id"
+                [class.text-white]="selectedGroundId === ground.id"
+                [class.border-slate-700]="selectedGroundId !== ground.id"
+                [class.bg-slate-800/70]="selectedGroundId !== ground.id"
+                [class.text-slate-200]="selectedGroundId !== ground.id"
+                [class.hover:border-indigo-400]="selectedGroundId !== ground.id"
+                [title]="'Paint ground #' + ground.tile + ' with the brush'"
               >
-                <canvas
-                  #groundPreview
-                  class="h-full w-full"
-                  style="image-rendering: pixelated"
-                ></canvas>
-              </span>
-            </button>
-          }
+                <span
+                  class="flex h-10 w-10 items-center justify-center overflow-hidden rounded border border-slate-700 bg-slate-950/60"
+                >
+                  <canvas
+                    #groundPreview
+                    class="h-full w-full"
+                    style="image-rendering: pixelated"
+                  ></canvas>
+                </span>
+              </button>
+            }
+          </div>
         </div>
-      </div>
+      }
     </div>
 
     <!-- Advanced (collapsible): manual tile drawing (reference only) -->
@@ -75,72 +82,88 @@
 
     <!-- Doors (smart objects with rotation variants): drag onto the canvas -->
     <div class="mt-3 rounded-lg border border-slate-800">
-      <div class="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-        Doors
-      </div>
-      <div class="space-y-2 border-t border-slate-800 px-3 py-3">
-        <p class="text-[11px] text-slate-500">
-          Drag a door onto the room canvas, then right-click it to rotate.
-        </p>
-        <div class="flex flex-wrap gap-2">
-          @for (decoration of doorDefinitions; track decoration.id) {
-            <button
-              type="button"
-              draggable="true"
-              (dragstart)="onDecorationDragStart($event, decoration)"
-              (dragend)="onDecorationDragEnd()"
-              class="flex cursor-grab flex-col items-center gap-2 rounded-lg border border-slate-700 bg-slate-800/70 px-3 py-2 text-xs text-slate-200 transition hover:border-indigo-400 hover:bg-slate-700/60 active:cursor-grabbing"
-              [title]="'Drag ' + decoration.name + ' onto the canvas'"
-            >
-              <span
-                class="flex h-20 w-full items-center justify-center overflow-hidden rounded border border-slate-700 bg-slate-950/60"
+      <button
+        type="button"
+        (click)="toggleDoors()"
+        class="flex w-full cursor-pointer items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400"
+      >
+        <span>Doors</span>
+        <span class="text-slate-500">{{ doorsOpen() ? '▾' : '▸' }}</span>
+      </button>
+      @if (doorsOpen()) {
+        <div class="space-y-2 border-t border-slate-800 px-3 py-3">
+          <p class="text-[11px] text-slate-500">
+            Drag a door onto the room canvas, then right-click it to rotate.
+          </p>
+          <div class="flex flex-wrap gap-2">
+            @for (decoration of doorDefinitions; track decoration.id) {
+              <button
+                type="button"
+                draggable="true"
+                (dragstart)="onDecorationDragStart($event, decoration)"
+                (dragend)="onDecorationDragEnd()"
+                class="flex cursor-grab flex-col items-center gap-2 rounded-lg border border-slate-700 bg-slate-800/70 px-3 py-2 text-xs text-slate-200 transition hover:border-indigo-400 hover:bg-slate-700/60 active:cursor-grabbing"
+                [title]="'Drag ' + decoration.name + ' onto the canvas'"
               >
-                <canvas
-                  #decoPreview
-                  class="max-h-full max-w-full"
-                  style="image-rendering: pixelated"
-                ></canvas>
-              </span>
-              <span>{{ decoration.name }}</span>
-            </button>
-          }
+                <span
+                  class="flex h-20 w-full items-center justify-center overflow-hidden rounded border border-slate-700 bg-slate-950/60"
+                >
+                  <canvas
+                    #decoPreview
+                    [attr.data-deco-id]="decoration.id"
+                    class="max-h-full max-w-full"
+                    style="image-rendering: pixelated"
+                  ></canvas>
+                </span>
+                <span>{{ decoration.name }}</span>
+              </button>
+            }
+          </div>
         </div>
-      </div>
+      }
     </div>
 
     <!-- Decorations (smart objects): drag onto the canvas to place -->
     <div class="mt-3 rounded-lg border border-slate-800">
-      <div class="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-        Decorations
-      </div>
-      <div class="space-y-2 border-t border-slate-800 px-3 py-3">
-        <p class="text-[11px] text-slate-500">
-          Drag a decoration onto the room canvas to place it. All its tiles are stamped at once.
-        </p>
-        <div class="flex flex-wrap gap-2">
-          @for (decoration of otherDefinitions; track decoration.id) {
-            <button
-              type="button"
-              draggable="true"
-              (dragstart)="onDecorationDragStart($event, decoration)"
-              (dragend)="onDecorationDragEnd()"
-              class="flex cursor-grab flex-col items-center gap-2 rounded-lg border border-slate-700 bg-slate-800/70 px-3 py-2 text-xs text-slate-200 transition hover:border-indigo-400 hover:bg-slate-700/60 active:cursor-grabbing"
-              [title]="'Drag ' + decoration.name + ' onto the canvas'"
-            >
-              <span
-                class="flex h-20 w-full items-center justify-center overflow-hidden rounded border border-slate-700 bg-slate-950/60"
+      <button
+        type="button"
+        (click)="toggleDecorations()"
+        class="flex w-full cursor-pointer items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400"
+      >
+        <span>Decorations</span>
+        <span class="text-slate-500">{{ decorationsOpen() ? '▾' : '▸' }}</span>
+      </button>
+      @if (decorationsOpen()) {
+        <div class="space-y-2 border-t border-slate-800 px-3 py-3">
+          <p class="text-[11px] text-slate-500">
+            Drag a decoration onto the room canvas to place it. All its tiles are stamped at once.
+          </p>
+          <div class="flex flex-wrap gap-2">
+            @for (decoration of otherDefinitions; track decoration.id) {
+              <button
+                type="button"
+                draggable="true"
+                (dragstart)="onDecorationDragStart($event, decoration)"
+                (dragend)="onDecorationDragEnd()"
+                class="flex cursor-grab flex-col items-center gap-2 rounded-lg border border-slate-700 bg-slate-800/70 px-3 py-2 text-xs text-slate-200 transition hover:border-indigo-400 hover:bg-slate-700/60 active:cursor-grabbing"
+                [title]="'Drag ' + decoration.name + ' onto the canvas'"
               >
-                <canvas
-                  #decoPreview
-                  class="max-h-full max-w-full"
-                  style="image-rendering: pixelated"
-                ></canvas>
-              </span>
-              <span>{{ decoration.name }}</span>
-            </button>
-          }
+                <span
+                  class="flex h-20 w-full items-center justify-center overflow-hidden rounded border border-slate-700 bg-slate-950/60"
+                >
+                  <canvas
+                    #decoPreview
+                    [attr.data-deco-id]="decoration.id"
+                    class="max-h-full max-w-full"
+                    style="image-rendering: pixelated"
+                  ></canvas>
+                </span>
+                <span>{{ decoration.name }}</span>
+              </button>
+            }
+          </div>
         </div>
-      </div>
+      }
     </div>
   </div>
 </aside>

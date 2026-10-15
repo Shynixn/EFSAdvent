@@ -15,6 +15,7 @@ import { StageRenderer } from '../../service/render/stage-renderer';
 import {
   SMART_OBJECT_DEFINITIONS,
   SmartObjectDefinition,
+  findSmartObjectDefinition,
   smartObjectBounds,
   renderSmartObjectPreview,
 } from '../../entity/smartobject.entity';
@@ -109,6 +110,15 @@ export class ToolboxColumnComponent implements AfterViewInit {
   /** Whether the Advanced (manual drawing) section is expanded. */
   readonly advancedOpen = signal(false);
 
+  /** Whether the Ground section is expanded. */
+  readonly groundOpen = signal(true);
+
+  /** Whether the Doors section is expanded. */
+  readonly doorsOpen = signal(true);
+
+  /** Whether the Decorations section is expanded. */
+  readonly decorationsOpen = signal(true);
+
   /** Available decoration (smart-object) definitions, shown in the toolbox. */
   readonly decorations: SmartObjectDefinition[] = SMART_OBJECT_DEFINITIONS;
 
@@ -152,9 +162,15 @@ export class ToolboxColumnComponent implements AfterViewInit {
     }
     await renderer.prepareTileset();
     const canvases = this.previewCanvases();
-    for (let i = 0; i < this.decorations.length && i < canvases.length; i++) {
-      const definition = this.decorations[i];
-      const canvas = canvases[i].nativeElement;
+    // Match each canvas to its definition by id, so collapsing a section (which
+    // removes its canvases from the DOM) does not shift the mapping.
+    for (const ref of canvases) {
+      const id = ref.nativeElement.dataset['decoId'];
+      const definition = id ? findSmartObjectDefinition(id) : undefined;
+      const canvas = ref.nativeElement;
+      if (!definition) {
+        continue;
+      }
       const bounds = smartObjectBounds(definition);
       canvas.width = bounds.cols * 16;
       canvas.height = bounds.rows * 16;
@@ -201,6 +217,21 @@ export class ToolboxColumnComponent implements AfterViewInit {
     const open = !this.advancedOpen();
     this.advancedOpen.set(open);
     this.advancedOpenChange.emit(open);
+  }
+
+  /** Toggles the Ground section. */
+  toggleGround(): void {
+    this.groundOpen.update((open) => !open);
+  }
+
+  /** Toggles the Doors section. */
+  toggleDoors(): void {
+    this.doorsOpen.update((open) => !open);
+  }
+
+  /** Toggles the Decorations section. */
+  toggleDecorations(): void {
+    this.decorationsOpen.update((open) => !open);
   }
 
   /** Selects a ground (or deselects it when the same one is clicked again). */
