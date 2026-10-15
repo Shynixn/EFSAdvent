@@ -122,7 +122,8 @@ export class RoomPage implements OnInit, OnDestroy {
   readonly brushTile = signal(1);
 
   /** Active tool: `brush` paints tiles, `hand` moves placed smart objects. */
-  readonly tool = signal<'brush' | 'hand' | 'eraser'>('brush');
+  /** Active tool: `brush` paints tiles, `eraser` clears tiles/ground, `hand` moves objects. */
+  readonly tool = signal<'brush' | 'hand' | 'eraser'>('hand');
 
   /**
    * Smart objects (decorations) placed in the current room. Populated only by

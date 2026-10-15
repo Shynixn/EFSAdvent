@@ -163,7 +163,7 @@ export class RoomCanvasComponent implements AfterViewInit {
   }
 
   /** Active tool: `brush` paints, `eraser` clears tiles/ground, `hand` moves objects. */
-  @Input() tool: 'brush' | 'hand' | 'eraser' = 'brush';
+  @Input() tool: 'brush' | 'hand' | 'eraser' = 'hand';
 
   private _smartObjects: SmartObjectPlacement[] = [];
   /** Smart objects placed in this room (for hit-testing, dragging, ground skip). */
