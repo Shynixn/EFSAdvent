@@ -571,8 +571,7 @@ export class RoomCanvasComponent implements AfterViewInit {
       ? this.zOrder.filter((entry) => this.smartObjects.includes(entry))
       : [...this.smartObjects];
     const filtered = order.filter((entry) => entry !== placement);
-    this.zOrder =
-      where === 'front' ? [...filtered, placement] : [placement, ...filtered];
+    this.zOrder = where === 'front' ? [...filtered, placement] : [placement, ...filtered];
     this.redrawSmartObjects();
     this.closeContextMenu();
     void this.redraw();
@@ -586,9 +585,10 @@ export class RoomCanvasComponent implements AfterViewInit {
    * deletion, where the removed object's tiles must not leave holes in objects
    * that overlapped it).
    */
-  private redrawSmartObjects(
-    override?: { list: SmartObjectPlacement[]; skip: SmartObjectPlacement[] },
-  ): void {
+  private redrawSmartObjects(override?: {
+    list: SmartObjectPlacement[];
+    skip: SmartObjectPlacement[];
+  }): void {
     const room = this.room;
     if (!room) {
       return;
