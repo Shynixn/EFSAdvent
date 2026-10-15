@@ -212,7 +212,11 @@ export class RoomPage implements OnInit, OnDestroy {
    * and ground merged into its `rooms` array (reflecting unsaved edits).
    */
   private composeRoomRecord(file: StageFile, grid: { row: number; col: number }): StageFile {
-    const placements = this.smartObjects();
+    // Actor-baked objects (enemies) are not part of the stage JSON — they live in
+    // the archive's enemy list — so exclude them here to match what is written.
+    const placements = this.smartObjects().filter(
+      (placement) => findSmartObjectDefinition(placement.id)?.baking !== 'actor',
+    );
     const ground = this.groundLayers().filter(
       (layer) =>
         layer.bottomLayerTiles.some((t) => t !== 0) || layer.topLayerTiles.some((t) => t !== 0),
@@ -873,7 +877,12 @@ export class RoomPage implements OnInit, OnDestroy {
           id,
           grid.row,
           grid.col,
-          this.smartObjects(),
+          // Only tile-baked objects go in the stage JSON: actor-baked ones
+          // (enemies) live in the archive's enemy list, and are rebuilt from it
+          // on load — persisting them here too would duplicate them.
+          this.smartObjects().filter(
+            (placement) => findSmartObjectDefinition(placement.id)?.baking !== 'actor',
+          ),
           ground,
         );
       }

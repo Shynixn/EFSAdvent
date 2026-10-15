@@ -18,6 +18,11 @@ public static partial class FsaInterop
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        // Incoming payloads from the Angular app use camelCase keys (e.g. the
+        // actor list's `{ id, layer, x, y, variable }`); the DTOs are PascalCase.
+        // Without this, System.Text.Json silently leaves every property at its
+        // default and placed actors are written as empty/zero records.
+        PropertyNameCaseInsensitive = true,
     };
 
     /// <summary>
@@ -285,6 +290,14 @@ public static partial class FsaInterop
             room.Actors.Clear();
             foreach (var dto in actors)
             {
+                if (string.IsNullOrEmpty(dto.Id))
+                {
+                    // A blank id means the payload did not map onto ActorDto
+                    // (e.g. a JSON casing mismatch) — fail loudly instead of
+                    // writing a corrupt actor.
+                    Console.Error.WriteLine("SetRoomActors: actor payload has an empty id.");
+                    return Array.Empty<byte>();
+                }
                 room.Actors.Add(new Actor(
                     new Identifier32(dto.Id.AsSpan()),
                     dto.Layer,
@@ -295,8 +308,9 @@ public static partial class FsaInterop
 
             return SerializeStage(stage);
         }
-        catch
+        catch (Exception ex)
         {
+            Console.Error.WriteLine($"SetRoomActors failed: {ex}");
             return Array.Empty<byte>();
         }
     }
