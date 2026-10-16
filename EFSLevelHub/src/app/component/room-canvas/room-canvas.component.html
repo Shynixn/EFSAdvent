@@ -85,6 +85,58 @@
             <span>Rotate</span>
           </button>
         }
+        @if (contextSubTypes().length > 0) {
+          <div class="relative">
+            <button
+              type="button"
+              (click)="toggleSubMenu()"
+              class="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-slate-200 transition hover:bg-slate-700"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                <path
+                  fill-rule="evenodd"
+                  d="M10 2a1 1 0 011 1v1.6a5.5 5.5 0 014.4 4.4H17a1 1 0 110 2h-1.6a5.5 5.5 0 01-4.4 4.4V17a1 1 0 11-2 0v-1.6a5.5 5.5 0 01-4.4-4.4H3a1 1 0 110-2h1.6A5.5 5.5 0 019 4.6V3a1 1 0 011-1zm0 5.5a2.5 2.5 0 100 5 2.5 2.5 0 000-5z"
+                  clip-rule="evenodd"
+                />
+              </svg>
+              <span class="flex-1">Type</span>
+              <svg
+                class="h-3 w-3 transition-transform"
+                [class.rotate-90]="subMenuOpen()"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+                aria-hidden="true"
+              >
+                <path
+                  fill-rule="evenodd"
+                  d="M7.21 14.77a.75.75 0 010-1.06L10.94 10 7.21 6.29a.75.75 0 111.06-1.06l4.25 4.24a.75.75 0 010 1.06l-4.25 4.24a.75.75 0 01-1.06 0z"
+                  clip-rule="evenodd"
+                />
+              </svg>
+            </button>
+            <!-- Submenu of the definition's sub-types (e.g. door styles).
+                 Opens directly below the Type item so it never leaves the
+                 viewport on a right-edge right-click. -->
+            @if (subMenuOpen()) {
+              <div
+                class="mt-0.5 min-w-32 overflow-hidden rounded-lg border border-slate-700 bg-slate-800 py-1 text-sm shadow-lg"
+              >
+                @for (subType of contextSubTypes(); track subType.id; let i = $index) {
+                  <button
+                    type="button"
+                    (click)="selectContextSubType(i)"
+                    class="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left transition hover:bg-slate-700"
+                    [class.text-sky-300]="contextSubTypeIndex() === i"
+                    [class.text-slate-200]="contextSubTypeIndex() !== i"
+                  >
+                    <span class="w-3 text-center">{{ contextSubTypeIndex() === i ? '✓' : '' }}</span>
+                    <span>{{ subType.name }}</span>
+                  </button>
+                }
+              </div>
+            }
+          </div>
+        }
         @if (canConnectContextPlacement()) {
           @if (isContextPlacementConnected()) {
             <button

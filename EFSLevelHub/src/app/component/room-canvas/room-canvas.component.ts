@@ -20,11 +20,15 @@ import {
   findSmartObjectDefinition,
   flattenPlacements,
   placementToActor,
+  resolveSubTypeIndex,
   smartObjectBounds,
   smartObjectVariant,
+  variantsForSubType,
+  warpChildDestination,
   withChildren,
   SmartObjectDefinition,
   SmartObjectPlacement,
+  SmartObjectSubType,
   SmartObjectTileOffset,
   WARP_ACTOR_ID,
 } from '../../entity/smartobject.entity';
@@ -61,6 +65,14 @@ const DIMENSION = 32;
  * is drawn either — a box would outline empty tiles.
  */
 const HIDDEN_ACTOR_MARKERS = new Set(['SWEV', 'TINB', 'GFBS', 'BGMN']);
+
+/**
+ * Warp types for a connected door, indexed by the door's variant (rotation):
+ * `0 → 21` (north, the default), `1 → 23` (east), `2 → 22` (south), `3 → 24`
+ * (west). These are the "Entrance to Side View" types from `WARP.json`; they
+ * auto-return, so a connection needs only ONE warp (on the source door).
+ */
+const DOOR_WARP_TYPES = [21, 23, 22, 24] as const;
 
 /**
  * RoomCanvasComponent
@@ -340,6 +352,8 @@ export class RoomCanvasComponent implements AfterViewInit {
     anchorCol: number;
     /** Active variant (rotation style) index within the definition's `set`. */
     variantIndex: number;
+    /** Active sub-type index within the definition's `subTypes` (0 when none). */
+    subTypeIndex: number;
     /** True while the pointer is over the canvas. */
     active: boolean;
   } | null = null;
@@ -379,6 +393,13 @@ export class RoomCanvasComponent implements AfterViewInit {
     x: number;
     y: number;
   } | null>(null);
+
+  /**
+   * Whether the context menu's "Type" submenu is expanded. The menu lives over a
+   * backdrop that closes it, so the submenu is toggled by click (a hover-open
+   * popup would fight the backdrop / the `left-full` positioning).
+   */
+  readonly subMenuOpen = signal(false);
 
   ngAfterViewInit(): void {
     void this.redraw();
@@ -467,7 +488,11 @@ export class RoomCanvasComponent implements AfterViewInit {
       if (!definition) {
         continue;
       }
-      const variant = smartObjectVariant(definition, placement.variantIndex ?? 0);
+      const variant = smartObjectVariant(
+        definition,
+        placement.variantIndex ?? 0,
+        placement.subTypeIndex ?? 0,
+      );
       for (const offset of variant.bottomLayerTiles) {
         const row = placement.anchorRow + offset.dRow;
         const col = placement.anchorCol + offset.dCol;
@@ -587,14 +612,21 @@ export class RoomCanvasComponent implements AfterViewInit {
     const y = rect ? event.clientY - rect.top : event.offsetY;
 
     const placement = tile ? this.findPlacementAt(tile) : null;
+    this.subMenuOpen.set(false);
     this.contextMenu.set(placement ? { placement, x, y } : null);
     this.drawHoverOutline();
   }
 
   /** Closes the context menu. */
   closeContextMenu(): void {
+    this.subMenuOpen.set(false);
     this.contextMenu.set(null);
     this.drawHoverOutline();
+  }
+
+  /** Toggles the context menu's "Type" submenu (click, not hover). */
+  toggleSubMenu(): void {
+    this.subMenuOpen.update((open) => !open);
   }
 
   /** Deletes the smart object targeted by the context menu. */
@@ -625,7 +657,11 @@ export class RoomCanvasComponent implements AfterViewInit {
     if (!placement) {
       return false;
     }
-    return (findSmartObjectDefinition(placement.id)?.set.length ?? 0) > 1;
+    const definition = findSmartObjectDefinition(placement.id);
+    if (!definition) {
+      return false;
+    }
+    return variantsForSubType(definition, placement.subTypeIndex ?? 0).length > 1;
   }
 
   /**
@@ -641,15 +677,103 @@ export class RoomCanvasComponent implements AfterViewInit {
     return definition?.baking === 'tile' && definition.section === 'Doors';
   }
 
-  /** Whether the context-menu target is a door that already has a connection. */
+  /**
+   * Whether the context-menu target is a door that already has a connection —
+   * either as the **source** (it owns a `WARP` child) or as the **target** (it
+   * records a `connectedFrom` back-reference).
+   */
   isContextPlacementConnected(): boolean {
     const placement = this.contextMenu()?.placement;
-    return !!placement && this.connectionOf(placement) !== undefined;
+    if (!placement) {
+      return false;
+    }
+    return this.connectionOf(placement) !== undefined || placement.connectedFrom !== undefined;
   }
 
   /** The `WARP` child that connects a door to another door, if any. */
   private connectionOf(placement: SmartObjectPlacement): SmartObjectPlacement | undefined {
     return (placement.children ?? []).find((child) => child.id === WARP_ACTOR_ID);
+  }
+
+  /**
+   * Finds the door that owns a `WARP` child pointing at `target` (the source of
+   * `target`'s connection), or null. Used so a connection can be cleared from
+   * the target's side too.
+   */
+  private findSourceOf(target: SmartObjectPlacement): SmartObjectPlacement | null {
+    for (const placement of this.smartObjects) {
+      const child = this.connectionOf(placement);
+      if (!child) {
+        continue;
+      }
+      const dest = warpChildDestination(child);
+      if (
+        dest &&
+        dest.row === target.anchorRow &&
+        dest.col === target.anchorCol &&
+        dest.layer === (target.baseLayerId ?? 0)
+      ) {
+        return placement;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Removes a door's connection. If the door is the **source** its `WARP` child
+   * is dropped; if it is the **target** the source door's warp is cleared (and
+   * this door's back-reference removed).
+   */
+  disconnectContextPlacement(): void {
+    const placement = this.contextMenu()?.placement;
+    if (!placement) {
+      return;
+    }
+    this.contextMenu.set(null);
+    this.hoveredPlacement = null;
+
+    const child = this.connectionOf(placement);
+    if (child) {
+      // Source: drop the warp child and clear the target's back-reference.
+      const target = this.findTargetOf(placement);
+      const list = this.smartObjects.map((entry) =>
+        entry === placement
+          ? this.withWarpChild(placement, null)
+          : entry === target
+            ? { ...entry, connectedFrom: undefined }
+            : entry,
+      );
+      this.redrawSmartObjects({ list, skip: [placement] });
+      this.placementUpdated.emit({ from: placement, to: this.withWarpChild(placement, null) });
+      if (target) {
+        this.placementUpdated.emit({ from: target, to: { ...target, connectedFrom: undefined } });
+      }
+    } else if (placement.connectedFrom) {
+      // Target: clear the source's warp child too.
+      const source = this.findSourceOf(placement);
+      this.placementUpdated.emit({ from: placement, to: { ...placement, connectedFrom: undefined } });
+      if (source) {
+        this.placementUpdated.emit({ from: source, to: this.withWarpChild(source, null) });
+      }
+    }
+    void this.redraw();
+  }
+
+  /** The door a source placement's warp points at, if any. */
+  private findTargetOf(source: SmartObjectPlacement): SmartObjectPlacement | null {
+    const child = this.connectionOf(source);
+    const dest = child ? warpChildDestination(child) : null;
+    if (!dest) {
+      return null;
+    }
+    return (
+      this.smartObjects.find(
+        (entry) =>
+          entry.anchorRow === dest.row &&
+          entry.anchorCol === dest.col &&
+          (entry.baseLayerId ?? 0) === dest.layer,
+      ) ?? null
+    );
   }
 
   /**
@@ -675,19 +799,6 @@ export class RoomCanvasComponent implements AfterViewInit {
     this.drawHoverOutline();
   }
 
-  /** Emits nothing visual; removes the connection (the `WARP` child) of the target door. */
-  disconnectContextPlacement(): void {
-    const placement = this.contextMenu()?.placement;
-    if (!placement) {
-      return;
-    }
-    const remaining = (placement.children ?? []).filter((child) => child.id !== WARP_ACTOR_ID);
-    const updated = withChildren(placement, remaining);
-    this.contextMenu.set(null);
-    this.hoveredPlacement = null;
-    this.placementUpdated.emit({ from: placement, to: updated });
-  }
-
   /**
    * Completes a connect drag: if another door is under the pointer, attaches a
    * child `WARP` actor to the **source** door that points at the target door's
@@ -701,25 +812,18 @@ export class RoomCanvasComponent implements AfterViewInit {
     this.connectingFrom.set(null);
     this.connectCursor.set(null);
     const tile = this.tileAt(event);
-    const target = tile ? this.findPlacementAt(tile) : null;
+    const target = tile ? this.findDoorAtAnyLayer(tile) : null;
     if (!target || target === source) {
       this.drawHoverOutline();
       return;
     }
-    const targetDefinition = findSmartObjectDefinition(target.id);
-    if (targetDefinition?.baking !== 'tile' || targetDefinition.section !== 'Doors') {
-      this.drawHoverOutline();
-      return;
-    }
 
-    // Replace any existing connection, then attach a WARP child centred in the
-    // source door, pointing at the target door's anchor tile/layer.
-    const others = (source.children ?? []).filter((child) => child.id !== WARP_ACTOR_ID);
-    const sourceDef = findSmartObjectDefinition(source.id);
-    const bounds = sourceDef ? smartObjectBounds(sourceDef, source.variantIndex ?? 0) : null;
-    // Half-tile offsets that land the warp on the door's visual centre.
-    const centreDx = bounds ? bounds.minCol * 2 + bounds.cols : 0;
-    const centreDy = bounds ? bounds.minRow * 2 + bounds.rows : 0;
+    // Attach a single warp to the SOURCE door, at the door's OWN anchor (the
+    // game draws a warp at `X*8, Y*8`, no centring). Its type follows the
+    // door's current facing (variant 0 = north → 21, then 23/22/24 for E/S/W),
+    // so the entrance direction matches the door sprite. The return trip needs
+    // no second warp (these entrance types auto-return).
+    const type = this.doorWarpTypeForVariant(source.variantIndex ?? 0);
     const warp = createWarpChild(
       source.baseLayerId,
       source.anchorRow,
@@ -727,18 +831,85 @@ export class RoomCanvasComponent implements AfterViewInit {
       target.anchorRow,
       target.anchorCol,
       target.baseLayerId,
-      0,
-      centreDx,
-      centreDy,
+      type,
     );
-    const updated = withChildren(source, [...others, warp]);
-    this.placementUpdated.emit({ from: source, to: updated });
+
+    // The source door holds the warp child (points at the target). The TARGET
+    // door records a back-reference so it can be selected and moved too — when
+    // it moves, the source's warp destination follows (see RoomPage).
+    const sourceUpdated = this.withWarpChild(source, warp);
+    const targetUpdated: SmartObjectPlacement = {
+      ...target,
+      connectedFrom: {
+        row: source.anchorRow,
+        col: source.anchorCol,
+        layer: source.baseLayerId ?? 0,
+      },
+    };
+    // Apply both to this canvas's in-memory list so a second connect/render is
+    // consistent even before the host round-trips the state.
+    const list = this.smartObjects.map((placement) =>
+      placement === source ? sourceUpdated : placement === target ? targetUpdated : placement,
+    );
+    this.redrawSmartObjects({ list, skip: [source, target] });
+    this.placementUpdated.emit({ from: source, to: sourceUpdated });
+    this.placementUpdated.emit({ from: target, to: targetUpdated });
+    this.drawHoverOutline();
+    void this.redraw();
+  }
+
+  /**
+   * The warp type byte that matches a door variant (rotation):
+   * `0 → 21` (north), `1 → 23` (east), `2 → 22` (south), `3 → 24` (west).
+   */
+  private doorWarpTypeForVariant(variantIndex: number): number {
+    return DOOR_WARP_TYPES[variantIndex % DOOR_WARP_TYPES.length];
+  }
+
+  /** Returns a copy of `placement` whose `WARP` child is replaced by `warp` (or removed when null). */
+  private withWarpChild(
+    placement: SmartObjectPlacement,
+    warp: SmartObjectPlacement | null,
+  ): SmartObjectPlacement {
+    const others = (placement.children ?? []).filter((child) => child.id !== WARP_ACTOR_ID);
+    return withChildren(placement, warp ? [...others, warp] : others);
+  }
+
+  /**
+   * Finds a **door** placement under a tile regardless of base layer, so a
+   * connection can be drawn from a door on one layer to a door on another.
+   */
+  private findDoorAtAnyLayer(tile: { x: number; y: number }): SmartObjectPlacement | null {
+    for (const placement of this.smartObjects) {
+      const definition = findSmartObjectDefinition(placement.id);
+      if (definition?.baking !== 'tile' || definition.section !== 'Doors') {
+        continue;
+      }
+      const bounds = smartObjectBounds(
+        definition,
+        placement.variantIndex ?? 0,
+        placement.subTypeIndex ?? 0,
+      );
+      if (
+        tile.y >= placement.anchorRow + bounds.minRow &&
+        tile.y <= placement.anchorRow + bounds.maxRow &&
+        tile.x >= placement.anchorCol + bounds.minCol &&
+        tile.x <= placement.anchorCol + bounds.maxCol
+      ) {
+        return placement;
+      }
+    }
+    return null;
   }
 
   /**
    * Rotates the smart object targeted by the context menu to the next variant in
    * its definition's `set`. Clears the current tiles, re-stamps the next variant
    * at the same anchor and emits the change so the host updates the stage JSON.
+   *
+   * For a **door** whose rotation drives an entrance direction, an attached
+   * `WARP` child has its warp type advanced in lock-step (north → east → south →
+   * west), so the connection's facing follows the sprite.
    */
   rotateContextPlacement(): void {
     const from = this.contextMenu()?.placement;
@@ -747,12 +918,18 @@ export class RoomCanvasComponent implements AfterViewInit {
       return;
     }
     const definition = findSmartObjectDefinition(from.id);
-    if (!definition || definition.set.length <= 1) {
+    if (!definition) {
       return;
     }
-    const nextVariant = ((from.variantIndex ?? 0) + 1) % definition.set.length;
+    const set = variantsForSubType(definition, from.subTypeIndex ?? 0);
+    if (set.length <= 1) {
+      return;
+    }
+    const nextVariant = ((from.variantIndex ?? 0) + 1) % set.length;
     // Re-stamp the next variant at the same anchor, keeping the same stacking.
-    const rotated = { ...from, variantIndex: nextVariant };
+    // A connected door also advances its WARP child's type (21→23→22→24) so the
+    // entrance direction matches the sprite facing.
+    const rotated = this.withRotatedWarpType({ ...from, variantIndex: nextVariant }, nextVariant);
     const list = this.smartObjects.map((placement) => (placement === from ? rotated : placement));
     this.redrawSmartObjects({ list, skip: [from] });
     this.contextMenu.set(null);
@@ -760,6 +937,75 @@ export class RoomCanvasComponent implements AfterViewInit {
     this.decorationRotated.emit({ from, to: rotated });
     this.drawHoverOutline();
     void this.redraw();
+  }
+
+  /**
+   * The sub-types the context-menu target offers, or `[]` when it has none (so
+   * the "Type" submenu stays hidden). Only definitions with `subTypes` (e.g. the
+   * merged door) list anything.
+   */
+  contextSubTypes(): SmartObjectSubType[] {
+    const placement = this.contextMenu()?.placement;
+    if (!placement) {
+      return [];
+    }
+    return findSmartObjectDefinition(placement.id)?.subTypes ?? [];
+  }
+
+  /** Index of the sub-type the context-menu target currently uses. */
+  contextSubTypeIndex(): number {
+    const placement = this.contextMenu()?.placement;
+    return placement ? resolveSubTypeIndex(placement.id, placement.subTypeIndex) : 0;
+  }
+
+  /**
+   * Switches the context-menu target to a different sub-type (e.g. door →
+   * closed door → key door). The tiles are re-stamped with the new sub-type's
+   * variant of the **same** facing, and the change is emitted so the host
+   * records it.
+   */
+  selectContextSubType(subTypeIndex: number): void {
+    const from = this.contextMenu()?.placement;
+    const room = this.room;
+    if (!from || !room) {
+      return;
+    }
+    const definition = findSmartObjectDefinition(from.id);
+    if (!definition?.subTypes?.[subTypeIndex]) {
+      return;
+    }
+    if (resolveSubTypeIndex(from.id, from.subTypeIndex) === subTypeIndex) {
+      this.contextMenu.set(null);
+      return;
+    }
+    const changed: SmartObjectPlacement = { ...from, subTypeIndex };
+    const list = this.smartObjects.map((placement) => (placement === from ? changed : placement));
+    this.redrawSmartObjects({ list, skip: [from] });
+    this.contextMenu.set(null);
+    this.hoveredPlacement = null;
+    this.placementUpdated.emit({ from, to: changed });
+    this.drawHoverOutline();
+    void this.redraw();
+  }
+
+  /**
+   * Advances the warp type of a rotated door's `WARP` child so the entrance
+   * direction follows the sprite facing (north → east → south → west, i.e.
+   * types 21 → 23 → 22 → 24). Doors with no connection are returned unchanged.
+   */
+  private withRotatedWarpType(
+    placement: SmartObjectPlacement,
+    variantIndex: number,
+  ): SmartObjectPlacement {
+    const child = this.connectionOf(placement);
+    if (!child) {
+      return placement;
+    }
+    const type = DOOR_WARP_TYPES[variantIndex % DOOR_WARP_TYPES.length];
+    const variable = ((child.actorVariable ?? 0) & ~0xff) | (type & 0xff);
+    const updatedChild: SmartObjectPlacement = { ...child, actorVariable: variable >>> 0 };
+    const children = (placement.children ?? []).map((c) => (c === child ? updatedChild : c));
+    return { ...placement, children };
   }
 
   /**
@@ -798,7 +1044,11 @@ export class RoomCanvasComponent implements AfterViewInit {
       if (!definition) {
         continue;
       }
-      const variant = smartObjectVariant(definition, placement.variantIndex ?? 0);
+      const variant = smartObjectVariant(
+        definition,
+        placement.variantIndex ?? 0,
+        placement.subTypeIndex ?? 0,
+      );
       const add = (layerIndex: number, offsets: SmartObjectTileOffset[]): void => {
         let set = claimed.get(layerIndex);
         if (!set) {
@@ -827,7 +1077,11 @@ export class RoomCanvasComponent implements AfterViewInit {
       if (!definition) {
         continue;
       }
-      const variant = smartObjectVariant(definition, placement.variantIndex ?? 0);
+      const variant = smartObjectVariant(
+        definition,
+        placement.variantIndex ?? 0,
+        placement.subTypeIndex ?? 0,
+      );
       const clear = (layerIndex: number, offsets: SmartObjectTileOffset[]): void => {
         const layer = room.Layers[layerIndex];
         if (!layer) {
@@ -863,6 +1117,7 @@ export class RoomCanvasComponent implements AfterViewInit {
         room.Layers,
         placement.baseLayerId,
         placement.variantIndex ?? 0,
+        placement.subTypeIndex ?? 0,
       );
     }
   }
@@ -911,6 +1166,7 @@ export class RoomCanvasComponent implements AfterViewInit {
       anchorRow,
       anchorCol,
       variantIndex: this.dragService.variantIndex(),
+      subTypeIndex: 0,
       active: true,
     };
     this.drawPreview();
@@ -987,6 +1243,7 @@ export class RoomCanvasComponent implements AfterViewInit {
       room.Layers,
       this.layerIndex,
       dragging?.variantIndex ?? 0,
+      dragging?.subTypeIndex ?? 0,
     );
     this.dragService.clear();
     this.dragging = null;
@@ -1025,6 +1282,7 @@ export class RoomCanvasComponent implements AfterViewInit {
       anchorRow: placement.anchorRow,
       anchorCol: placement.anchorCol,
       variantIndex: placement.variantIndex ?? 0,
+      subTypeIndex: placement.subTypeIndex ?? 0,
       active: true,
     };
     void this.redraw();
@@ -1061,7 +1319,11 @@ export class RoomCanvasComponent implements AfterViewInit {
         }
         continue;
       }
-      const bounds = smartObjectBounds(definition, placement.variantIndex ?? 0);
+      const bounds = smartObjectBounds(
+        definition,
+        placement.variantIndex ?? 0,
+        placement.subTypeIndex ?? 0,
+      );
       if (
         tile.y >= placement.anchorRow + bounds.minRow &&
         tile.y <= placement.anchorRow + bounds.maxRow &&
@@ -1107,8 +1369,32 @@ export class RoomCanvasComponent implements AfterViewInit {
         room.Layers,
         dragging.source.baseLayerId,
         dragging.variantIndex,
+        dragging.subTypeIndex,
       );
-      this.decorationMoved.emit({ from: dragging.source, to: moved });
+      // A child (e.g. the connecting WARP actor) travels with its parent: keep
+      // the children but translate their anchors by the same delta so the
+      // connection stays attached to the moved door. Their `actorVariable`
+      // (destination) is untouched, so the link still points at the other door.
+      const deltaRow = moved.anchorRow - dragging.source.anchorRow;
+      const deltaCol = moved.anchorCol - dragging.source.anchorCol;
+      let withChildrenMoved: SmartObjectPlacement = moved;
+      if (dragging.source.children && dragging.source.children.length > 0) {
+        withChildrenMoved = withChildren(
+          moved,
+          dragging.source.children.map((child) => ({
+            ...child,
+            anchorRow: child.anchorRow + deltaRow,
+            anchorCol: child.anchorCol + deltaCol,
+          })),
+        );
+      }
+      // A TARGET door keeps its back-reference (its source door is re-pointed by
+      // the host on `decorationMoved`), so carrying it here keeps the placement
+      // "connected" until the host updates both ends.
+      if (dragging.source.connectedFrom) {
+        withChildrenMoved = { ...withChildrenMoved, connectedFrom: dragging.source.connectedFrom };
+      }
+      this.decorationMoved.emit({ from: dragging.source, to: withChildrenMoved });
     }
     void this.redraw();
   }
@@ -1185,7 +1471,11 @@ export class RoomCanvasComponent implements AfterViewInit {
       });
       return;
     }
-    const bounds = smartObjectBounds(definition, placement.variantIndex ?? 0);
+    const bounds = smartObjectBounds(
+      definition,
+      placement.variantIndex ?? 0,
+      placement.subTypeIndex ?? 0,
+    );
     this.strokeOutline(
       ctx,
       (placement.anchorCol + bounds.minCol) * TILE_SIZE,
@@ -1275,24 +1565,21 @@ export class RoomCanvasComponent implements AfterViewInit {
     ctx.stroke();
     ctx.restore();
 
-    // Highlight a valid target door under the cursor.
-    const target = cursor ? this.findPlacementAt(cursor) : null;
-    const targetDef = target ? findSmartObjectDefinition(target.id) : null;
-    if (
-      target &&
-      target !== source &&
-      targetDef?.baking === 'tile' &&
-      targetDef.section === 'Doors'
-    ) {
-      const tb = smartObjectBounds(targetDef, target.variantIndex ?? 0);
-      this.strokeOutline(
-        ctx,
-        (target.anchorCol + tb.minCol) * TILE_SIZE,
-        (target.anchorRow + tb.minRow) * TILE_SIZE,
-        tb.cols * TILE_SIZE,
-        tb.rows * TILE_SIZE,
-        { color: '#22c55e', dash: [] },
-      );
+    // Highlight a valid target door under the cursor (any layer).
+    const target = cursor ? this.findDoorAtAnyLayer(cursor) : null;
+    if (target && target !== source) {
+      const targetDef = findSmartObjectDefinition(target.id);
+      const tb = targetDef ? smartObjectBounds(targetDef, target.variantIndex ?? 0) : null;
+      if (tb) {
+        this.strokeOutline(
+          ctx,
+          (target.anchorCol + tb.minCol) * TILE_SIZE,
+          (target.anchorRow + tb.minRow) * TILE_SIZE,
+          tb.cols * TILE_SIZE,
+          tb.rows * TILE_SIZE,
+          { color: '#22c55e', dash: [] },
+        );
+      }
     }
   }
   /** Strokes a rectangle (crisp 1px) at the given pixel rectangle. */

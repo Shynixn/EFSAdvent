@@ -71,4 +71,32 @@ export class SystemColumnComponent {
   @Output() paintTopChange = new EventEmitter<boolean>();
   /** Emits when the user clears this room's smart objects + ground from the stage JSON. */
   @Output() clearRoomData = new EventEmitter<void>();
+
+  /** True for a moment after the "Copy JSON" button succeeds (shows feedback). */
+  readonly copied = signal(false);
+
+  /**
+   * Copies the room JSON to the clipboard as **minified** JSON (no whitespace).
+   * The displayed JSON is pretty-printed for readability, so it is parsed and
+   * re-serialized without indentation here. Falls back to the pretty text if the
+   * JSON cannot be parsed.
+   */
+  async copyRoomJson(): Promise<void> {
+    if (!this.roomJson) {
+      return;
+    }
+    let text = this.roomJson;
+    try {
+      text = JSON.stringify(JSON.parse(this.roomJson));
+    } catch {
+      // Not parseable — copy what we have.
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      this.copied.set(true);
+      setTimeout(() => this.copied.set(false), 1500);
+    } catch {
+      // Clipboard unavailable (permissions / insecure context) — ignore.
+    }
+  }
 }

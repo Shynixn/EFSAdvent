@@ -46,7 +46,10 @@ import {
   flattenPlacements,
   placementToActor,
   registerActorSmartObjects,
+  repointWarpChild,
   smartObjectVariant,
+  warpChildDestination,
+  WARP_ACTOR_ID,
 } from '../../entity/smartobject.entity';
 import { actorSmartObjects, enemyDefinitions } from '../../entity/enemy.definition';
 import { TilesetTheme } from '../../entity/tileset.util';
@@ -403,30 +406,45 @@ export class RoomPage implements OnInit, OnDestroy {
       // another tool). They are surfaced separately AND injected into
       // `smartObjects` below, so the room ends up with a single, truthful list.
       const recordedPlacements = record?.smartObjects ?? [];
-      const tilePlacements = recordedPlacements.filter(
-        (placement) => findSmartObjectDefinition(placement.id)?.baking !== 'actor',
-      );
+      // Whether a recorded placement bakes an actor. The definition catalog may
+      // NOT be registered yet at this point (actor-baked ids like `WARP` are
+      // added by `ensureEnemies()` which runs after this block), so this also
+      // treats any placement carrying an `actorVariable` — or the WARP actor id —
+      // as actor-baked. Without that, a door's recorded `WARP` child would be
+      // filtered out here and the archive's matching WARP would resurface as a
+      // duplicate legacy actor.
+      const isActorBaked = (placement: SmartObjectPlacement): boolean =>
+        findSmartObjectDefinition(placement.id)?.baking === 'actor' ||
+        placement.id === WARP_ACTOR_ID ||
+        placement.actorVariable !== undefined;
+      const tilePlacements = recordedPlacements.filter((placement) => !isActorBaked(placement));
       // Actor-baked roots stay in the list as-is (their children — e.g. a door's
       // connecting WARP actor — travel with them).
-      const recordedActors = recordedPlacements.filter(
-        (placement) => findSmartObjectDefinition(placement.id)?.baking === 'actor',
-      );
+      const recordedActors = recordedPlacements.filter(isActorBaked);
       // Every recorded actor, INCLUDING children, so an actor that is recorded as
       // a child is not also surfaced (and duplicated) as a legacy actor.
-      const recordedActorsFlat = flattenPlacements(recordedPlacements).filter(
-        (placement) => findSmartObjectDefinition(placement.id)?.baking === 'actor',
-      );
+      const recordedActorsFlat = flattenPlacements(recordedPlacements).filter(isActorBaked);
 
       const archiveActors = (room.Actors ?? []).map((actor) => actorToPlacement(actor));
-      // A legacy actor is one whose id+anchor+layer is not already recorded.
+      // A legacy actor is one whose actor record is not already recorded.
+      //
+      // The match is on `id + layer + Variable`. The Variable is the actor's
+      // identifying payload (for a WARP it packs both the type and the
+      // destination), so it survives the coordinate drift that a save/reload
+      // round-trip introduces: the archive stores an actor's final `X/Y` while a
+      // recorded child carries `halfTileDx/Dy`, so an anchor comparison would
+      // miss the match and the actor would resurface as a duplicate legacy actor.
+      //
+      // `placementToActor` gives the recorded placement its baked Variable (and
+      // is the no-op identity for an `actorToPlacement` result, which already
+      // holds the archive's own Variable).
+      const actorKey = (actor: ActorData): string =>
+        `${actor.Id}|${actor.Layer & 0x07}|${actor.Variable >>> 0}`;
+      const recordedActorKeys = new Set(
+        recordedActorsFlat.map((recorded) => actorKey(placementToActor(recorded))),
+      );
       const isRecorded = (placement: SmartObjectPlacement): boolean =>
-        recordedActorsFlat.some(
-          (recorded) =>
-            recorded.id === placement.id &&
-            recorded.anchorRow === placement.anchorRow &&
-            recorded.anchorCol === placement.anchorCol &&
-            (recorded.baseLayerId ?? 0) === (placement.baseLayerId ?? 0),
-        );
+        recordedActorKeys.has(actorKey(placementToActor(placement)));
       const legacy = archiveActors.filter((placement) => !isRecorded(placement));
 
       // The SAME placement objects are used for both lists, so the canvas can
@@ -593,20 +611,96 @@ export class RoomPage implements OnInit, OnDestroy {
       const base = event.to.baseLayerId;
       this.stageRoom.markLayerDirty(this.roomIndex(), base);
       this.stageRoom.markLayerDirty(this.roomIndex(), base + 8);
+      // A moved door carries its connecting `WARP` child actor along, so the
+      // actor list changed position too.
+      if ((event.to.children ?? []).some((child) => child.id === WARP_ACTOR_ID)) {
+        this.stageRoom.markActorsDirty(this.roomIndex());
+      }
     }
     this.replacePlacement(event.from, event.to);
+    // A moved TARGET door must re-point the source door's warp at its new anchor
+    // so the drawn connection follows it.
+    this.repointInboundWarps(event.from, event.to);
+    // A moved SOURCE door must refresh its target's back-reference, which stores
+    // the source's position (the warp destination is unchanged, so the link
+    // itself is still correct — only the recorded source anchor is stale).
+    this.refreshSourceReferences(event.from, event.to);
+  }
+
+  /**
+   * Refreshes the `connectedFrom` back-reference on a moved **source** door's
+   * target, so the target records the source's new position.
+   */
+  private refreshSourceReferences(from: SmartObjectPlacement, to: SmartObjectPlacement): void {
+    const child = (to.children ?? []).find((c) => c.id === WARP_ACTOR_ID);
+    const dest = child ? warpChildDestination(child) : null;
+    if (!dest) {
+      return;
+    }
+    const target = this.smartObjects().find(
+      (entry) =>
+        entry.anchorRow === dest.row &&
+        entry.anchorCol === dest.col &&
+        (entry.baseLayerId ?? 0) === dest.layer,
+    );
+    if (target?.connectedFrom) {
+      this.replacePlacement(target, {
+        ...target,
+        connectedFrom: { row: to.anchorRow, col: to.anchorCol, layer: to.baseLayerId ?? 0 },
+      });
+    }
+  }
+
+  /**
+   * Re-points any door whose `WARP` child targeted `from` so it now targets
+   * `to`'s new anchor (used when the connected **target** door moves). No-op
+   * when nothing pointed at `from`.
+   */
+  private repointInboundWarps(from: SmartObjectPlacement, to: SmartObjectPlacement): void {
+    const changed: SmartObjectPlacement[] = [];
+    for (const placement of this.smartObjects()) {
+      const child = (placement.children ?? []).find((c) => c.id === WARP_ACTOR_ID);
+      if (!child) {
+        continue;
+      }
+      const dest = warpChildDestination(child);
+      if (
+        !dest ||
+        dest.row !== from.anchorRow ||
+        dest.col !== from.anchorCol ||
+        dest.layer !== (from.baseLayerId ?? 0)
+      ) {
+        continue;
+      }
+      const updatedChild = repointWarpChild(child, to.anchorRow, to.anchorCol, to.baseLayerId ?? 0);
+      const updated: SmartObjectPlacement = {
+        ...placement,
+        children: (placement.children ?? []).map((c) => (c === child ? updatedChild : c)),
+      };
+      this.replacePlacement(placement, updated);
+      changed.push(updated);
+    }
+    if (changed.length > 0) {
+      this.stageRoom.markActorsDirty(this.roomIndex());
+    }
   }
 
   /**
    * Records a rotated decoration: the canvas already cleared the old variant's
    * tiles and stamped the next one, so here we replace the placement and mark
    * both layers dirty.
+   *
+   * Rotating a connected **door** also advances its child `WARP` actor's type,
+   * so the actor list is marked dirty as well (its `Variable` changed).
    */
   onDecorationRotated(event: { from: SmartObjectPlacement; to: SmartObjectPlacement }): void {
     this.stageEditor.setDirty(this.stageId(), true);
     const base = event.to.baseLayerId;
     this.stageRoom.markLayerDirty(this.roomIndex(), base);
     this.stageRoom.markLayerDirty(this.roomIndex(), base + 8);
+    if ((event.to.children ?? []).some((child) => child.id === WARP_ACTOR_ID)) {
+      this.stageRoom.markActorsDirty(this.roomIndex());
+    }
     this.replacePlacement(event.from, event.to);
   }
 
@@ -638,6 +732,10 @@ export class RoomPage implements OnInit, OnDestroy {
   /**
    * Records a deleted decoration: the canvas already cleared its stamped tiles,
    * so here we drop the placement from the room list and mark both layers dirty.
+   *
+   * Deleting a door also detaches any **inbound** connections: other doors whose
+   * `WARP` child pointed at this door would otherwise keep drawing a warp line to
+   * a destination that no longer exists.
    */
   onDecorationDeleted(placement: SmartObjectPlacement): void {
     this.stageEditor.setDirty(this.stageId(), true);
@@ -649,8 +747,70 @@ export class RoomPage implements OnInit, OnDestroy {
       this.stageRoom.markLayerDirty(this.roomIndex(), base);
       this.stageRoom.markLayerDirty(this.roomIndex(), base + 8);
     }
+
+    // Tear down both sides of any connection this door was part of:
+    //  - doors whose warp pointed AT it (it was a target), and
+    //  - the door its own warp pointed at (it was a source) — clear that door's
+    //    back-reference so it no longer claims to be connected.
+    const touched = this.detachConnections(placement);
+    if (touched > 0) {
+      this.stageRoom.markActorsDirty(this.roomIndex());
+    }
     this.smartObjects.update((list) => list.filter((entry) => entry !== placement));
     this.legacyActors.update((list) => list.filter((entry) => entry !== placement));
+  }
+
+  /**
+   * Clears every connection involving `placement`:
+   * - drops the `WARP` child from any door that pointed at `placement`, and
+   * - clears `connectedFrom` on the door `placement`'s own warp pointed at.
+   *
+   * Returns how many other placements were changed (0 when it had no links).
+   */
+  private detachConnections(placement: SmartObjectPlacement): number {
+    let touched = 0;
+
+    // Other doors -> placement (placement is a target).
+    for (const other of this.smartObjects()) {
+      if (other === placement) {
+        continue;
+      }
+      const child = (other.children ?? []).find((c) => c.id === WARP_ACTOR_ID);
+      const dest = child ? warpChildDestination(child) : null;
+      if (
+        child &&
+        dest &&
+        dest.row === placement.anchorRow &&
+        dest.col === placement.anchorCol &&
+        dest.layer === (placement.baseLayerId ?? 0)
+      ) {
+        const others = (other.children ?? []).filter((c) => c !== child);
+        const updated: SmartObjectPlacement = {
+          ...other,
+          children: others.length > 0 ? others : undefined,
+        };
+        this.replacePlacement(other, updated);
+        touched++;
+      }
+    }
+
+    // placement -> its target (placement is a source): clear the back-reference.
+    const own = (placement.children ?? []).find((c) => c.id === WARP_ACTOR_ID);
+    const ownDest = own ? warpChildDestination(own) : null;
+    if (ownDest) {
+      const target = this.smartObjects().find(
+        (entry) =>
+          entry.anchorRow === ownDest.row &&
+          entry.anchorCol === ownDest.col &&
+          (entry.baseLayerId ?? 0) === ownDest.layer,
+      );
+      if (target && target.connectedFrom) {
+        this.replacePlacement(target, { ...target, connectedFrom: undefined });
+        touched++;
+      }
+    }
+
+    return touched;
   }
 
   /** Loads the placable enemy catalog (actor-baked smart objects) once. */

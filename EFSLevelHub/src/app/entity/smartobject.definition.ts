@@ -49,6 +49,24 @@ export interface SmartObjectVariant {
 /** Toolbox section a definition belongs to. */
 export type SmartObjectSection = 'Doors' | 'Decorations' | 'Enemies';
 
+/**
+ * A selectable sub-type of a definition (e.g. a door can be a plain door, a
+ * closed door or a key door).
+ *
+ * The sub-type only changes which sprite/tiles are stamped — the geometry, the
+ * anchor and the rotation behave identically. Chosen from the context menu and
+ * cycled implicitly so the entry list stays small while all styles remain
+ * available.
+ */
+export interface SmartObjectSubType {
+  /** Stable id, e.g. `closed-door`. */
+  id: string;
+  /** Display name shown in the context menu. */
+  name: string;
+  /** The variants (one per rotation) stamped for this sub-type. */
+  set: SmartObjectVariant[];
+}
+
 /** A hard-coded smart-object definition (tile-baked or actor-baked). */
 export interface SmartObjectDefinition {
   /** Stable id, e.g. `tree`. For an actor-baked object this is the actor id. */
@@ -63,8 +81,17 @@ export interface SmartObjectDefinition {
    * The variants (rotation styles) of this object. Single-entry for objects
    * that do not rotate (e.g. a tree); four entries for doors (one per facing).
    * Actor-baked objects have a single (empty) variant — they bake no tiles.
+   *
+   * When {@link subTypes} is present this is the sub-type currently selected
+   * (index into `subTypes`), and {@link set} is kept as an alias of its `set`.
    */
   set: SmartObjectVariant[];
+  /**
+   * Optional selectable styles for this object (e.g. a door's
+   * door / closed-door / key-door sprites). When present, the placement's
+   * {@link subTypeIndex} picks one and {@link set} mirrors the chosen sub-type.
+   */
+  subTypes?: SmartObjectSubType[];
   /**
    * For `baking: 'actor'` objects: the 4-character actor id to place (e.g.
    * `AMOS`) and the default `Variable` value selecting its render variant.
@@ -88,54 +115,140 @@ export interface SmartObjectDefinition {
  */
 export const SMART_OBJECT_DEFINITIONS: SmartObjectDefinition[] = [
   {
-    id: 'closed-door',
-    baking: 'tile',
-    name: 'Closed door',
-    section: 'Doors',
-    set: [
-      {
-        bottomLayerTiles: [
-          { dRow: 1, dCol: 0, tile: 736 },
-          { dRow: 1, dCol: 1, tile: 737 },
-          { dRow: 0, dCol: 0, tile: 832 },
-          { dRow: 0, dCol: 1, tile: 833 },
-        ],
-        topLayerTiles: [],
-      },
-      {
-        bottomLayerTiles: [
-          { dRow: 0, dCol: 0, tile: 739 },
-          { dRow: 1, dCol: 0, tile: 755 },
-          { dRow: 0, dCol: 1, tile: 839 },
-          { dRow: 1, dCol: 1, tile: 855 },
-        ],
-        topLayerTiles: [],
-      },
-      {
-        bottomLayerTiles: [
-          { dRow: 0, dCol: 0, tile: 752 },
-          { dRow: 0, dCol: 1, tile: 753 },
-          { dRow: 1, dCol: 0, tile: 850 },
-          { dRow: 1, dCol: 1, tile: 851 },
-        ],
-        topLayerTiles: [],
-      },
-      {
-        bottomLayerTiles: [
-          { dRow: 0, dCol: 1, tile: 738 },
-          { dRow: 1, dCol: 1, tile: 754 },
-          { dRow: 0, dCol: 0, tile: 836 },
-          { dRow: 1, dCol: 0, tile: 852 },
-        ],
-        topLayerTiles: [],
-      },
-    ],
-  },
-  {
     id: 'door',
     baking: 'tile',
     name: 'Door',
     section: 'Doors',
+    subTypes: [
+      {
+        id: 'door',
+        name: 'Door',
+        set: [
+          {
+            bottomLayerTiles: [
+              { dRow: 0, dCol: 0, tile: 832 },
+              { dRow: 0, dCol: 1, tile: 833 },
+              { dRow: 1, dCol: 0, tile: 848 },
+              { dRow: 1, dCol: 1, tile: 849 },
+            ],
+            topLayerTiles: [],
+          },
+          {
+            bottomLayerTiles: [
+              { dRow: 0, dCol: 0, tile: 838 },
+              { dRow: 0, dCol: 1, tile: 839 },
+              { dRow: 1, dCol: 0, tile: 854 },
+              { dRow: 1, dCol: 1, tile: 855 },
+            ],
+            topLayerTiles: [],
+          },
+          {
+            bottomLayerTiles: [
+              { dRow: 0, dCol: 0, tile: 834 },
+              { dRow: 0, dCol: 1, tile: 835 },
+              { dRow: 1, dCol: 0, tile: 850 },
+              { dRow: 1, dCol: 1, tile: 851 },
+            ],
+            topLayerTiles: [],
+          },
+          {
+            bottomLayerTiles: [
+              { dRow: 0, dCol: 0, tile: 836 },
+              { dRow: 0, dCol: 1, tile: 837 },
+              { dRow: 1, dCol: 0, tile: 852 },
+              { dRow: 1, dCol: 1, tile: 853 },
+            ],
+            topLayerTiles: [],
+          },
+        ],
+      },
+      {
+        id: 'closed-door',
+        name: 'Closed door',
+        set: [
+          {
+            bottomLayerTiles: [
+              { dRow: 1, dCol: 0, tile: 736 },
+              { dRow: 1, dCol: 1, tile: 737 },
+              { dRow: 0, dCol: 0, tile: 832 },
+              { dRow: 0, dCol: 1, tile: 833 },
+            ],
+            topLayerTiles: [],
+          },
+          {
+            bottomLayerTiles: [
+              { dRow: 0, dCol: 0, tile: 739 },
+              { dRow: 1, dCol: 0, tile: 755 },
+              { dRow: 0, dCol: 1, tile: 839 },
+              { dRow: 1, dCol: 1, tile: 855 },
+            ],
+            topLayerTiles: [],
+          },
+          {
+            bottomLayerTiles: [
+              { dRow: 0, dCol: 0, tile: 752 },
+              { dRow: 0, dCol: 1, tile: 753 },
+              { dRow: 1, dCol: 0, tile: 850 },
+              { dRow: 1, dCol: 1, tile: 851 },
+            ],
+            topLayerTiles: [],
+          },
+          {
+            bottomLayerTiles: [
+              { dRow: 0, dCol: 1, tile: 738 },
+              { dRow: 1, dCol: 1, tile: 754 },
+              { dRow: 0, dCol: 0, tile: 836 },
+              { dRow: 1, dCol: 0, tile: 852 },
+            ],
+            topLayerTiles: [],
+          },
+        ],
+      },
+      {
+        id: 'key-door',
+        name: 'Key door',
+        set: [
+          {
+            bottomLayerTiles: [
+              { dRow: 0, dCol: 0, tile: 832 },
+              { dRow: 0, dCol: 1, tile: 833 },
+              { dRow: 1, dCol: 0, tile: 840 },
+              { dRow: 1, dCol: 1, tile: 841 },
+            ],
+            topLayerTiles: [],
+          },
+          {
+            bottomLayerTiles: [
+              { dRow: 0, dCol: 0, tile: 843 },
+              { dRow: 0, dCol: 1, tile: 839 },
+              { dRow: 1, dCol: 0, tile: 859 },
+              { dRow: 1, dCol: 1, tile: 855 },
+            ],
+            topLayerTiles: [],
+          },
+          {
+            bottomLayerTiles: [
+              { dRow: 0, dCol: 0, tile: 856 },
+              { dRow: 0, dCol: 1, tile: 857 },
+              { dRow: 1, dCol: 0, tile: 850 },
+              { dRow: 1, dCol: 1, tile: 851 },
+            ],
+            topLayerTiles: [],
+          },
+          {
+            bottomLayerTiles: [
+              { dRow: 0, dCol: 0, tile: 836 },
+              { dRow: 0, dCol: 1, tile: 842 },
+              { dRow: 1, dCol: 0, tile: 852 },
+              { dRow: 1, dCol: 1, tile: 858 },
+            ],
+            topLayerTiles: [],
+          },
+        ],
+      },
+    ],
+    // `set` mirrors the default sub-type ("door"); kept for callers that only
+    // read `set` (hit-testing bounds, toolbox preview).
     set: [
       {
         bottomLayerTiles: [
@@ -170,50 +283,6 @@ export const SMART_OBJECT_DEFINITIONS: SmartObjectDefinition[] = [
           { dRow: 0, dCol: 1, tile: 837 },
           { dRow: 1, dCol: 0, tile: 852 },
           { dRow: 1, dCol: 1, tile: 853 },
-        ],
-        topLayerTiles: [],
-      },
-    ],
-  },
-  {
-    id: 'key-door',
-    baking: 'tile',
-    name: 'Key door',
-    section: 'Doors',
-    set: [
-      {
-        bottomLayerTiles: [
-          { dRow: 0, dCol: 0, tile: 832 },
-          { dRow: 0, dCol: 1, tile: 833 },
-          { dRow: 1, dCol: 0, tile: 840 },
-          { dRow: 1, dCol: 1, tile: 841 },
-        ],
-        topLayerTiles: [],
-      },
-      {
-        bottomLayerTiles: [
-          { dRow: 0, dCol: 0, tile: 843 },
-          { dRow: 0, dCol: 1, tile: 839 },
-          { dRow: 1, dCol: 0, tile: 859 },
-          { dRow: 1, dCol: 1, tile: 855 },
-        ],
-        topLayerTiles: [],
-      },
-      {
-        bottomLayerTiles: [
-          { dRow: 0, dCol: 0, tile: 856 },
-          { dRow: 0, dCol: 1, tile: 857 },
-          { dRow: 1, dCol: 0, tile: 850 },
-          { dRow: 1, dCol: 1, tile: 851 },
-        ],
-        topLayerTiles: [],
-      },
-      {
-        bottomLayerTiles: [
-          { dRow: 0, dCol: 0, tile: 836 },
-          { dRow: 0, dCol: 1, tile: 842 },
-          { dRow: 1, dCol: 0, tile: 852 },
-          { dRow: 1, dCol: 1, tile: 858 },
         ],
         topLayerTiles: [],
       },
@@ -769,10 +838,51 @@ export function registerActorSmartObjects(definitions: SmartObjectDefinition[]):
   }
 }
 
+/**
+ * Legacy definition ids that were merged into another definition's `subTypes`.
+ * Old saved rooms still reference these ids, so they resolve to the merged
+ * definition plus the sub-type index to use.
+ */
+const LEGACY_SUBTYPE_IDS: Record<string, { id: string; subTypeIndex: number }> = {
+  'closed-door': { id: 'door', subTypeIndex: 1 },
+  'key-door': { id: 'door', subTypeIndex: 2 },
+};
+
 /** Looks up a smart-object definition by id (static catalog then actor-baked). */
 export function findSmartObjectDefinition(id: string): SmartObjectDefinition | undefined {
-  return (
+  const direct =
     SMART_OBJECT_DEFINITIONS.find((definition) => definition.id === id) ??
-    ACTOR_SMART_OBJECTS.get(id)
-  );
+    ACTOR_SMART_OBJECTS.get(id);
+  if (direct) {
+    return direct;
+  }
+  // A legacy id merged into another definition's sub-types.
+  const legacy = LEGACY_SUBTYPE_IDS[id];
+  if (legacy) {
+    return SMART_OBJECT_DEFINITIONS.find((definition) => definition.id === legacy.id);
+  }
+  return undefined;
+}
+
+/**
+ * Resolves the sub-type a placement uses: the sub-type index recorded on the
+ * placement, or the one implied by a legacy definition id.
+ */
+export function resolveSubTypeIndex(id: string, subTypeIndex: number | undefined): number {
+  if (subTypeIndex !== undefined) {
+    return subTypeIndex;
+  }
+  return LEGACY_SUBTYPE_IDS[id]?.subTypeIndex ?? 0;
+}
+
+/**
+ * The variants a definition stamps for a given sub-type: the sub-type's `set`
+ * when the definition has sub-types, otherwise the definition's own `set`.
+ */
+export function variantsForSubType(
+  definition: SmartObjectDefinition,
+  subTypeIndex = 0,
+): SmartObjectVariant[] {
+  const subType = definition.subTypes?.[subTypeIndex];
+  return subType?.set ?? definition.set;
 }

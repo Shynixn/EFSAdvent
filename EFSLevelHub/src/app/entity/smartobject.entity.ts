@@ -21,16 +21,20 @@ import {
   SmartObjectDefinition,
   SmartObjectTileOffset,
   SmartObjectVariant,
+  variantsForSubType,
 } from './smartobject.definition';
 
 export {
   SMART_OBJECT_DEFINITIONS,
   findSmartObjectDefinition,
   registerActorSmartObjects,
+  resolveSubTypeIndex,
+  variantsForSubType,
 } from './smartobject.definition';
 export type {
   SmartObjectDefinition,
   SmartObjectSection,
+  SmartObjectSubType,
   SmartObjectTileOffset,
   SmartObjectBaking,
   SmartObjectVariant,
@@ -40,12 +44,17 @@ export type {
  * Returns the variant (rotation style) a definition uses for the given index,
  * falling back to the first variant (the default, e.g. north for a door) when
  * the index is missing or out of range.
+ *
+ * When the placement selects a sub-type (e.g. a door's closed/key style) the
+ * sub-type's own variant list is used.
  */
 export function smartObjectVariant(
   definition: SmartObjectDefinition,
   variantIndex = 0,
+  subTypeIndex = 0,
 ): SmartObjectVariant {
-  return definition.set[variantIndex] ?? definition.set[0];
+  const set = variantsForSubType(definition, subTypeIndex);
+  return set[variantIndex] ?? set[0];
 }
 
 /** A tile coordinate recorded for a placed smart object (absolute, in-room). */
@@ -71,6 +80,12 @@ export interface SmartObjectPlacement {
    * was stamped. Defaults to 0 (the object's default rotation, e.g. north).
    */
   variantIndex?: number;
+  /**
+   * Index of the definition's {@link SmartObjectSubType} selected for this
+   * placement (e.g. a door's door / closed-door / key-door style). Defaults to
+   * 0 when the definition has no sub-types.
+   */
+  subTypeIndex?: number;
   /**
    * Base layer the object was placed on (0-7). Its paired top layer is
    * `baseLayerId + 8`. Recorded so the object can be resolved, moved or
@@ -108,6 +123,16 @@ export interface SmartObjectPlacement {
    */
   halfTileDx?: number;
   halfTileDy?: number;
+  /**
+   * For a door that is the **target** of a connection: the source door's tile
+   * position (its anchor + base layer). The source door owns the `WARP` child
+   * that points here, so this back-reference lets the target be selected/moved
+   * too — when it moves, the source's warp destination is re-pointed at its new
+   * anchor (see `RoomPage.onPlacementUpdated`).
+   *
+   * `undefined` on doors that are not a connection target.
+   */
+  connectedFrom?: { row: number; col: number; layer: number };
 }
 
 /**
@@ -148,11 +173,13 @@ export function applySmartObject(
   layers: SmartObjectTargetLayer[],
   baseLayerIndex = 0,
   variantIndex = 0,
+  subTypeIndex = 0,
 ): SmartObjectPlacement {
-  const variant = smartObjectVariant(definition, variantIndex);
+  const variant = smartObjectVariant(definition, variantIndex, subTypeIndex);
   const placement: SmartObjectPlacement = {
     id: definition.id,
     variantIndex,
+    subTypeIndex,
     baseLayerId: baseLayerIndex,
     anchorRow,
     anchorCol,
@@ -232,8 +259,9 @@ export const WARP_ACTOR_ID = 'WARP';
  * - byte 3 (bits 16-23) — destination tile **X** (0 = the actor's own tile),
  * - byte 4 bits 0-2     — destination base layer (0-7).
  *
- * Coordinates are stored in the same units as the actor (`variableByte *
- * ACTOR_PIXELS_PER_COORDINATE`, i.e. half-tiles where the tile is `value / 2`).
+ * The destination bytes hold **tile** coordinates (the game draws the marker at
+ * `byte * ACTOR_PIXELS_PER_COORDINATE` = `byte * 8` px = `byte` tiles — see
+ * EFSAdvent's `DrawActor`), NOT the actor's half-tile units.
  */
 export interface WarpLink {
   /** Starting tile (the warp actor's anchor tile). */
@@ -280,11 +308,12 @@ export function warpLinks(actors: readonly ActorData[]): WarpLink[] {
     const { b1, b2, b3, b4 } = actorVariableBytes(actor.Variable);
     const isZero = b2 === 0 && b3 === 0;
     // Actor X/Y are HALF-TILES where the tile is `value / 2`; the destination
-    // bytes are in the same half-tile unit when non-zero.
+    // bytes hold TILE coordinates directly (the game draws the marker at
+    // `byte * 8` px = `byte` tiles).
     const fromRow = Math.floor(actor.Y / 2);
     const fromCol = Math.floor(actor.X / 2);
-    const toRow = isZero ? fromRow : b2 / 2;
-    const toCol = isZero ? fromCol : b3 / 2;
+    const toRow = isZero ? fromRow : b2;
+    const toCol = isZero ? fromCol : b3;
     links.push({
       fromRow,
       fromCol,
@@ -358,8 +387,8 @@ export function withChildren(
  *
  * The actor's `Variable` packs the destination (see {@link WarpLink}):
  * `type | destY<<8 | destX<<16 | destLayer<<24` where the destination tile
- * coordinates are stored in **half-tiles** (`tile * 2`), matching the actor
- * coordinate space.
+ * coordinates are stored as **tiles** (the game's own convention — it draws the
+ * marker at `byte * 8` px = `byte` tiles).
  *
  * @param sourceLayer  Base layer the source door (and thus the warp) sits on.
  * @param sourceRow    Source door's anchor tile row (the warp's base position).
@@ -384,8 +413,8 @@ export function createWarpChild(
 ): SmartObjectPlacement {
   const variable =
     ((type & 0xff) |
-      (((destRow * 2) & 0xff) << 8) |
-      (((destCol * 2) & 0xff) << 16) |
+      ((destRow & 0xff) << 8) |
+      ((destCol & 0xff) << 16) |
       ((destLayer & 0x07) << 24)) >>>
     0;
   const warp: SmartObjectPlacement = {
@@ -419,7 +448,32 @@ export function warpChildDestination(
   if (b2 === 0 && b3 === 0) {
     return null;
   }
-  return { row: b2 / 2, col: b3 / 2, layer: b4 & 0x07 };
+  return { row: b2, col: b3, layer: b4 & 0x07 };
+}
+
+/**
+ * Returns a copy of a `WARP` child whose destination is re-pointed at a new
+ * tile + layer, keeping its type byte (and the actor's own anchor) unchanged.
+ * Used when the connected **target** door moves: the source door's warp must
+ * follow it. A non-warp placement is returned unchanged.
+ */
+export function repointWarpChild(
+  placement: SmartObjectPlacement,
+  destRow: number,
+  destCol: number,
+  destLayer: number,
+): SmartObjectPlacement {
+  if (placement.id !== WARP_ACTOR_ID) {
+    return placement;
+  }
+  const { b1 } = actorVariableBytes(placement.actorVariable ?? 0);
+  const variable =
+    ((b1 & 0xff) |
+      ((destRow & 0xff) << 8) |
+      ((destCol & 0xff) << 16) |
+      ((destLayer & 0x07) << 24)) >>>
+    0;
+  return { ...placement, actorVariable: variable };
 }
 
 /**
@@ -429,6 +483,7 @@ export function warpChildDestination(
 export function smartObjectBounds(
   definition: SmartObjectDefinition,
   variantIndex = 0,
+  subTypeIndex = 0,
 ): {
   minRow: number;
   minCol: number;
@@ -437,7 +492,7 @@ export function smartObjectBounds(
   rows: number;
   cols: number;
 } {
-  const variant = smartObjectVariant(definition, variantIndex);
+  const variant = smartObjectVariant(definition, variantIndex, subTypeIndex);
   const all = [...variant.bottomLayerTiles, ...variant.topLayerTiles];
   let minRow = 0;
   let minCol = 0;
