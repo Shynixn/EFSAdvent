@@ -142,6 +142,17 @@ export class RoomPage implements OnInit, OnDestroy {
   readonly smartObjects = signal<SmartObjectPlacement[]>([]);
 
   /**
+   * Actors found in the room's archive (`room.Actors`) that are **not** recorded
+   * in the room's `smartObjects` entry — i.e. actors that predate the editor and
+   * have never been touched here.
+   *
+   * They are drawn with a red border so they stand out from editor-placed
+   * objects, and are injected into {@link smartObjects} (and thus the stage JSON)
+   * as soon as the room is loaded, so no actor is silently lost.
+   */
+  readonly legacyActors = signal<SmartObjectPlacement[]>([]);
+
+  /**
    * The actor records for this room, derived from the actor-baked placements in
    * {@link smartObjects}. Written to the archive's `d_enemy_map*.bin` on save.
    */
@@ -413,13 +424,35 @@ export class RoomPage implements OnInit, OnDestroy {
       // A room's placements come from two sources with a clear split:
       //  - tile-baked objects (decorations) from the stage JSON, and
       //  - actor-baked objects (enemies) from the ARCHIVE's enemy list.
-      // Enemies are also mirrored into the JSON for readability, so drop any
-      // actor-baked entry that came from the JSON to avoid duplicating them.
-      const tilePlacements = (record?.smartObjects ?? []).filter(
+      // Everything the editor recorded (both kinds) lives in the room's
+      // `smartObjects` entry, so actors already in the archive that are NOT in
+      // that list are "legacy" actors: they predate the editor (or were added by
+      // another tool). They are surfaced separately AND injected into
+      // `smartObjects` below, so the room ends up with a single, truthful list.
+      const recordedPlacements = record?.smartObjects ?? [];
+      const recordedActors = recordedPlacements.filter(
+        (placement) => findSmartObjectDefinition(placement.id)?.baking === 'actor',
+      );
+      const tilePlacements = recordedPlacements.filter(
         (placement) => findSmartObjectDefinition(placement.id)?.baking !== 'actor',
       );
-      const actorPlacements = (room.Actors ?? []).map((actor) => actorToPlacement(actor));
-      this.smartObjects.set([...tilePlacements, ...actorPlacements]);
+
+      const archiveActors = (room.Actors ?? []).map((actor) => actorToPlacement(actor));
+      // A legacy actor is one whose id+anchor is not already recorded.
+      const isRecorded = (placement: SmartObjectPlacement): boolean =>
+        recordedActors.some(
+          (recorded) =>
+            recorded.id === placement.id &&
+            recorded.anchorRow === placement.anchorRow &&
+            recorded.anchorCol === placement.anchorCol &&
+            (recorded.baseLayerId ?? 0) === (placement.baseLayerId ?? 0),
+        );
+      const legacy = archiveActors.filter((placement) => !isRecorded(placement));
+
+      // The SAME placement objects are used for both lists, so the canvas can
+      // identify a legacy actor by identity (`legacyActors.includes(p)`).
+      this.legacyActors.set(legacy);
+      this.smartObjects.set([...tilePlacements, ...recordedActors, ...legacy]);
       this.groundLayers.set((record?.ground ?? []).map((layer) => ({ ...layer })));
 
       // Load the sprite sheets/thumbnails first, then the placable enemy catalog
@@ -431,6 +464,14 @@ export class RoomPage implements OnInit, OnDestroy {
 
       // Show the stage's current definition file in the System column.
       this.stageFile.set(await this.stageService.getStageFile(stageId));
+
+      // Inject any legacy actors (archive actors not previously recorded) into
+      // the room's `smartObjects` entry right away, so the stage JSON becomes the
+      // single source of truth for every actor in the room.
+      if (legacy.length > 0 && grid) {
+        await this.persistRoomRecord(stageId, grid);
+        this.stageFile.set(await this.stageService.getStageFile(stageId));
+      }
 
       // Register this room as an open tab and mark the stage active so the side
       // nav highlights it and the stage page's save picks up the edits.
@@ -537,6 +578,7 @@ export class RoomPage implements OnInit, OnDestroy {
   clearRoomData(): void {
     this.stageEditor.setDirty(this.stageId(), true);
     this.smartObjects.set([]);
+    this.legacyActors.set([]);
     this.groundLayers.set([]);
   }
 
@@ -576,9 +618,7 @@ export class RoomPage implements OnInit, OnDestroy {
       this.stageRoom.markLayerDirty(this.roomIndex(), base);
       this.stageRoom.markLayerDirty(this.roomIndex(), base + 8);
     }
-    this.smartObjects.update((list) =>
-      list.map((placement) => (placement === event.from ? event.to : placement)),
-    );
+    this.replacePlacement(event.from, event.to);
   }
 
   /**
@@ -591,8 +631,18 @@ export class RoomPage implements OnInit, OnDestroy {
     const base = event.to.baseLayerId;
     this.stageRoom.markLayerDirty(this.roomIndex(), base);
     this.stageRoom.markLayerDirty(this.roomIndex(), base + 8);
-    this.smartObjects.update((list) =>
-      list.map((placement) => (placement === event.from ? event.to : placement)),
+    this.replacePlacement(event.from, event.to);
+  }
+
+  /**
+   * Swaps a placement for its updated copy in both {@link smartObjects} and
+   * {@link legacyActors}, so a moved/rotated **legacy** actor keeps its red
+   * border (identity is how the canvas recognises it).
+   */
+  private replacePlacement(from: SmartObjectPlacement, to: SmartObjectPlacement): void {
+    this.smartObjects.update((list) => list.map((placement) => (placement === from ? to : placement)));
+    this.legacyActors.update((list) =>
+      list.map((placement) => (placement === from ? to : placement)),
     );
   }
 
@@ -611,6 +661,7 @@ export class RoomPage implements OnInit, OnDestroy {
       this.stageRoom.markLayerDirty(this.roomIndex(), base + 8);
     }
     this.smartObjects.update((list) => list.filter((entry) => entry !== placement));
+    this.legacyActors.update((list) => list.filter((entry) => entry !== placement));
   }
 
   /** Loads the placable enemy catalog (actor-baked smart objects) once. */
@@ -658,6 +709,31 @@ export class RoomPage implements OnInit, OnDestroy {
     } catch (error) {
       this.logger.warn('RoomPage: failed to load actor sprites', error);
     }
+  }
+
+  /**
+   * Writes this room's in-memory `smartObjects` + ground into the stage JSON.
+   *
+   * `smartObjects` is the single authoritative placement list (decorations,
+   * enemies and any legacy actors injected on load), so this is the only place
+   * the room record is persisted — used by both the initial legacy injection and
+   * {@link save}.
+   */
+  private async persistRoomRecord(
+    stageId: string,
+    grid: { row: number; col: number },
+  ): Promise<void> {
+    const ground = this.groundLayers().filter(
+      (layer) =>
+        layer.bottomLayerTiles.some((t) => t !== 0) || layer.topLayerTiles.some((t) => t !== 0),
+    );
+    await this.stageService.saveRoomSmartObjects(
+      stageId,
+      grid.row,
+      grid.col,
+      this.smartObjects(),
+      ground,
+    );
   }
 
   /**
@@ -875,20 +951,7 @@ export class RoomPage implements OnInit, OnDestroy {
       // each other).
       const grid = this.roomGridPosition();
       if (grid) {
-        const ground = this.groundLayers().filter(
-          (layer) =>
-            layer.bottomLayerTiles.some((t) => t !== 0) || layer.topLayerTiles.some((t) => t !== 0),
-        );
-        await this.stageService.saveRoomSmartObjects(
-          id,
-          grid.row,
-          grid.col,
-          // All placements go in the stage JSON — enemies included. They are also
-          // written to the archive's enemy list below (syncRoomActors), so the
-          // room keeps one authoritative placement list.
-          this.smartObjects(),
-          ground,
-        );
+        await this.persistRoomRecord(id, grid);
       }
 
       // Refresh the displayed stage JSON now that it has been rewritten.

@@ -107,6 +107,9 @@ export class RoomLayersComponent implements AfterViewInit, OnDestroy {
     queueMicrotask(() => this.drawWarpOverlay());
   }
 
+  /** Actor placements that mark pre-existing (legacy) actors — red-bordered. */
+  @Input() legacyActors: SmartObjectPlacement[] = [];
+
   private _groundLayers: GroundLayer[] = [];
   /** Ground layers painted in this room (drawn under each base layer's tiles). */
   @Input()

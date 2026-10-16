@@ -194,6 +194,15 @@ export class RoomCanvasComponent implements AfterViewInit {
   }
 
   /**
+   * Actor placements that represent **pre-existing (legacy) actors** — actors
+   * found in the room's archive that were not recorded by the editor.
+   *
+   * They are the only actors drawn with a red border; editor-placed objects show
+   * nothing until hovered (a black dotted outline).
+   */
+  @Input() legacyActors: SmartObjectPlacement[] = [];
+
+  /**
    * The actor-baked placements in this room, as {@link ActorData} records —
    * derived from {@link smartObjects} so enemies need no separate input.
    *
@@ -217,15 +226,22 @@ export class RoomCanvasComponent implements AfterViewInit {
   }
 
   /**
-   * Actor-baked placements on this canvas's base layer (`layerIndex`) that draw
-   * a sprite — used for actor markers. Actors on other base layers belong to
-   * their own section, and {@link HIDDEN_ACTOR_MARKERS} actors (which render
-   * nothing) are excluded.
+   * **Legacy** actor placements on this canvas's base layer (`layerIndex`) that
+   * draw a sprite — the only actors marked with a red border.
+   *
+   * Actors on other base layers belong to their own section, and
+   * {@link HIDDEN_ACTOR_MARKERS} actors (which render nothing) are excluded.
+   * Editor-placed objects are intentionally NOT marked; they show only the
+   * hover outline.
    */
-  private actorsOnActiveLayer(): SmartObjectPlacement[] {
+  private legacyActorsOnLayer(): SmartObjectPlacement[] {
     const draggingSource = this.dragging?.source ?? null;
+    const legacy = new Set(this.legacyActors);
     return this._smartObjects.filter((placement) => {
-      if (placement === draggingSource || HIDDEN_ACTOR_MARKERS.has(placement.id)) {
+      if (placement === draggingSource || !legacy.has(placement)) {
+        return false;
+      }
+      if (HIDDEN_ACTOR_MARKERS.has(placement.id)) {
         return false;
       }
       const definition = findSmartObjectDefinition(placement.id);
@@ -982,10 +998,10 @@ export class RoomCanvasComponent implements AfterViewInit {
       return;
     }
 
-    // Red markers for every actor **on this layer** — actors on other layers are
-    // drawn in their own section, and invisible actors get no marker.
+    // Red markers for **legacy** actors on this layer only — editor-placed
+    // objects show nothing until hovered.
     if (this.showMarkers) {
-      for (const placement of this.actorsOnActiveLayer()) {
+      for (const placement of this.legacyActorsOnLayer()) {
         const box = this.actorBox(placement);
         this.strokeOutline(ctx, box.x, box.y, box.width, box.height, {
           color: '#ef4444',
@@ -1080,11 +1096,10 @@ export class RoomCanvasComponent implements AfterViewInit {
     }
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Keep the red actor markers visible while dragging (the dragged actor is
-    // excluded — its ghost follows the cursor instead). Only actors on the
-    // active base layer are marked, matching the resting view.
+    // Keep the red legacy-actor markers visible while dragging (the dragged
+    // actor is excluded — its ghost follows the cursor instead).
     if (this.showMarkers) {
-      for (const placement of this.actorsOnActiveLayer()) {
+      for (const placement of this.legacyActorsOnLayer()) {
         const box = this.actorBox(placement);
         this.strokeOutline(ctx, box.x, box.y, box.width, box.height, {
           color: '#ef4444',
