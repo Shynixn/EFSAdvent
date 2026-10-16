@@ -257,6 +257,13 @@ export class ToolboxColumnComponent implements AfterViewInit {
         }
         canvas.width = buffer.width;
         canvas.height = buffer.height;
+
+        // Scale the bitmap to FIT the 64px-thumbnail box (preserving aspect),
+        // so small sprites are enlarged and large ones shrunk without warp.
+        const scale = Math.min(64 / buffer.width, 64 / buffer.height);
+        canvas.style.width = `${Math.round(buffer.width * scale)}px`;
+        canvas.style.height = `${Math.round(buffer.height * scale)}px`;
+
         const ctx = canvas.getContext('2d');
         if (!ctx) {
           continue;

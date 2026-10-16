@@ -26,6 +26,16 @@ import {
 } from './gba-tile-renderer';
 import { SpriteRenderer, TilesetRenderer, parseSob } from './gba-sprite-renderer';
 
+/** Whether an image buffer has any non-transparent pixel. */
+function hasAlpha(buffer: ImageBuffer): boolean {
+  for (let i = 3; i < buffer.pixels.length; i += 4) {
+    if (buffer.pixels[i] > 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /** Render toggles, mirroring `FSALib.Rendering.RenderOptions`. */
 export enum RenderOptions {
   Nothing = 0,
@@ -378,6 +388,44 @@ export class StageRenderer {
   }
 
   /**
+   * Whether an actor's graphics actually exist in **this stage's** resources, so
+   * a placed actor would draw something.
+   *
+   * Sprite parts and BTI textures live in the stage archive, so an actor can be
+   * known to the catalog yet have no drawable graphics here (e.g. a boss whose
+   * sprite sheet is not part of this stage). Used by the toolbox to hide such
+   * actors instead of offering a blank entry.
+   *
+   * @param id       Actor id (4 characters).
+   * @param variable Actor variable value selecting the render variant.
+   * @param gba      Check the GBA sprite sheet.
+   */
+  canRenderActor(id: string, variable = 0, gba = false): boolean {
+    const variants = this.resolveVariants(id, variable);
+    if (variants.length === 0) {
+      return false;
+    }
+    for (const variant of variants) {
+      if (variant.SpriteIndex !== -1) {
+        const rendered = (gba ? this.spriteGBA : this.spriteTV).renderSpriteToBuffer(
+          variant.SpriteIndex,
+          variant.SpriteListIndex,
+          variant.ReplacementPaletteIndex,
+          variant.TargetPaletteIndex,
+        );
+        if (rendered && hasAlpha(rendered.buffer)) {
+          return true;
+        }
+        continue;
+      }
+      if (variant.BtiFile && this.images.has(variant.BtiFile)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
    * Draws a single actor at a pixel offset (used by the room editor to overlay
    * actors on the layer canvas). Coordinates are pixels, not half-tiles.
    *
@@ -386,8 +434,17 @@ export class StageRenderer {
    * @param gba        Draw the GBA variant (layer level 1) instead of the TV one.
    * @param offsetX    Extra pixel offset applied after the actor's own position.
    * @param offsetY    Extra pixel offset applied after the actor's own position.
+   * @param additiveBti Blend BTI textures additively (I4 "light" textures, as the
+   *                   room render does) instead of normally.
    */
-  drawActorAt(target: ImageBuffer, actor: ActorData, gba = false, offsetX = 0, offsetY = 0): void {
+  drawActorAt(
+    target: ImageBuffer,
+    actor: ActorData,
+    gba = false,
+    offsetX = 0,
+    offsetY = 0,
+    additiveBti = false,
+  ): void {
     const renderer = gba ? this.spriteGBA : this.spriteTV;
     const variants = this.resolveVariants(actor.Id, actor.Variable);
     if (variants.length === 0) {
@@ -403,10 +460,34 @@ export class StageRenderer {
     //   i.e. (X*8 - width/2, Y*8 - height/2).
     for (const variant of variants) {
       if (variant.SpriteIndex !== -1) {
+        const drawX = actor.X * 8 + variant.XOffset + offsetX;
+        const drawY = actor.Y * 8 + variant.YOffset + offsetY;
+        const scaled = variant.XScale !== 1 || variant.YScale !== 1;
+        if (scaled) {
+          // Scaled sprites (e.g. the 2× "big" Chief Soldier variant) are drawn
+          // through a scratch buffer, then blitted enlarged. Mirrors the game's
+          // transform path.
+          const rendered = renderer.renderSpriteToBuffer(
+            variant.SpriteIndex,
+            variant.SpriteListIndex,
+            variant.ReplacementPaletteIndex,
+            variant.TargetPaletteIndex,
+          );
+          if (rendered) {
+            target.blendScaledFrom(
+              rendered.buffer,
+              drawX + Math.round(rendered.originX * variant.XScale),
+              drawY + Math.round(rendered.originY * variant.YScale),
+              variant.XScale,
+              variant.YScale,
+            );
+          }
+          continue;
+        }
         renderer.drawSprite(
           target,
-          actor.X * 8 + variant.XOffset + offsetX,
-          actor.Y * 8 + variant.YOffset + offsetY,
+          drawX,
+          drawY,
           variant.SpriteIndex,
           variant.SpriteListIndex,
           variant.ReplacementPaletteIndex,
@@ -420,7 +501,11 @@ export class StageRenderer {
       }
       const drawX = actor.X * 8 - Math.floor(image.width / 2) + variant.XOffset + offsetX;
       const drawY = actor.Y * 8 - Math.floor(image.height / 2) + variant.YOffset + offsetY;
-      target.blendFrom(image, drawX, drawY);
+      if (additiveBti && this.isLightTexture(variant.BtiFile)) {
+        target.addFrom(image, drawX, drawY, 0.6);
+      } else {
+        target.blendFrom(image, drawX, drawY);
+      }
     }
   }
 
@@ -465,11 +550,14 @@ export class StageRenderer {
         if (!bounds) {
           continue;
         }
+        // Scale the sprite's footprint (the variant may enlarge it, e.g. 2×).
+        const w = Math.max(1, bounds.maxX - bounds.minX) * variant.XScale;
+        const h = Math.max(1, bounds.maxY - bounds.minY) * variant.YScale;
         include(
-          actor.X * 8 + variant.XOffset + bounds.minX,
-          actor.Y * 8 + variant.YOffset + bounds.minY,
-          Math.max(1, bounds.maxX - bounds.minX),
-          Math.max(1, bounds.maxY - bounds.minY),
+          actor.X * 8 + variant.XOffset + bounds.minX * variant.XScale,
+          actor.Y * 8 + variant.YOffset + bounds.minY * variant.YScale,
+          w,
+          h,
         );
         continue;
       }
@@ -477,11 +565,13 @@ export class StageRenderer {
       if (!image) {
         continue;
       }
+      const w = image.width * variant.XScale;
+      const h = image.height * variant.YScale;
       include(
-        actor.X * 8 - Math.floor(image.width / 2) + variant.XOffset,
-        actor.Y * 8 - Math.floor(image.height / 2) + variant.YOffset,
-        image.width,
-        image.height,
+        actor.X * 8 - Math.floor(w / 2) + variant.XOffset,
+        actor.Y * 8 - Math.floor(h / 2) + variant.YOffset,
+        w,
+        h,
       );
     }
 
@@ -513,24 +603,39 @@ export class StageRenderer {
     height = 32,
     gba = false,
   ): ImageBuffer | null {
-    const variant = this.resolveVariant(id, variable);
-    if (!variant) {
+    const variants = this.resolveVariants(id, variable);
+    if (variants.length === 0) {
       return null;
     }
-    const buffer = new ImageBuffer(width, height);
+
+    // Measure the sprite relative to an arbitrary origin, then compute the
+    // output size and the origin that centres the sprite's real footprint. This
+    // keeps large / offset sprites (bigger than one tile, or with negative
+    // attribute offsets) fully framed instead of clipped or pushed off-centre.
+    const measure = this.actorBounds({ Id: id, Layer: 0, X: 0, Y: 0, Variable: variable }, gba);
+    const spriteW = measure?.width ?? 16;
+    const spriteH = measure?.height ?? 16;
+    const outW = Math.max(width, spriteW);
+    const outH = Math.max(height, spriteH);
+
+    // With origin (0,0) the sprite occupies [measure.x, measure.x + spriteW).
+    // Shift the actor so that box is centred in the buffer. Rounded to whole
+    // pixels: the renderer writes at integer coordinates.
+    const targetMinX = Math.round((outW - spriteW) / 2);
+    const targetMinY = Math.round((outH - spriteH) / 2);
+    const deltaX = targetMinX - (measure?.x ?? 0);
+    const deltaY = targetMinY - (measure?.y ?? 0);
+
+    const buffer = new ImageBuffer(outW, outH);
     buffer.fill(0, 0, 0, 0);
-    // Actor sprites are anchored at the bottom-centre of their 16px cell; a
-    // plain 16px/+8px offset keeps them roughly centred in the preview.
+    // Draw at origin (0,0) and use the pixel offset args for the exact shift, so
+    // odd-sized sprites are centred without rounding to whole half-tiles.
     this.drawActorAt(
       buffer,
-      {
-        Id: id,
-        Layer: 0,
-        X: Math.round(width / 16),
-        Y: Math.round(height / 16),
-        Variable: variable,
-      },
+      { Id: id, Layer: 0, X: 0, Y: 0, Variable: variable },
       gba,
+      deltaX,
+      deltaY,
     );
     return buffer;
   }
@@ -583,43 +688,11 @@ export class StageRenderer {
     if (id.length < 4) {
       return;
     }
-
-    const actorOffsetX = actor.X * 8;
-    const actorOffsetY = actor.Y * 8;
-    const renderer = layerLevel === 0 ? this.spriteTV : this.spriteGBA;
-    const variant = this.resolveVariant(id, actor.Variable);
-    if (!variant) {
-      return;
-    }
-
-    if (variant.SpriteIndex !== undefined && variant.SpriteIndex !== -1) {
-      renderer.drawSprite(
-        target,
-        actorOffsetX + variant.XOffset,
-        actorOffsetY + variant.YOffset,
-        variant.SpriteIndex,
-        variant.SpriteListIndex,
-        variant.ReplacementPaletteIndex,
-        variant.TargetPaletteIndex,
-      );
-      return;
-    }
-
-    // BTI-rendered actor (TV layer only in the C# renderer).
-    if (layerLevel !== 0 || !variant.BtiFile) {
-      return;
-    }
-    const image = this.images.get(variant.BtiFile);
-    if (!image) {
-      return;
-    }
-    const drawX = actorOffsetX + variant.XOffset - Math.floor(image.width / 2);
-    const drawY = actorOffsetY + variant.YOffset - Math.floor(image.height / 2);
-    if (this.isLightTexture(variant.BtiFile)) {
-      target.addFrom(image, drawX, drawY, 0.6);
-    } else {
-      target.blendFrom(image, drawX, drawY);
-    }
+    // Delegate to the shared editor path so the room render and the room editor
+    // agree: it draws every variant of the resolved key and honours variant
+    // scale. The only room-render extra is additive blending for I4 light
+    // textures (handled inside `drawActorAt` via `additiveBti`).
+    this.drawActorAt(target, actor, layerLevel !== 0, 0, 0, true);
   }
 
   /**

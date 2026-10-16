@@ -321,6 +321,12 @@ export class RoomCanvasComponent implements AfterViewInit {
   /** True while a smart object is being dragged with the hand tool. */
   readonly draggingObject = signal(false);
 
+  /**
+   * True while an incompatible item (a `noGBASprite` actor) is dragged over this
+   * GBA layer, so the canvas shows a "not allowed" X and rejects the drop.
+   */
+  readonly dragNotAllowed = signal(false);
+
   /** Smart object currently hovered by the pointer (for its boundary outline). */
   private hoveredPlacement: SmartObjectPlacement | null = null;
 
@@ -699,6 +705,17 @@ export class RoomCanvasComponent implements AfterViewInit {
     if (!event.dataTransfer?.types.includes('application/x-smart-object')) {
       return;
     }
+    // Reject incompatible actors (no GBA sprite) on GBA layers: no drop, no
+    // preview, and a "not allowed" indicator instead.
+    if (this.dragBlockedHere()) {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'none';
+      this.dragging = null;
+      this.clearPreview();
+      this.dragNotAllowed.set(true);
+      return;
+    }
+    this.dragNotAllowed.set(false);
     event.preventDefault();
     event.dataTransfer.dropEffect = 'copy';
 
@@ -736,6 +753,22 @@ export class RoomCanvasComponent implements AfterViewInit {
       this.dragging = null;
       this.clearPreview();
     }
+    this.dragNotAllowed.set(false);
+  }
+
+  /**
+   * Whether the actor being dragged (if any) cannot be placed on this layer.
+   *
+   * Actors flagged `noGBASprite` only exist on the TV layer (base layer 0);
+   * dropping one on a GBA layer (base layer 1-7) would place an actor the game
+   * cannot draw there, so the drag is rejected with a "not allowed" indicator.
+   */
+  private dragBlockedHere(): boolean {
+    if (this.layerIndex === 0) {
+      return false;
+    }
+    const definition = this.dragService.definition();
+    return definition?.baking === 'actor' && definition.noGBASprite === true;
   }
 
   /**
@@ -744,13 +777,26 @@ export class RoomCanvasComponent implements AfterViewInit {
    * resulting placement so the host can record it in the stage JSON.
    */
   onDrop(event: DragEvent): void {
+    const room = this.room;
+    const dragging = this.dragging;
+    if (!room) {
+      return;
+    }
+    // Reject the drop when the actor cannot exist on this layer (dragBlockedHere
+    // already showed the not-allowed indicator during dragover).
+    if (this.dragBlockedHere()) {
+      event.preventDefault();
+      this.dragService.clear();
+      this.dragging = null;
+      this.dragNotAllowed.set(false);
+      this.clearPreview();
+      return;
+    }
     const id =
       event.dataTransfer?.getData('application/x-smart-object') ??
       this.dragging?.definition.id ??
       this.dragService.definition()?.id;
-    const room = this.room;
-    const dragging = this.dragging;
-    if (!id || !room) {
+    if (!id) {
       return;
     }
     event.preventDefault();

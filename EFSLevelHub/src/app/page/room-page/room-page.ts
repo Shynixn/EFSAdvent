@@ -422,11 +422,12 @@ export class RoomPage implements OnInit, OnDestroy {
       this.smartObjects.set([...tilePlacements, ...actorPlacements]);
       this.groundLayers.set((record?.ground ?? []).map((layer) => ({ ...layer })));
 
-      // Load the placable enemy catalog (actor category `Enemy`) and the sprite
-      // sheets/thumbnails it needs, so the toolbox is fully populated before the
+      // Load the sprite sheets/thumbnails first, then the placable enemy catalog
+      // (actor category `Enemy`), so the toolbox is fully populated — and can
+      // hide enemies whose graphics this stage does not carry — before the
       // loading overlay is dismissed.
-      await this.ensureEnemies();
       await this.prepareEnemySprites();
+      await this.ensureEnemies();
 
       // Show the stage's current definition file in the System column.
       this.stageFile.set(await this.stageService.getStageFile(stageId));
@@ -619,10 +620,21 @@ export class RoomPage implements OnInit, OnDestroy {
     }
     try {
       const actors = await this.fsaLib.loadActors();
-      const enemies = enemyDefinitions(actors);
+      const renderer = this.renderer();
+      // Only offer enemies whose graphics actually exist in this stage's
+      // resources; sprite parts and BTI textures live in the stage archive, so
+      // an enemy the catalog knows can still be undrawable here. Check both the
+      // TV and GBA sprite sheets so toggling the GBA layer never empties the list.
+      const enemies = renderer
+        ? enemyDefinitions(actors).filter(
+            (enemy) =>
+              renderer.canRenderActor(enemy.id, enemy.actorVariable ?? 0, false) ||
+              renderer.canRenderActor(enemy.id, enemy.actorVariable ?? 0, true),
+          )
+        : enemyDefinitions(actors);
       if (enemies.length === 0) {
         this.logger.warn(
-          `RoomPage: no enemy actors resolved from ${Object.keys(actors).length} definitions`,
+          `RoomPage: no drawable enemy actors resolved from ${Object.keys(actors).length} definitions`,
         );
       }
       // Register EVERY actor as a smart object (not just the Enemy toolbox

@@ -144,6 +144,46 @@ export class ImageBuffer {
   }
 
   /**
+   * Alpha-composites `source` onto this buffer at (x, y), scaled by integer
+   * `scaleX`/`scaleY` with nearest-neighbour sampling.
+   *
+   * Mirrors the game's `StageRenderer.Draw` scale path (`XScale`/`YScale != 1`),
+   * used by actors whose render variant enlarges the sprite (e.g. a 2× boss).
+   */
+  blendScaledFrom(source: ImageBuffer, x: number, y: number, scaleX = 1, scaleY = 1): void {
+    if (scaleX <= 0 || scaleY <= 0) {
+      return;
+    }
+    const outW = Math.max(1, Math.round(source.width * scaleX));
+    const outH = Math.max(1, Math.round(source.height * scaleY));
+    for (let dy = 0; dy < outH; dy++) {
+      const ty = y + dy;
+      if (ty < 0 || ty >= this.height) {
+        continue;
+      }
+      const sy = Math.min(source.height - 1, Math.floor(dy / scaleY));
+      for (let dx = 0; dx < outW; dx++) {
+        const tx = x + dx;
+        if (tx < 0 || tx >= this.width) {
+          continue;
+        }
+        const sx = Math.min(source.width - 1, Math.floor(dx / scaleX));
+        const si = (sy * source.width + sx) * 4;
+        const sa = source.pixels[si + 3] / 255;
+        if (sa <= 0) {
+          continue;
+        }
+        const di = (ty * this.width + tx) * 4;
+        const inv = 1 - sa;
+        this.pixels[di] = source.pixels[si] * sa + this.pixels[di] * inv;
+        this.pixels[di + 1] = source.pixels[si + 1] * sa + this.pixels[di + 1] * inv;
+        this.pixels[di + 2] = source.pixels[si + 2] * sa + this.pixels[di + 2] * inv;
+        this.pixels[di + 3] = 255 * sa + this.pixels[di + 3] * inv;
+      }
+    }
+  }
+
+  /**
    * Additively blends `source` onto this buffer at (x, y).
    *
    * Mirrors `BlendModes.Add`, which `StageRenderer` uses for I4 "light"

@@ -2,6 +2,8 @@
   <!-- Room canvas (editable; accepts dragged decorations) -->
   <div
     class="relative inline-block w-fit rounded-lg border border-slate-700 bg-slate-900/60 p-1"
+    [class.ring-2]="dragNotAllowed()"
+    [class.ring-red-500]="dragNotAllowed()"
     (dragover)="onDragOver($event)"
     (dragleave)="onDragLeave()"
     (drop)="onDrop($event)"
@@ -12,9 +14,10 @@
       width="512"
       height="384"
       class="block touch-none"
-      [class.cursor-crosshair]="tool !== 'hand'"
+      [class.cursor-crosshair]="tool !== 'hand' && !dragNotAllowed()"
       [class.cursor-grab]="tool === 'hand' && hoveringObject() && !draggingObject()"
       [class.cursor-grabbing]="tool === 'hand' && draggingObject()"
+      [class.cursor-not-allowed]="dragNotAllowed()"
       style="image-rendering: pixelated; width: 800px; height: 600px"
       (pointerdown)="onPointerDown($event)"
       (pointermove)="onPointerMove($event)"
@@ -31,6 +34,25 @@
       class="pointer-events-none absolute left-1 top-1 block"
       style="image-rendering: pixelated; width: 800px; height: 600px"
     ></canvas>
+
+    <!-- "Not allowed" indicator: this actor has no GBA sprite for this layer. -->
+    @if (dragNotAllowed()) {
+      <div
+        class="pointer-events-none absolute inset-1 z-20 flex items-center justify-center bg-slate-950/50"
+      >
+        <svg
+          class="h-24 w-24 text-red-500 drop-shadow"
+          viewBox="0 0 20 20"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2.5"
+          stroke-linecap="round"
+          aria-hidden="true"
+        >
+          <path d="M4 4l12 12M16 4L4 16" />
+        </svg>
+      </div>
+    }
 
     <!-- Backdrop that closes the context menu when clicking elsewhere. -->
     @if (contextMenu()) {

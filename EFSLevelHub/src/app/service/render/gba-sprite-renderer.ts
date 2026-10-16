@@ -266,6 +266,39 @@ export class SpriteRenderer {
     return this.partIndices.subarray(source, source + PART_INDEX_BYTES);
   }
 
+  /**
+   * Renders a sprite into a fresh transparent buffer whose origin is the
+   * sprite's draw position, sized to hold its full footprint.
+   *
+   * Returns the buffer plus the offset (in pixels) from the buffer's top-left to
+   * the sprite's draw origin, so a transformed blit can place it correctly.
+   */
+  renderSpriteToBuffer(
+    spriteIndex: number,
+    attributeList = 0,
+    replacementPaletteIndex = -1,
+    targetPaletteIndex = -1,
+  ): { buffer: ImageBuffer; originX: number; originY: number } | null {
+    const bounds = this.spriteBounds(spriteIndex, attributeList);
+    if (!bounds) {
+      return null;
+    }
+    const width = Math.max(1, bounds.maxX - bounds.minX);
+    const height = Math.max(1, bounds.maxY - bounds.minY);
+    const buffer = new ImageBuffer(width, height);
+    buffer.fill(0, 0, 0, 0);
+    this.drawSprite(
+      buffer,
+      -bounds.minX,
+      -bounds.minY,
+      spriteIndex,
+      attributeList,
+      replacementPaletteIndex,
+      targetPaletteIndex,
+    );
+    return { buffer, originX: bounds.minX, originY: bounds.minY };
+  }
+
   /** Draws a sprite by list + index, matching `DrawSprite(target, x, y, spriteIndex, attributeList)`. */
   drawSprite(
     target: ImageBuffer,
