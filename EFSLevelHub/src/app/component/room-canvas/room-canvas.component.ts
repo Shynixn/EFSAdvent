@@ -52,6 +52,13 @@ export interface RoomGroundChange {
 const DIMENSION = 32;
 
 /**
+ * Actor ids that render nothing in-game and are placed at fixed spots (often
+ * the room's top-left corner). No sprite is drawn for them, so no actor marker
+ * is drawn either — a box would outline empty tiles.
+ */
+const HIDDEN_ACTOR_MARKERS = new Set(['SWEV', 'TINB', 'GFBS', 'BGMN']);
+
+/**
  * RoomCanvasComponent
  * -------------------
  * Editable room canvas — the main room editor, modelled on EFSAdvent's WinForms
@@ -168,24 +175,8 @@ export class RoomCanvasComponent implements AfterViewInit {
   @Input() tool: 'brush' | 'hand' | 'eraser' = 'hand';
 
   /**
-   * Whether this canvas accepts interaction (painting, erasing, dragging,
-   * context menu). When false the canvas is a read-only preview — used by the
-   * stacked layer view, where only the active base layer is editable.
-   */
-  private _interactive = true;
-  @Input()
-  get interactive(): boolean {
-    return this._interactive;
-  }
-  set interactive(value: boolean) {
-    this._interactive = value;
-    queueMicrotask(() => void this.redraw());
-  }
-
-  /**
    * Whether this canvas should draw the red actor markers / hover outline.
-   * Disabled for the inactive preview canvases so only the editable layer shows
-   * its own markers.
+   * Every canvas is fully editable; this only controls the actor markers.
    */
   @Input() showMarkers = true;
 
@@ -226,14 +217,15 @@ export class RoomCanvasComponent implements AfterViewInit {
   }
 
   /**
-   * Actor-baked placements on the active base layer (`layerIndex`). Actors on
-   * other base layers are hidden from this canvas — the stacked layer view shows
-   * each base layer in its own section, so they are visible there instead.
+   * Actor-baked placements on this canvas's base layer (`layerIndex`) that draw
+   * a sprite — used for actor markers. Actors on other base layers belong to
+   * their own section, and {@link HIDDEN_ACTOR_MARKERS} actors (which render
+   * nothing) are excluded.
    */
   private actorsOnActiveLayer(): SmartObjectPlacement[] {
     const draggingSource = this.dragging?.source ?? null;
     return this._smartObjects.filter((placement) => {
-      if (placement === draggingSource) {
+      if (placement === draggingSource || HIDDEN_ACTOR_MARKERS.has(placement.id)) {
         return false;
       }
       const definition = findSmartObjectDefinition(placement.id);
@@ -450,7 +442,7 @@ export class RoomCanvasComponent implements AfterViewInit {
 
   /** Starts painting/erasing, or grabs a smart object when the hand tool is active. */
   onPointerDown(event: PointerEvent): void {
-    if (!this.interactive || event.button !== 0) {
+    if (event.button !== 0) {
       return;
     }
     (event.target as HTMLElement).setPointerCapture(event.pointerId);
@@ -470,9 +462,6 @@ export class RoomCanvasComponent implements AfterViewInit {
 
   /** Continues painting / moves a grabbed smart object. */
   onPointerMove(event: PointerEvent): void {
-    if (!this.interactive) {
-      return;
-    }
     if (this.dragging) {
       this.moveDragged(event);
       return;
@@ -526,9 +515,6 @@ export class RoomCanvasComponent implements AfterViewInit {
    */
   onCanvasContextMenu(event: MouseEvent): void {
     event.preventDefault();
-    if (!this.interactive) {
-      return;
-    }
     const tile = this.tileAt(event);
     // Position the menu relative to the canvas wrapper (its offset parent).
     const wrapper = (event.currentTarget as HTMLElement) ?? undefined;
@@ -710,7 +696,7 @@ export class RoomCanvasComponent implements AfterViewInit {
 
   /** Allows dropping a smart object onto the canvas, showing a live preview. */
   onDragOver(event: DragEvent): void {
-    if (!this.interactive || !event.dataTransfer?.types.includes('application/x-smart-object')) {
+    if (!event.dataTransfer?.types.includes('application/x-smart-object')) {
       return;
     }
     event.preventDefault();
@@ -758,9 +744,6 @@ export class RoomCanvasComponent implements AfterViewInit {
    * resulting placement so the host can record it in the stage JSON.
    */
   onDrop(event: DragEvent): void {
-    if (!this.interactive) {
-      return;
-    }
     const id =
       event.dataTransfer?.getData('application/x-smart-object') ??
       this.dragging?.definition.id ??
@@ -848,14 +831,16 @@ export class RoomCanvasComponent implements AfterViewInit {
       if (!definition) {
         continue;
       }
-      // Actor-baked objects bake no tiles: their sprite straddles the anchor
-      // tile's right/bottom halves (drawn at +8/-8), so hit-test the 2×2 cells
-      // around the anchor — the sprite is always inside that area, matching
-      // where the user sees and grabs it.
+      // Actor-baked objects bake no tiles: hit-test the sprite's REAL footprint
+      // (variant offsets + sprite size), so large actors are grabbed where they
+      // are actually drawn rather than in a fixed 2×2 cell around the anchor.
       if (definition.baking === 'actor') {
+        const box = this.actorBox(placement);
         if (
-          (tile.x === placement.anchorCol || tile.x === placement.anchorCol + 1) &&
-          (tile.y === placement.anchorRow || tile.y === placement.anchorRow - 1)
+          tile.x >= Math.floor(box.x / TILE_SIZE) &&
+          tile.x <= Math.floor((box.x + box.width - 1) / TILE_SIZE) &&
+          tile.y >= Math.floor(box.y / TILE_SIZE) &&
+          tile.y <= Math.floor((box.y + box.height - 1) / TILE_SIZE)
         ) {
           return placement;
         }
@@ -951,12 +936,15 @@ export class RoomCanvasComponent implements AfterViewInit {
       return;
     }
 
-    // Red markers for every actor **on the active base layer** — actors on other
-    // layers are neither drawn nor interactive here.
+    // Red markers for every actor **on this layer** — actors on other layers are
+    // drawn in their own section, and invisible actors get no marker.
     if (this.showMarkers) {
       for (const placement of this.actorsOnActiveLayer()) {
-        const { x, y } = this.actorBox(placement);
-        this.strokeOutline(ctx, x, y, TILE_SIZE, TILE_SIZE, { color: '#ef4444', dash: [] });
+        const box = this.actorBox(placement);
+        this.strokeOutline(ctx, box.x, box.y, box.width, box.height, {
+          color: '#ef4444',
+          dash: [],
+        });
       }
     }
 
@@ -970,8 +958,11 @@ export class RoomCanvasComponent implements AfterViewInit {
       return;
     }
     if (definition.baking === 'actor') {
-      const { x, y } = this.actorBox(placement);
-      this.strokeOutline(ctx, x, y, TILE_SIZE, TILE_SIZE, { color: '#000', dash: [3, 3] });
+      const box = this.actorBox(placement);
+      this.strokeOutline(ctx, box.x, box.y, box.width, box.height, {
+        color: '#000',
+        dash: [3, 3],
+      });
       return;
     }
     const bounds = smartObjectBounds(definition, placement.variantIndex ?? 0);
@@ -985,15 +976,29 @@ export class RoomCanvasComponent implements AfterViewInit {
   }
 
   /**
-   * Top-left pixel of an actor placement's marker box: the sprite is drawn at
-   * `(X*8 + 8, Y*8 - 8)`, so the box is centred half a tile up/left of it to sit
-   * on the sprite.
+   * Pixel box an actor placement's sprite actually occupies.
+   *
+   * Delegates to {@link StageRenderer.actorBounds}, which accounts for the
+   * variant's offsets and the sprite's real size (sprites span several
+   * attributes, so large actors cover many tiles). Falls back to a 16×16 box
+   * centred on the actor's anchor tile when the sprite cannot be resolved.
    */
-  private actorBox(placement: SmartObjectPlacement): { x: number; y: number } {
+  private actorBox(placement: SmartObjectPlacement): {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } {
     const actor = placementToActor(placement);
+    const bounds = this.renderer?.actorBounds(actor, this.gba);
+    if (bounds) {
+      return bounds;
+    }
     return {
-      x: actor.X * 8 + 8 - TILE_SIZE / 2,
-      y: actor.Y * 8 - 8 - TILE_SIZE / 2,
+      x: actor.X * 8 - TILE_SIZE / 2,
+      y: actor.Y * 8 - TILE_SIZE / 2,
+      width: TILE_SIZE,
+      height: TILE_SIZE,
     };
   }
 
@@ -1034,8 +1039,11 @@ export class RoomCanvasComponent implements AfterViewInit {
     // active base layer are marked, matching the resting view.
     if (this.showMarkers) {
       for (const placement of this.actorsOnActiveLayer()) {
-        const { x, y } = this.actorBox(placement);
-        this.strokeOutline(ctx, x, y, TILE_SIZE, TILE_SIZE, { color: '#ef4444', dash: [] });
+        const box = this.actorBox(placement);
+        this.strokeOutline(ctx, box.x, box.y, box.width, box.height, {
+          color: '#ef4444',
+          dash: [],
+        });
       }
     }
 

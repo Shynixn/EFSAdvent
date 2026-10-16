@@ -52,10 +52,9 @@ const WARP_COLORS = [
  * at a time, it renders **every base layer (0-7)** as its own always-open
  * section, one after another, so the whole room can be reviewed at a glance.
  *
- * Each section embeds a {@link RoomCanvasComponent} bound to that base layer.
- * Only the section matching {@link layerIndex} is interactive (painting, hand
- * tool, context menu, drag & drop); the others are read-only previews that show
- * no actor markers, so each layer's actors only appear in their own section.
+ * Each section embeds a {@link RoomCanvasComponent} bound to that base layer,
+ * and **every** section is fully editable (brush, eraser, hand, context menu,
+ * drag & drop). Each section only shows its own layer's actor markers.
  *
  * A single absolutely-positioned overlay canvas sits on top of the whole stack
  * and draws **warp links** — a line from each `WARP` actor to its teleport
@@ -68,7 +67,6 @@ const WARP_COLORS = [
  *   [room]="room()"
  *   [index]="roomIndex()"
  *   [renderer]="renderer()"
- *   [layerIndex]="layerIndex()"
  *   [smartObjects]="smartObjects()"
  *   (tileChanged)="onTileChanged($event)"
  * />
@@ -86,25 +84,6 @@ export class RoomLayersComponent implements AfterViewInit, OnDestroy {
   @Input() index = -1;
   /** The stage renderer used to draw every layer. */
   @Input() renderer: StageRenderer | null = null;
-
-  private _layerIndex = 0;
-  /** Active base layer (0-7). The matching section is the interactive one. */
-  @Input()
-  get layerIndex(): number {
-    return this._layerIndex;
-  }
-  set layerIndex(value: number) {
-    if (value === this._layerIndex) {
-      return;
-    }
-    this._layerIndex = value;
-    // The interactive section changed (its canvas gains markers); re-align the
-    // cross-layer warp lines once the DOM has settled.
-    setTimeout(() => {
-      this.sizeOverlay();
-      this.drawWarpOverlay();
-    });
-  }
 
   /** When true the GBA tileset/layers are drawn (layer level 1). */
   @Input() gba = false;

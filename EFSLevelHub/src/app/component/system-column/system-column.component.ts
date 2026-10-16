@@ -23,13 +23,11 @@ import { StageData } from '../../entity/fsalib.entity';
  *   [selectedRoom]="roomIndex()"
  *   [themeName]="themeName()"
  *   [stageJson]="stageJson()"
- *   [layerIndex]="layerIndex()"
  *   [gba]="gba()"
  *   [topLayer]="topLayer()"
  *   [paintTop]="paintTop()"
  *   (roomSelected)="selectRoom($event)"
  *   (themeClicked)="openTheme()"
- *   (layerIndexChange)="layerIndex.set($event)"
  *   (gbaChange)="gba.set($event)"
  *   (topLayerChange)="topLayer.set($event)"
  *   (paintTopChange)="paintTop.set($event)"
@@ -51,8 +49,6 @@ export class SystemColumnComponent {
   /** Pretty-printed JSON of the stage's definition file (null while loading). */
   @Input() stageJson: string | null = null;
 
-  /** Active base layer (0-7) shown in the Debug section. */
-  @Input() layerIndex = 0;
   /** Whether the GBA tileset/layer is drawn. */
   @Input() gba = false;
   /** Whether the paired top layer is composited over the base layer. */
@@ -67,8 +63,6 @@ export class SystemColumnComponent {
   @Output() roomSelected = new EventEmitter<number>();
   /** Emits when the user opens the theme picker. */
   @Output() themeClicked = new EventEmitter<void>();
-  /** Emits the newly selected base layer. */
-  @Output() layerIndexChange = new EventEmitter<number>();
   /** Emits the new GBA-layer toggle state. */
   @Output() gbaChange = new EventEmitter<boolean>();
   /** Emits the new top-layer toggle state. */

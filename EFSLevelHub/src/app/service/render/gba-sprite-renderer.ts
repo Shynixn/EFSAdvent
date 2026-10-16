@@ -287,6 +287,45 @@ export class SpriteRenderer {
     this.drawAttributes(target, x, y, attributes, replacementPaletteIndex, targetPaletteIndex);
   }
 
+  /**
+   * Pixel bounding box of a sprite, relative to the sprite's draw origin
+   * `(x, y)`.
+   *
+   * A sprite is a set of attributes, each drawn at its own `xOffset`/`yOffset`
+   * and covering `blocks × PART_SIZE` pixels, so the union of those rectangles is
+   * the sprite's true footprint. Used to outline/hit-test actors of any size
+   * (large actors like buildings span many tiles).
+   *
+   * Returns `null` when the sprite cannot be resolved.
+   */
+  spriteBounds(
+    spriteIndex: number,
+    attributeList = 0,
+  ): { minX: number; minY: number; maxX: number; maxY: number } | null {
+    const list = this.attributeLists[attributeList];
+    const attributes = list?.[spriteIndex];
+    if (!attributes || attributes.length === 0) {
+      return null;
+    }
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const attribute of attributes) {
+      const [blocksX, blocksY] = spriteBlockDimensions(attribute.blockShape, attribute.blockSize);
+      const left = attribute.xOffset;
+      const top = attribute.yOffset;
+      minX = Math.min(minX, left);
+      minY = Math.min(minY, top);
+      maxX = Math.max(maxX, left + blocksX * PART_SIZE);
+      maxY = Math.max(maxY, top + blocksY * PART_SIZE);
+    }
+    if (!Number.isFinite(minX) || !Number.isFinite(minY)) {
+      return null;
+    }
+    return { minX, minY, maxX, maxY };
+  }
+
   /** Draws a set of attributes, applying optional palette replacement. */
   drawAttributes(
     target: ImageBuffer,

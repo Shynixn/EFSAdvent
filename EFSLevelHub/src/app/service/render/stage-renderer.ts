@@ -389,36 +389,111 @@ export class StageRenderer {
    */
   drawActorAt(target: ImageBuffer, actor: ActorData, gba = false, offsetX = 0, offsetY = 0): void {
     const renderer = gba ? this.spriteGBA : this.spriteTV;
-    const variant = this.resolveVariant(actor.Id, actor.Variable);
-    if (!variant) {
+    const variants = this.resolveVariants(actor.Id, actor.Variable);
+    if (variants.length === 0) {
       return;
     }
-    // EFSAdvent draws actor sprites at (X*8 + 8, Y*8 - 8): the actor's half-tile
-    // coordinate is the bottom-centre anchor, so the sprite is nudged right half
-    // a tile and up half a tile to sit on the cell. Variant offsets are applied
-    // on top of that base.
-    const drawX = actor.X * 8 + 8 + variant.XOffset + offsetX;
-    const drawY = actor.Y * 8 - 8 + variant.YOffset + offsetY;
-    if (variant.SpriteIndex !== -1) {
-      renderer.drawSprite(
-        target,
-        drawX,
-        drawY,
-        variant.SpriteIndex,
-        variant.SpriteListIndex,
-        variant.ReplacementPaletteIndex,
-        variant.TargetPaletteIndex,
+
+    // Mirrors the game's `FSALib.Rendering.StageRenderer.Draw`, which draws EVERY
+    // variant of the resolved key (multi-part actors such as the hovering Force
+    // Gem list several sprites):
+    // - SOB sprite (SpriteIndex != -1): at the actor origin (X*8 + XOffset, Y*8 + YOffset).
+    //   The sprite's own attributes carry any further offsets.
+    // - BTI texture (no SOB sprite, TV layer only): CENTRED on the actor origin,
+    //   i.e. (X*8 - width/2, Y*8 - height/2).
+    for (const variant of variants) {
+      if (variant.SpriteIndex !== -1) {
+        renderer.drawSprite(
+          target,
+          actor.X * 8 + variant.XOffset + offsetX,
+          actor.Y * 8 + variant.YOffset + offsetY,
+          variant.SpriteIndex,
+          variant.SpriteListIndex,
+          variant.ReplacementPaletteIndex,
+          variant.TargetPaletteIndex,
+        );
+        continue;
+      }
+      const image = variant.BtiFile ? this.images.get(variant.BtiFile) : undefined;
+      if (!image) {
+        continue;
+      }
+      const drawX = actor.X * 8 - Math.floor(image.width / 2) + variant.XOffset + offsetX;
+      const drawY = actor.Y * 8 - Math.floor(image.height / 2) + variant.YOffset + offsetY;
+      target.blendFrom(image, drawX, drawY);
+    }
+  }
+
+  /**
+   * The pixel rectangle an actor's sprite actually occupies on the canvas.
+   *
+   * Unlike a fixed tile-sized box, this accounts for the resolved variant's
+   * `XOffset`/`YOffset` **and** the sprite's real size (a sprite is several
+   * attributes, each with its own offset and block dimensions), so large actors
+   * are outlined/hit-tested over their true footprint.
+   *
+   * @param actor  Actor record (its `X`/`Y` are half-tiles).
+   * @param gba    Use the GBA sprite sheet.
+   * @returns Top-left pixel plus size, or null when the actor cannot be resolved.
+   */
+  actorBounds(
+    actor: ActorData,
+    gba = false,
+  ): { x: number; y: number; width: number; height: number } | null {
+    const variants = this.resolveVariants(actor.Id, actor.Variable);
+    if (variants.length === 0) {
+      return null;
+    }
+    const renderer = gba ? this.spriteGBA : this.spriteTV;
+
+    // Union the pixel rect of every variant's sprite, matching drawActorAt (the
+    // game draws all variants of a key), so multi-part actors are fully covered.
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    const include = (x: number, y: number, w: number, h: number): void => {
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x + w);
+      maxY = Math.max(maxY, y + h);
+    };
+
+    for (const variant of variants) {
+      if (variant.SpriteIndex !== -1) {
+        const bounds = renderer.spriteBounds(variant.SpriteIndex, variant.SpriteListIndex);
+        if (!bounds) {
+          continue;
+        }
+        include(
+          actor.X * 8 + variant.XOffset + bounds.minX,
+          actor.Y * 8 + variant.YOffset + bounds.minY,
+          Math.max(1, bounds.maxX - bounds.minX),
+          Math.max(1, bounds.maxY - bounds.minY),
+        );
+        continue;
+      }
+      const image = variant.BtiFile ? this.images.get(variant.BtiFile) : undefined;
+      if (!image) {
+        continue;
+      }
+      include(
+        actor.X * 8 - Math.floor(image.width / 2) + variant.XOffset,
+        actor.Y * 8 - Math.floor(image.height / 2) + variant.YOffset,
+        image.width,
+        image.height,
       );
-      return;
     }
-    if (!variant.BtiFile) {
-      return;
+
+    if (!Number.isFinite(minX) || !Number.isFinite(minY)) {
+      return null;
     }
-    const image = this.images.get(variant.BtiFile);
-    if (!image) {
-      return;
-    }
-    target.blendFrom(image, drawX, drawY);
+    return {
+      x: minX,
+      y: minY,
+      width: Math.max(1, maxX - minX),
+      height: Math.max(1, maxY - minY),
+    };
   }
 
   /**
@@ -548,17 +623,28 @@ export class StageRenderer {
   }
 
   /**
-   * Resolves the render variant for an actor from the actor definition catalog
+   * Resolves the render variants for an actor from the actor definition catalog
    * (keyed by the 4-character id), selecting the variant list via
-   * `actor.Variable & bitMask`. Returns the first variant, or null when the
-   * actor/definition is unknown.
+   * `actor.Variable & bitMask`.
+   *
+   * Returns **every** variant of the selected key (multi-part actors such as the
+   * hovering Force Gem list several sprites), or an empty array when the actor /
+   * definition / rendering is unknown.
+   */
+  private resolveVariants(id: string, variable: number): ActorRenderVariant[] {
+    const definition = this.actors[id];
+    if (!definition) {
+      return [];
+    }
+    return actorVariants(definition, variable);
+  }
+
+  /**
+   * Resolves the first render variant for an actor, or null when the actor /
+   * definition / rendering is unknown.
    */
   private resolveVariant(_id: string, _variable: number): ActorRenderVariant | null {
-    const definition = this.actors[_id];
-    if (!definition) {
-      return null;
-    }
-    return actorVariants(definition, _variable)[0] ?? null;
+    return this.resolveVariants(_id, _variable)[0] ?? null;
   }
 
   /** Loads the tileset + palette for `index` if not already active. */
