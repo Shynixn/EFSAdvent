@@ -451,7 +451,7 @@ export const SMART_OBJECT_DEFINITIONS: SmartObjectDefinition[] = [
     id: 'cave-entrance',
     baking: 'tile',
     name: 'Cave entrance',
-    section: 'Decorations',
+    section: 'Doors',
     set: [
       {
         bottomLayerTiles: [

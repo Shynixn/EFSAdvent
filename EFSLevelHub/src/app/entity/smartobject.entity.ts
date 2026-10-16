@@ -90,6 +90,15 @@ export interface SmartObjectPlacement {
    * placed. Undefined for tile-baked objects.
    */
   actorVariable?: number;
+  /**
+   * Child placements attached to this one.
+   *
+   * Children are rendered and baked exactly like top-level placements but are
+   * **not directly selectable** — they cannot be hovered, grabbed, moved or
+   * deleted on their own; they follow their parent and are removed with it.
+   * Used e.g. to attach a `WARP` actor to a door when connecting two doors.
+   */
+  children?: SmartObjectPlacement[];
 }
 
 /**
@@ -295,6 +304,104 @@ export function actorToPlacement(actor: ActorData): SmartObjectPlacement {
     topLayerTiles: [],
     actorVariable: actor.Variable,
   };
+}
+
+/**
+ * Flattens a placement list including every child (recursively), returning the
+ * root placements followed by their descendants.
+ *
+ * Children are baked and rendered like any other placement, so most consumers
+ * (actor sync, tile baking, rendering) work on the flattened list while
+ * interaction (hover/grab/delete) stays restricted to the roots.
+ */
+export function flattenPlacements(
+  placements: readonly SmartObjectPlacement[],
+): SmartObjectPlacement[] {
+  const out: SmartObjectPlacement[] = [];
+  const visit = (placement: SmartObjectPlacement): void => {
+    out.push(placement);
+    for (const child of placement.children ?? []) {
+      visit(child);
+    }
+  };
+  for (const placement of placements) {
+    visit(placement);
+  }
+  return out;
+}
+
+/**
+ * Updates a placement's `children` array (matched by identity), returning a new
+ * root list. Used to attach/detach a child (e.g. a connecting `WARP` actor)
+ * without mutating the shared placement objects.
+ */
+export function withChildren(
+  placement: SmartObjectPlacement,
+  children: SmartObjectPlacement[] | undefined,
+): SmartObjectPlacement {
+  const { children: _omit, ...rest } = placement;
+  return children && children.length > 0 ? { ...rest, children } : { ...rest };
+}
+
+/**
+ * Builds a `WARP` actor placement that connects a source door to a destination,
+ * suitable for attaching as a child of the source door.
+ *
+ * The actor's `Variable` packs the destination (see {@link WarpLink}):
+ * `type | destY<<8 | destX<<16 | destLayer<<24` where the destination tile
+ * coordinates are stored in **half-tiles** (`tile * 2`), matching the actor
+ * coordinate space.
+ *
+ * @param sourceLayer  Base layer the source door (and thus the warp) sits on.
+ * @param sourceRow    Source door's anchor tile row (where the warp actor sits).
+ * @param sourceCol    Source door's anchor tile column.
+ * @param destRow      Destination tile row (the target door's anchor).
+ * @param destCol      Destination tile column.
+ * @param destLayer    Destination base layer.
+ * @param type         Warp type/style byte (see `WARP.json`).
+ */
+export function createWarpChild(
+  sourceLayer: number,
+  sourceRow: number,
+  sourceCol: number,
+  destRow: number,
+  destCol: number,
+  destLayer: number,
+  type = 0,
+): SmartObjectPlacement {
+  const variable =
+    ((type & 0xff) |
+      (((destRow * 2) & 0xff) << 8) |
+      (((destCol * 2) & 0xff) << 16) |
+      ((destLayer & 0x07) << 24)) >>>
+    0;
+  return {
+    id: WARP_ACTOR_ID,
+    variantIndex: 0,
+    baseLayerId: sourceLayer,
+    anchorRow: sourceRow,
+    anchorCol: sourceCol,
+    bottomLayerTiles: [],
+    topLayerTiles: [],
+    actorVariable: variable,
+  };
+}
+
+/**
+ * Reads a `WARP` actor placement's destination tile, or null when it does not
+ * encode one (a zero destination means "the actor's own tile").
+ */
+export function warpChildDestination(
+  placement: SmartObjectPlacement,
+): { row: number; col: number; layer: number } | null {
+  if (placement.id !== WARP_ACTOR_ID) {
+    return null;
+  }
+  const { b2, b3, b4 } = actorVariableBytes(placement.actorVariable ?? 0);
+  if (b2 === 0 && b3 === 0) {
+    return null;
+  }
+  return { row: b2 / 2, col: b3 / 2, layer: b4 & 0x07 };
 }
 
 /**

@@ -20,6 +20,7 @@ import { GroundLayer } from '../../entity/ground.entity';
 import {
   SmartObjectPlacement,
   findSmartObjectDefinition,
+  flattenPlacements,
   placementToActor,
   warpLinks,
 } from '../../entity/smartobject.entity';
@@ -140,6 +141,12 @@ export class RoomLayersComponent implements AfterViewInit, OnDestroy {
   @Output() decorationDeleted = new EventEmitter<SmartObjectPlacement>();
   /** Emits when a placed decoration is rotated to the next variant. */
   @Output() decorationRotated = new EventEmitter<{
+    from: SmartObjectPlacement;
+    to: SmartObjectPlacement;
+  }>();
+
+  /** Emits when a placement's recorded data changes without moving it. */
+  @Output() placementUpdated = new EventEmitter<{
     from: SmartObjectPlacement;
     to: SmartObjectPlacement;
   }>();
@@ -290,7 +297,7 @@ export class RoomLayersComponent implements AfterViewInit, OnDestroy {
   /** The actor records for this room, derived from its actor-baked placements. */
   private actorRecords(): { Id: string; Layer: number; X: number; Y: number; Variable: number }[] {
     const actors: { Id: string; Layer: number; X: number; Y: number; Variable: number }[] = [];
-    for (const placement of this._smartObjects) {
+    for (const placement of flattenPlacements(this._smartObjects)) {
       if (findSmartObjectDefinition(placement.id)?.baking !== 'actor') {
         continue;
       }

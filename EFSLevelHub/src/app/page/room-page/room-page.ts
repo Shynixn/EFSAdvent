@@ -43,6 +43,7 @@ import {
   SmartObjectPlacement,
   actorToPlacement,
   findSmartObjectDefinition,
+  flattenPlacements,
   placementToActor,
   registerActorSmartObjects,
   smartObjectVariant,
@@ -154,10 +155,11 @@ export class RoomPage implements OnInit, OnDestroy {
 
   /**
    * The actor records for this room, derived from the actor-baked placements in
-   * {@link smartObjects}. Written to the archive's `d_enemy_map*.bin` on save.
+   * {@link smartObjects} **and their children** (e.g. a door's connecting `WARP`
+   * actor). Written to the archive's `d_enemy_map*.bin` on save.
    */
   readonly actors = computed<ActorData[]>(() =>
-    this.smartObjects()
+    flattenPlacements(this.smartObjects())
       .filter((placement) => findSmartObjectDefinition(placement.id)?.baking === 'actor')
       .map(placementToActor),
   );
@@ -430,17 +432,24 @@ export class RoomPage implements OnInit, OnDestroy {
       // another tool). They are surfaced separately AND injected into
       // `smartObjects` below, so the room ends up with a single, truthful list.
       const recordedPlacements = record?.smartObjects ?? [];
-      const recordedActors = recordedPlacements.filter(
-        (placement) => findSmartObjectDefinition(placement.id)?.baking === 'actor',
-      );
       const tilePlacements = recordedPlacements.filter(
         (placement) => findSmartObjectDefinition(placement.id)?.baking !== 'actor',
       );
+      // Actor-baked roots stay in the list as-is (their children — e.g. a door's
+      // connecting WARP actor — travel with them).
+      const recordedActors = recordedPlacements.filter(
+        (placement) => findSmartObjectDefinition(placement.id)?.baking === 'actor',
+      );
+      // Every recorded actor, INCLUDING children, so an actor that is recorded as
+      // a child is not also surfaced (and duplicated) as a legacy actor.
+      const recordedActorsFlat = flattenPlacements(recordedPlacements).filter(
+        (placement) => findSmartObjectDefinition(placement.id)?.baking === 'actor',
+      );
 
       const archiveActors = (room.Actors ?? []).map((actor) => actorToPlacement(actor));
-      // A legacy actor is one whose id+anchor is not already recorded.
+      // A legacy actor is one whose id+anchor+layer is not already recorded.
       const isRecorded = (placement: SmartObjectPlacement): boolean =>
-        recordedActors.some(
+        recordedActorsFlat.some(
           (recorded) =>
             recorded.id === placement.id &&
             recorded.anchorRow === placement.anchorRow &&
@@ -635,12 +644,25 @@ export class RoomPage implements OnInit, OnDestroy {
   }
 
   /**
+   * Records a placement whose recorded data changed without moving it — used
+   * when connecting/disconnecting two doors (which adds/removes a child `WARP`
+   * actor). The child is an actor, so the actor list needs re-serializing.
+   */
+  onPlacementUpdated(event: { from: SmartObjectPlacement; to: SmartObjectPlacement }): void {
+    this.stageEditor.setDirty(this.stageId(), true);
+    this.stageRoom.markActorsDirty(this.roomIndex());
+    this.replacePlacement(event.from, event.to);
+  }
+
+  /**
    * Swaps a placement for its updated copy in both {@link smartObjects} and
    * {@link legacyActors}, so a moved/rotated **legacy** actor keeps its red
    * border (identity is how the canvas recognises it).
    */
   private replacePlacement(from: SmartObjectPlacement, to: SmartObjectPlacement): void {
-    this.smartObjects.update((list) => list.map((placement) => (placement === from ? to : placement)));
+    this.smartObjects.update((list) =>
+      list.map((placement) => (placement === from ? to : placement)),
+    );
     this.legacyActors.update((list) =>
       list.map((placement) => (placement === from ? to : placement)),
     );
@@ -845,7 +867,7 @@ export class RoomPage implements OnInit, OnDestroy {
       // of truth the canvas composites from — so drifting recorded refs cannot
       // let ground overwrite a decoration's tiles.
       const owned = new Set<number>();
-      for (const placement of this.smartObjects()) {
+      for (const placement of flattenPlacements(this.smartObjects())) {
         if (placement.baseLayerId !== base) {
           continue;
         }

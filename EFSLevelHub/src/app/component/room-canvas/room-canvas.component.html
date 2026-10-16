@@ -18,6 +18,7 @@
       [class.cursor-grab]="tool === 'hand' && hoveringObject() && !draggingObject()"
       [class.cursor-grabbing]="tool === 'hand' && draggingObject()"
       [class.cursor-not-allowed]="dragNotAllowed()"
+      [class.cursor-crosshair]="connectingFrom() !== null"
       style="image-rendering: pixelated; width: 800px; height: 600px"
       (pointerdown)="onPointerDown($event)"
       (pointermove)="onPointerMove($event)"
@@ -83,6 +84,37 @@
             </svg>
             <span>Rotate</span>
           </button>
+        }
+        @if (canConnectContextPlacement()) {
+          @if (isContextPlacementConnected()) {
+            <button
+              type="button"
+              (click)="disconnectContextPlacement()"
+              class="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-amber-400 transition hover:bg-slate-700"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                <path
+                  d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
+                />
+              </svg>
+              <span>Cancel connect</span>
+            </button>
+          } @else {
+            <button
+              type="button"
+              (click)="startConnect()"
+              class="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-sky-300 transition hover:bg-slate-700"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                <path
+                  fill-rule="evenodd"
+                  d="M12.586 4.586a2 2 0 112.828 2.828l-3 3a2 2 0 01-2.828 0 1 1 0 00-1.414 1.414 4 4 0 005.656 0l3-3a4 4 0 00-5.656-5.656l-1.5 1.5a1 1 0 101.414 1.414l1.5-1.5zm-5 5a2 2 0 012.828 0 1 1 0 101.414-1.414 4 4 0 00-5.656 0l-3 3a4 4 0 105.656 5.656l1.5-1.5a1 1 0 10-1.414-1.414l-1.5 1.5a2 2 0 11-2.828-2.828l3-3z"
+                  clip-rule="evenodd"
+                />
+              </svg>
+              <span>Connect</span>
+            </button>
+          }
         }
         <button
           type="button"

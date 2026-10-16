@@ -16,13 +16,17 @@ import { StageRenderer } from '../../service/render/stage-renderer';
 import {
   applySmartObject,
   clearSmartObject,
+  createWarpChild,
   findSmartObjectDefinition,
+  flattenPlacements,
   placementToActor,
   smartObjectBounds,
   smartObjectVariant,
+  withChildren,
   SmartObjectDefinition,
   SmartObjectPlacement,
   SmartObjectTileOffset,
+  WARP_ACTOR_ID,
 } from '../../entity/smartobject.entity';
 import { SmartObjectDragService } from '../../service/smart-object-drag.service';
 
@@ -213,7 +217,7 @@ export class RoomCanvasComponent implements AfterViewInit {
   private get actors(): ActorData[] {
     const draggingSource = this.dragging?.source ?? null;
     const actors: ActorData[] = [];
-    for (const placement of this._smartObjects) {
+    for (const placement of flattenPlacements(this._smartObjects)) {
       if (placement === draggingSource) {
         continue;
       }
@@ -303,6 +307,15 @@ export class RoomCanvasComponent implements AfterViewInit {
     to: SmartObjectPlacement;
   }>();
 
+  /**
+   * Emits when a placement's recorded data changes without moving it — used for
+   * connecting/disconnecting two doors (which adds/removes a child `WARP` actor).
+   */
+  @Output() placementUpdated = new EventEmitter<{
+    from: SmartObjectPlacement;
+    to: SmartObjectPlacement;
+  }>();
+
   /** The canvas element the room is drawn onto. */
   private readonly canvasRef = viewChild<ElementRef<HTMLCanvasElement>>('canvas');
   /** The transparent overlay canvas used for drag previews. */
@@ -342,6 +355,16 @@ export class RoomCanvasComponent implements AfterViewInit {
    * GBA layer, so the canvas shows a "not allowed" X and rejects the drop.
    */
   readonly dragNotAllowed = signal(false);
+
+  /**
+   * The door the user is currently connecting from (a context-menu "Connect"),
+   * or null. While set, moving the pointer draws a line from this door and
+   * releasing over another door connects the two.
+   */
+  readonly connectingFrom = signal<SmartObjectPlacement | null>(null);
+
+  /** Tile under the cursor while connecting (drives the connect line). */
+  private readonly connectCursor = signal<{ x: number; y: number } | null>(null);
 
   /** Smart object currently hovered by the pointer (for its boundary outline). */
   private hoveredPlacement: SmartObjectPlacement | null = null;
@@ -436,7 +459,7 @@ export class RoomCanvasComponent implements AfterViewInit {
     // + anchor + variant (the same source of truth the compositor stamps from)
     // rather than the recorded refs, which can drift after a rotate/move.
     const owned = new Set<number>();
-    for (const placement of this.smartObjects) {
+    for (const placement of flattenPlacements(this.smartObjects)) {
       if (placement.baseLayerId !== this.groundBaseLayerId) {
         continue;
       }
@@ -467,6 +490,10 @@ export class RoomCanvasComponent implements AfterViewInit {
     if (event.button !== 0) {
       return;
     }
+    // A connect drag is in progress: ignore the press (the release completes it).
+    if (this.connectingFrom()) {
+      return;
+    }
     (event.target as HTMLElement).setPointerCapture(event.pointerId);
 
     if (this.tool === 'hand') {
@@ -484,6 +511,11 @@ export class RoomCanvasComponent implements AfterViewInit {
 
   /** Continues painting / moves a grabbed smart object. */
   onPointerMove(event: PointerEvent): void {
+    // While connecting, draw a line from the source door to the cursor.
+    if (this.connectingFrom()) {
+      this.drawConnectLine(event);
+      return;
+    }
     if (this.dragging) {
       this.moveDragged(event);
       return;
@@ -504,9 +536,14 @@ export class RoomCanvasComponent implements AfterViewInit {
     }
   }
 
-  /** Stops painting / drops a grabbed smart object. */
+  /** Stops painting / drops a grabbed smart object / completes a connect drag. */
   onPointerUp(event: PointerEvent): void {
     (event.target as HTMLElement).releasePointerCapture?.(event.pointerId);
+    // Completing a connect drag: attach the WARP child if a door is under the cursor.
+    if (this.connectingFrom()) {
+      this.finishConnect(event);
+      return;
+    }
     if (this.dragging) {
       this.dropDragged();
       return;
@@ -517,6 +554,11 @@ export class RoomCanvasComponent implements AfterViewInit {
 
   /** Hides the hover outline when the pointer leaves the canvas. */
   onPointerLeaveCanvas(event: PointerEvent): void {
+    // A connect drag keeps running while the pointer is outside the canvas (the
+    // user may drag over another layer's canvas); do not complete it here.
+    if (this.connectingFrom()) {
+      return;
+    }
     this.hoveredPlacement = null;
     this.hoveringObject.set(false);
     // Repaint the outline (keeps the context-menu target outlined if the menu
@@ -587,6 +629,105 @@ export class RoomCanvasComponent implements AfterViewInit {
   }
 
   /**
+   * Whether the context-menu target is a **door** (a tile-baked object in the
+   * `Doors` section), the only objects that can be connected.
+   */
+  canConnectContextPlacement(): boolean {
+    const placement = this.contextMenu()?.placement;
+    if (!placement) {
+      return false;
+    }
+    const definition = findSmartObjectDefinition(placement.id);
+    return definition?.baking === 'tile' && definition.section === 'Doors';
+  }
+
+  /** Whether the context-menu target is a door that already has a connection. */
+  isContextPlacementConnected(): boolean {
+    const placement = this.contextMenu()?.placement;
+    return !!placement && this.connectionOf(placement) !== undefined;
+  }
+
+  /** The `WARP` child that connects a door to another door, if any. */
+  private connectionOf(placement: SmartObjectPlacement): SmartObjectPlacement | undefined {
+    return (placement.children ?? []).find((child) => child.id === WARP_ACTOR_ID);
+  }
+
+  /**
+   * Starts connecting the context-menu door: the pointer becomes a "connect"
+   * cursor and a line follows the cursor until the user releases over another
+   * door (or the connect is cancelled).
+   */
+  startConnect(): void {
+    const placement = this.contextMenu()?.placement;
+    if (!placement) {
+      return;
+    }
+    this.connectingFrom.set(placement);
+    this.connectCursor.set(null);
+    this.contextMenu.set(null);
+    void this.redraw();
+  }
+
+  /** Cancels an in-progress connect drag. */
+  cancelConnect(): void {
+    this.connectingFrom.set(null);
+    this.connectCursor.set(null);
+    this.drawHoverOutline();
+  }
+
+  /** Emits nothing visual; removes the connection (the `WARP` child) of the target door. */
+  disconnectContextPlacement(): void {
+    const placement = this.contextMenu()?.placement;
+    if (!placement) {
+      return;
+    }
+    const remaining = (placement.children ?? []).filter((child) => child.id !== WARP_ACTOR_ID);
+    const updated = withChildren(placement, remaining);
+    this.contextMenu.set(null);
+    this.hoveredPlacement = null;
+    this.placementUpdated.emit({ from: placement, to: updated });
+  }
+
+  /**
+   * Completes a connect drag: if another door is under the pointer, attaches a
+   * child `WARP` actor to the **source** door that points at the target door's
+   * anchor tile, then reports the updated source placement.
+   */
+  private finishConnect(event: PointerEvent): void {
+    const source = this.connectingFrom();
+    if (!source) {
+      return;
+    }
+    this.connectingFrom.set(null);
+    this.connectCursor.set(null);
+    const tile = this.tileAt(event);
+    const target = tile ? this.findPlacementAt(tile) : null;
+    if (!target || target === source) {
+      this.drawHoverOutline();
+      return;
+    }
+    const targetDefinition = findSmartObjectDefinition(target.id);
+    if (targetDefinition?.baking !== 'tile' || targetDefinition.section !== 'Doors') {
+      this.drawHoverOutline();
+      return;
+    }
+
+    // Replace any existing connection, then attach a WARP child at the source
+    // door's anchor pointing at the target door's anchor tile/layer.
+    const others = (source.children ?? []).filter((child) => child.id !== WARP_ACTOR_ID);
+    const warp = createWarpChild(
+      source.baseLayerId,
+      source.anchorRow,
+      source.anchorCol,
+      target.anchorRow,
+      target.anchorCol,
+      target.baseLayerId,
+    );
+    const updated = withChildren(source, [...others, warp]);
+    this.placementUpdated.emit({ from: source, to: updated });
+  }
+
+  /**
    * Rotates the smart object targeted by the context menu to the next variant in
    * its definition's `set`. Clears the current tiles, re-stamps the next variant
    * at the same anchor and emits the change so the host updates the stage JSON.
@@ -629,8 +770,12 @@ export class RoomCanvasComponent implements AfterViewInit {
     if (!room) {
       return;
     }
-    const source = override ? override.list : this.smartObjects;
-    const skip = override ? override.skip : [];
+    // Children are baked into the layers too, so tear down and re-stamp the
+    // flattened list (roots + descendants).
+    const source = flattenPlacements(override ? override.list : this.smartObjects);
+    // Skipping a placement also skips its descendants (removing a parent removes
+    // its children with it).
+    const skip = flattenPlacements(override ? override.skip : []);
     // The placements that will remain stamped, in their stored order (later
     // ones draw on top of earlier ones at shared tiles).
     const stampOrder = source.filter((placement) => !skip.includes(placement));
@@ -998,6 +1143,11 @@ export class RoomCanvasComponent implements AfterViewInit {
       return;
     }
 
+    // Draw the in-progress connect line (source door -> cursor).
+    if (this.connectingFrom()) {
+      this.paintConnectLine(ctx);
+    }
+
     // Red markers for **legacy** actors on this layer only — editor-placed
     // objects show nothing until hovered.
     if (this.showMarkers) {
@@ -1064,6 +1214,74 @@ export class RoomCanvasComponent implements AfterViewInit {
     };
   }
 
+  /**
+   * Records the cursor position during a connect drag and repaints the overlay
+   * so the connect line follows the pointer.
+   */
+  private drawConnectLine(event: PointerEvent): void {
+    const tile = this.tileAt(event);
+    this.connectCursor.set(tile);
+    this.drawHoverOutline();
+  }
+
+  /**
+   * Draws the in-progress connect line onto the overlay: a dashed line from the
+   * source door to the cursor, and a green outline around a valid target door.
+   */
+  private paintConnectLine(ctx: CanvasRenderingContext2D): void {
+    const source = this.connectingFrom();
+    if (!source) {
+      return;
+    }
+    const cursor = this.connectCursor();
+    const sourceDef = findSmartObjectDefinition(source.id);
+    const sourceBounds = sourceDef ? smartObjectBounds(sourceDef, source.variantIndex ?? 0) : null;
+    const fromX = (source.anchorCol + (sourceBounds?.minCol ?? 0) + (sourceBounds?.cols ?? 1) / 2) *
+      TILE_SIZE;
+    const fromY = (source.anchorRow + (sourceBounds?.minRow ?? 0) + (sourceBounds?.rows ?? 1) / 2) *
+      TILE_SIZE;
+
+    // Outline the source door.
+    if (sourceBounds) {
+      this.strokeOutline(
+        ctx,
+        (source.anchorCol + sourceBounds.minCol) * TILE_SIZE,
+        (source.anchorRow + sourceBounds.minRow) * TILE_SIZE,
+        sourceBounds.cols * TILE_SIZE,
+        sourceBounds.rows * TILE_SIZE,
+        { color: '#38bdf8', dash: [] },
+      );
+    }
+
+    const toX = cursor ? (cursor.x + 0.5) * TILE_SIZE : fromX;
+    const toY = cursor ? (cursor.y + 0.5) * TILE_SIZE : fromY;
+
+    // The line itself.
+    ctx.save();
+    ctx.strokeStyle = '#38bdf8';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    ctx.moveTo(fromX, fromY);
+    ctx.lineTo(toX, toY);
+    ctx.stroke();
+    ctx.restore();
+
+    // Highlight a valid target door under the cursor.
+    const target = cursor ? this.findPlacementAt(cursor) : null;
+    const targetDef = target ? findSmartObjectDefinition(target.id) : null;
+    if (target && target !== source && targetDef?.baking === 'tile' && targetDef.section === 'Doors') {
+      const tb = smartObjectBounds(targetDef, target.variantIndex ?? 0);
+      this.strokeOutline(
+        ctx,
+        (target.anchorCol + tb.minCol) * TILE_SIZE,
+        (target.anchorRow + tb.minRow) * TILE_SIZE,
+        tb.cols * TILE_SIZE,
+        tb.rows * TILE_SIZE,
+        { color: '#22c55e', dash: [] },
+      );
+    }
+  }
   /** Strokes a rectangle (crisp 1px) at the given pixel rectangle. */
   private strokeOutline(
     ctx: CanvasRenderingContext2D,
