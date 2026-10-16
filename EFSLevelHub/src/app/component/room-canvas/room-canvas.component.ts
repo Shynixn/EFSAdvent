@@ -209,18 +209,28 @@ export class RoomCanvasComponent implements AfterViewInit {
     queueMicrotask(() => void this.redraw());
   }
 
+  private _legacyActors: SmartObjectPlacement[] = [];
   /**
    * Actor placements that represent **pre-existing (legacy) actors** — actors
    * found in the room's archive that were not recorded by the editor.
    *
    * They are the only actors drawn with a red border; editor-placed objects show
-   * nothing until hovered (a black dotted outline).
+   * nothing until hovered (a black dotted outline). A change repaints so the red
+   * markers appear as soon as the legacy list is known.
    */
-  @Input() legacyActors: SmartObjectPlacement[] = [];
+  @Input()
+  get legacyActors(): SmartObjectPlacement[] {
+    return this._legacyActors;
+  }
+  set legacyActors(value: SmartObjectPlacement[]) {
+    this._legacyActors = value ?? [];
+    queueMicrotask(() => void this.redraw());
+  }
 
   /**
    * The actor-baked placements in this room, as {@link ActorData} records —
-   * derived from {@link smartObjects} so enemies need no separate input.
+   * derived from {@link smartObjects} (plus their children) AND
+   * {@link legacyActors}, so every actor is drawn without a separate input.
    *
    * The placement currently being dragged with the hand tool is omitted, so the
    * grabbed sprite disappears from its old cell while it follows the cursor
@@ -229,7 +239,7 @@ export class RoomCanvasComponent implements AfterViewInit {
   private get actors(): ActorData[] {
     const draggingSource = this.dragging?.source ?? null;
     const actors: ActorData[] = [];
-    for (const placement of flattenPlacements(this._smartObjects)) {
+    for (const placement of [...flattenPlacements(this._smartObjects), ...this._legacyActors]) {
       if (placement === draggingSource) {
         continue;
       }
@@ -251,12 +261,7 @@ export class RoomCanvasComponent implements AfterViewInit {
    * hover outline.
    */
   private legacyActorsOnLayer(): SmartObjectPlacement[] {
-    const draggingSource = this.dragging?.source ?? null;
-    const legacy = new Set(this.legacyActors);
-    return this._smartObjects.filter((placement) => {
-      if (placement === draggingSource || !legacy.has(placement)) {
-        return false;
-      }
+    return this.legacyActors.filter((placement) => {
       if (HIDDEN_ACTOR_MARKERS.has(placement.id)) {
         return false;
       }
@@ -312,6 +317,21 @@ export class RoomCanvasComponent implements AfterViewInit {
 
   /** Emits when a placed decoration is deleted from the context menu. */
   @Output() decorationDeleted = new EventEmitter<SmartObjectPlacement>();
+
+  /**
+   * Emits when a **legacy** actor is deleted from the context menu. Legacy
+   * actors live outside `smartObjects` (see the host), so they are deleted
+   * separately — their sprite/actor is removed from the room on save.
+   */
+  @Output() legacyDeleted = new EventEmitter<SmartObjectPlacement>();
+
+  /**
+   * Emits when a **legacy** actor is moved with the hand tool (its new anchor).
+   */
+  @Output() legacyMoved = new EventEmitter<{
+    from: SmartObjectPlacement;
+    to: SmartObjectPlacement;
+  }>();
 
   /** Emits when a placed decoration is rotated to the next variant. */
   @Output() decorationRotated = new EventEmitter<{
@@ -635,17 +655,30 @@ export class RoomCanvasComponent implements AfterViewInit {
     if (!placement || !this.room) {
       return;
     }
+    this.contextMenu.set(null);
+    this.hoveredPlacement = null;
+    // A legacy actor bakes no tiles, so it is removed by the host (which owns the
+    // legacy list) — nothing to clear on the room layers.
+    if (this.isLegacy(placement)) {
+      this.legacyDeleted.emit(placement);
+      this.drawHoverOutline();
+      void this.redraw();
+      return;
+    }
     // Remove the stamped tiles so the object disappears from the canvas, then
     // let the host drop the placement from the stage JSON.
     clearSmartObject(placement, this.room.Layers, placement.baseLayerId);
     // Re-stamp every remaining smart object so tiles that this one had covered
     // (overlapping objects) come back correctly.
     this.redrawSmartObjects({ list: this.smartObjects, skip: [placement] });
-    this.contextMenu.set(null);
-    this.hoveredPlacement = null;
     this.decorationDeleted.emit(placement);
     this.drawHoverOutline();
     void this.redraw();
+  }
+
+  /** Whether a placement belongs to the legacy (archive) actor list. */
+  private isLegacy(placement: SmartObjectPlacement): boolean {
+    return this._legacyActors.includes(placement);
   }
 
   /**
@@ -751,7 +784,10 @@ export class RoomCanvasComponent implements AfterViewInit {
     } else if (placement.connectedFrom) {
       // Target: clear the source's warp child too.
       const source = this.findSourceOf(placement);
-      this.placementUpdated.emit({ from: placement, to: { ...placement, connectedFrom: undefined } });
+      this.placementUpdated.emit({
+        from: placement,
+        to: { ...placement, connectedFrom: undefined },
+      });
       if (source) {
         this.placementUpdated.emit({ from: source, to: this.withWarpChild(source, null) });
       }
@@ -1266,6 +1302,27 @@ export class RoomCanvasComponent implements AfterViewInit {
     if (!placement || !definition) {
       return;
     }
+    // A legacy actor bakes no tiles, so nothing is cleared/stamped; it is just
+    // moved (the host updates the legacy list on drop). Its sprite is hidden from
+    // the render while dragging via the `dragging.source` exclusion.
+    if (this.isLegacy(placement)) {
+      this.dragging = {
+        definition,
+        source: placement,
+        grabRow: tile.y - placement.anchorRow,
+        grabCol: tile.x - placement.anchorCol,
+        anchorRow: placement.anchorRow,
+        anchorCol: placement.anchorCol,
+        variantIndex: placement.variantIndex ?? 0,
+        subTypeIndex: placement.subTypeIndex ?? 0,
+        active: true,
+      };
+      void this.redraw();
+      this.draggingObject.set(true);
+      this.hoveringObject.set(false);
+      this.drawPreview();
+      return;
+    }
     // Clear the original tiles right away so the object is *grabbed* in the
     // view (it follows the cursor) rather than copied and removed on drop.
     // Use the placement's OWN base layer (not the viewed layer) so grabbing an
@@ -1293,47 +1350,60 @@ export class RoomCanvasComponent implements AfterViewInit {
 
   /** Returns the top-most placement covering a tile, or null. */
   private findPlacementAt(tile: { x: number; y: number }): SmartObjectPlacement | null {
+    // Legacy actors sit on top (they are drawn over the tiles) and are interactive
+    // like any other actor, so they are hit-tested first.
+    for (let i = this._legacyActors.length - 1; i >= 0; i--) {
+      const placement = this._legacyActors[i];
+      if (this.hitTestPlacement(placement, tile)) {
+        return placement;
+      }
+    }
     for (let i = this.smartObjects.length - 1; i >= 0; i--) {
       const placement = this.smartObjects[i];
-      // Only objects on the active base layer are interactive; the paired top
-      // layer belongs to the same base layer, so a single check covers both.
-      if ((placement.baseLayerId ?? 0) !== this.layerIndex) {
-        continue;
-      }
-      const definition = findSmartObjectDefinition(placement.id);
-      if (!definition) {
-        continue;
-      }
-      // Actor-baked objects bake no tiles: hit-test the sprite's REAL footprint
-      // (variant offsets + sprite size), so large actors are grabbed where they
-      // are actually drawn rather than in a fixed 2×2 cell around the anchor.
-      if (definition.baking === 'actor') {
-        const box = this.actorBox(placement);
-        if (
-          tile.x >= Math.floor(box.x / TILE_SIZE) &&
-          tile.x <= Math.floor((box.x + box.width - 1) / TILE_SIZE) &&
-          tile.y >= Math.floor(box.y / TILE_SIZE) &&
-          tile.y <= Math.floor((box.y + box.height - 1) / TILE_SIZE)
-        ) {
-          return placement;
-        }
-        continue;
-      }
-      const bounds = smartObjectBounds(
-        definition,
-        placement.variantIndex ?? 0,
-        placement.subTypeIndex ?? 0,
-      );
-      if (
-        tile.y >= placement.anchorRow + bounds.minRow &&
-        tile.y <= placement.anchorRow + bounds.maxRow &&
-        tile.x >= placement.anchorCol + bounds.minCol &&
-        tile.x <= placement.anchorCol + bounds.maxCol
-      ) {
+      if (this.hitTestPlacement(placement, tile)) {
         return placement;
       }
     }
     return null;
+  }
+
+  /** Whether a placement's footprint (layer + sprite/tile bounds) covers a tile. */
+  private hitTestPlacement(
+    placement: SmartObjectPlacement,
+    tile: { x: number; y: number },
+  ): boolean {
+    // Only objects on the active base layer are interactive; the paired top
+    // layer belongs to the same base layer, so a single check covers both.
+    if ((placement.baseLayerId ?? 0) !== this.layerIndex) {
+      return false;
+    }
+    const definition = findSmartObjectDefinition(placement.id);
+    if (!definition) {
+      return false;
+    }
+    // Actor-baked objects bake no tiles: hit-test the sprite's REAL footprint
+    // (variant offsets + sprite size), so large actors are grabbed where they
+    // are actually drawn rather than in a fixed 2×2 cell around the anchor.
+    if (definition.baking === 'actor') {
+      const box = this.actorBox(placement);
+      return (
+        tile.x >= Math.floor(box.x / TILE_SIZE) &&
+        tile.x <= Math.floor((box.x + box.width - 1) / TILE_SIZE) &&
+        tile.y >= Math.floor(box.y / TILE_SIZE) &&
+        tile.y <= Math.floor((box.y + box.height - 1) / TILE_SIZE)
+      );
+    }
+    const bounds = smartObjectBounds(
+      definition,
+      placement.variantIndex ?? 0,
+      placement.subTypeIndex ?? 0,
+    );
+    return (
+      tile.y >= placement.anchorRow + bounds.minRow &&
+      tile.y <= placement.anchorRow + bounds.maxRow &&
+      tile.x >= placement.anchorCol + bounds.minCol &&
+      tile.x <= placement.anchorCol + bounds.maxCol
+    );
   }
 
   /** Moves a grabbed smart object to follow the pointer. */
@@ -1359,6 +1429,18 @@ export class RoomCanvasComponent implements AfterViewInit {
       return;
     }
     if (dragging.source) {
+      // A legacy actor bakes nothing: just report its new anchor and let the host
+      // update the legacy list.
+      if (this.isLegacy(dragging.source)) {
+        const moved: SmartObjectPlacement = {
+          ...dragging.source,
+          anchorRow: dragging.anchorRow,
+          anchorCol: dragging.anchorCol,
+        };
+        this.legacyMoved.emit({ from: dragging.source, to: moved });
+        void this.redraw();
+        return;
+      }
       // The old tiles were already cleared when the grab started, so just
       // re-stamp at the new anchor (on the placement's own base layer) and
       // report the move.

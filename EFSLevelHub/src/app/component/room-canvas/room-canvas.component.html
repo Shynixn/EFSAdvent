@@ -129,7 +129,9 @@
                     [class.text-sky-300]="contextSubTypeIndex() === i"
                     [class.text-slate-200]="contextSubTypeIndex() !== i"
                   >
-                    <span class="w-3 text-center">{{ contextSubTypeIndex() === i ? '✓' : '' }}</span>
+                    <span class="w-3 text-center">{{
+                      contextSubTypeIndex() === i ? '✓' : ''
+                    }}</span>
                     <span>{{ subType.name }}</span>
                   </button>
                 }

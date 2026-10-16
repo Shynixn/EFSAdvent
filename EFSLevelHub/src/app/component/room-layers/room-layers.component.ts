@@ -151,6 +151,15 @@ export class RoomLayersComponent implements AfterViewInit, OnDestroy {
     to: SmartObjectPlacement;
   }>();
 
+  /** Emits when a **legacy** actor is deleted from the context menu. */
+  @Output() legacyDeleted = new EventEmitter<SmartObjectPlacement>();
+
+  /** Emits when a **legacy** actor is moved with the hand tool. */
+  @Output() legacyMoved = new EventEmitter<{
+    from: SmartObjectPlacement;
+    to: SmartObjectPlacement;
+  }>();
+
   /** The overlay `<canvas>` for the cross-layer warp lines. */
   private readonly warpCanvas = viewChild<ElementRef<HTMLCanvasElement>>('warpOverlay');
   /** The stack container the overlay spans (its offset parent). */
