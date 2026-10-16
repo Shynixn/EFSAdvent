@@ -237,9 +237,7 @@ export class RoomCanvasComponent implements AfterViewInit {
         return false;
       }
       const definition = findSmartObjectDefinition(placement.id);
-      return (
-        definition?.baking === 'actor' && (placement.baseLayerId ?? 0) === this.layerIndex
-      );
+      return definition?.baking === 'actor' && (placement.baseLayerId ?? 0) === this.layerIndex;
     });
   }
 

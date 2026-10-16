@@ -13,9 +13,7 @@ import { Subscription } from 'rxjs';
 import { ButtonComponent } from '../../component/button/button.component';
 import { SystemColumnComponent } from '../../component/system-column/system-column.component';
 import { ToolboxColumnComponent } from '../../component/toolbox-column/toolbox-column.component';
-import {
-  RoomLayersComponent,
-} from '../../component/room-layers/room-layers.component';
+import { RoomLayersComponent } from '../../component/room-layers/room-layers.component';
 import {
   RoomGroundChange,
   RoomTileChange,
