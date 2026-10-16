@@ -202,6 +202,85 @@ export function placementToActor(placement: SmartObjectPlacement): ActorData {
   };
 }
 
+/** Actor id of the warp smart object. */
+export const WARP_ACTOR_ID = 'WARP';
+
+/**
+ * A resolved warp link: a `WARP` actor and the tile it teleports to.
+ *
+ * The actor's `Variable` packs the destination:
+ * - byte 1 (bits 0-7)   — warp type / style (see `WARP.json`),
+ * - byte 2 (bits 8-15)  — destination tile **Y** (0 = the actor's own tile),
+ * - byte 3 (bits 16-23) — destination tile **X** (0 = the actor's own tile),
+ * - byte 4 bits 0-2     — destination base layer (0-7).
+ *
+ * Coordinates are stored in the same units as the actor (`variableByte *
+ * ACTOR_PIXELS_PER_COORDINATE`, i.e. half-tiles where the tile is `value / 2`).
+ */
+export interface WarpLink {
+  /** Starting tile (the warp actor's anchor tile). */
+  fromRow: number;
+  fromCol: number;
+  /** Base layer the warp actor sits on (0-7). */
+  fromLayer: number;
+  /** Destination tile. */
+  toRow: number;
+  toCol: number;
+  /** Destination base layer (0-7). */
+  toLayer: number;
+  /** Warp type/style (byte 1); drives the line colour. */
+  type: number;
+  /** Local activation variable (byte 4 bits 3-7); 0 = always active. */
+  activationVariable: number;
+}
+
+/** Extracts the four variable bytes (1-4) of a little-endian actor variable. */
+function actorVariableBytes(variable: number): { b1: number; b2: number; b3: number; b4: number } {
+  const v = variable >>> 0;
+  return {
+    b1: v & 0xff,
+    b2: (v >>> 8) & 0xff,
+    b3: (v >>> 16) & 0xff,
+    b4: (v >>> 24) & 0xff,
+  };
+}
+
+/**
+ * Resolves every `WARP` actor in a list into a {@link WarpLink}, so the room
+ * editor can draw a line from each warp to where it teleports (possibly on a
+ * different base layer).
+ *
+ * A destination of 0/0 means "stay on the actor's own tile" (the game then uses
+ * the actor position), matching EFSAdvent's `DrawActor`.
+ */
+export function warpLinks(actors: readonly ActorData[]): WarpLink[] {
+  const links: WarpLink[] = [];
+  for (const actor of actors) {
+    if (actor.Id !== WARP_ACTOR_ID) {
+      continue;
+    }
+    const { b1, b2, b3, b4 } = actorVariableBytes(actor.Variable);
+    const isZero = b2 === 0 && b3 === 0;
+    // Actor X/Y are HALF-TILES where the tile is `value / 2`; the destination
+    // bytes are in the same half-tile unit when non-zero.
+    const fromRow = Math.floor(actor.Y / 2);
+    const fromCol = Math.floor(actor.X / 2);
+    const toRow = isZero ? fromRow : b2 / 2;
+    const toCol = isZero ? fromCol : b3 / 2;
+    links.push({
+      fromRow,
+      fromCol,
+      fromLayer: actor.Layer & 0x07,
+      toRow,
+      toCol,
+      toLayer: b4 & 0x07,
+      type: b1,
+      activationVariable: b4 >> 3,
+    });
+  }
+  return links;
+}
+
 /** The inverse of {@link placementToActor}: an actor record back to a placement. */
 export function actorToPlacement(actor: ActorData): SmartObjectPlacement {
   const anchorCol = Math.floor(actor.X / 2);

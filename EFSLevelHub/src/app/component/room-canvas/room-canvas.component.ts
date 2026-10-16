@@ -167,6 +167,28 @@ export class RoomCanvasComponent implements AfterViewInit {
   /** Active tool: `brush` paints, `eraser` clears tiles/ground, `hand` moves objects. */
   @Input() tool: 'brush' | 'hand' | 'eraser' = 'hand';
 
+  /**
+   * Whether this canvas accepts interaction (painting, erasing, dragging,
+   * context menu). When false the canvas is a read-only preview — used by the
+   * stacked layer view, where only the active base layer is editable.
+   */
+  private _interactive = true;
+  @Input()
+  get interactive(): boolean {
+    return this._interactive;
+  }
+  set interactive(value: boolean) {
+    this._interactive = value;
+    queueMicrotask(() => void this.redraw());
+  }
+
+  /**
+   * Whether this canvas should draw the red actor markers / hover outline.
+   * Disabled for the inactive preview canvases so only the editable layer shows
+   * its own markers.
+   */
+  @Input() showMarkers = true;
+
   private _smartObjects: SmartObjectPlacement[] = [];
   /** Smart objects placed in this room (for hit-testing, dragging, ground skip). */
   @Input()
@@ -201,6 +223,24 @@ export class RoomCanvasComponent implements AfterViewInit {
       }
     }
     return actors;
+  }
+
+  /**
+   * Actor-baked placements on the active base layer (`layerIndex`). Actors on
+   * other base layers are hidden from this canvas — the stacked layer view shows
+   * each base layer in its own section, so they are visible there instead.
+   */
+  private actorsOnActiveLayer(): SmartObjectPlacement[] {
+    const draggingSource = this.dragging?.source ?? null;
+    return this._smartObjects.filter((placement) => {
+      if (placement === draggingSource) {
+        return false;
+      }
+      const definition = findSmartObjectDefinition(placement.id);
+      return (
+        definition?.baking === 'actor' && (placement.baseLayerId ?? 0) === this.layerIndex
+      );
+    });
   }
 
   private _groundTiles: number[] | null = null; /**
@@ -309,6 +349,11 @@ export class RoomCanvasComponent implements AfterViewInit {
     void this.redraw();
   }
 
+  /** The canvas element (used by the stacked layer view to align its overlay). */
+  canvasElement(): HTMLCanvasElement | null {
+    return this.canvasRef()?.nativeElement ?? null;
+  }
+
   /** Re-renders the current layer onto the canvas. */
   async redraw(): Promise<void> {
     const canvas = this.canvasRef()?.nativeElement;
@@ -407,7 +452,7 @@ export class RoomCanvasComponent implements AfterViewInit {
 
   /** Starts painting/erasing, or grabs a smart object when the hand tool is active. */
   onPointerDown(event: PointerEvent): void {
-    if (event.button !== 0) {
+    if (!this.interactive || event.button !== 0) {
       return;
     }
     (event.target as HTMLElement).setPointerCapture(event.pointerId);
@@ -427,6 +472,9 @@ export class RoomCanvasComponent implements AfterViewInit {
 
   /** Continues painting / moves a grabbed smart object. */
   onPointerMove(event: PointerEvent): void {
+    if (!this.interactive) {
+      return;
+    }
     if (this.dragging) {
       this.moveDragged(event);
       return;
@@ -480,6 +528,9 @@ export class RoomCanvasComponent implements AfterViewInit {
    */
   onCanvasContextMenu(event: MouseEvent): void {
     event.preventDefault();
+    if (!this.interactive) {
+      return;
+    }
     const tile = this.tileAt(event);
     // Position the menu relative to the canvas wrapper (its offset parent).
     const wrapper = (event.currentTarget as HTMLElement) ?? undefined;
@@ -661,7 +712,7 @@ export class RoomCanvasComponent implements AfterViewInit {
 
   /** Allows dropping a smart object onto the canvas, showing a live preview. */
   onDragOver(event: DragEvent): void {
-    if (!event.dataTransfer?.types.includes('application/x-smart-object')) {
+    if (!this.interactive || !event.dataTransfer?.types.includes('application/x-smart-object')) {
       return;
     }
     event.preventDefault();
@@ -709,6 +760,9 @@ export class RoomCanvasComponent implements AfterViewInit {
    * resulting placement so the host can record it in the stage JSON.
    */
   onDrop(event: DragEvent): void {
+    if (!this.interactive) {
+      return;
+    }
     const id =
       event.dataTransfer?.getData('application/x-smart-object') ??
       this.dragging?.definition.id ??
@@ -787,6 +841,11 @@ export class RoomCanvasComponent implements AfterViewInit {
   private findPlacementAt(tile: { x: number; y: number }): SmartObjectPlacement | null {
     for (let i = this.smartObjects.length - 1; i >= 0; i--) {
       const placement = this.smartObjects[i];
+      // Only objects on the active base layer are interactive; the paired top
+      // layer belongs to the same base layer, so a single check covers both.
+      if ((placement.baseLayerId ?? 0) !== this.layerIndex) {
+        continue;
+      }
       const definition = findSmartObjectDefinition(placement.id);
       if (!definition) {
         continue;
@@ -894,14 +953,13 @@ export class RoomCanvasComponent implements AfterViewInit {
       return;
     }
 
-    // Red markers for every actor in the room.
-    for (const placement of this._smartObjects) {
-      const definition = findSmartObjectDefinition(placement.id);
-      if (definition?.baking !== 'actor') {
-        continue;
+    // Red markers for every actor **on the active base layer** — actors on other
+    // layers are neither drawn nor interactive here.
+    if (this.showMarkers) {
+      for (const placement of this.actorsOnActiveLayer()) {
+        const { x, y } = this.actorBox(placement);
+        this.strokeOutline(ctx, x, y, TILE_SIZE, TILE_SIZE, { color: '#ef4444', dash: [] });
       }
-      const { x, y } = this.actorBox(placement);
-      this.strokeOutline(ctx, x, y, TILE_SIZE, TILE_SIZE, { color: '#ef4444', dash: [] });
     }
 
     // Black dotted outline for the hovered / selected placement.
@@ -974,17 +1032,13 @@ export class RoomCanvasComponent implements AfterViewInit {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     // Keep the red actor markers visible while dragging (the dragged actor is
-    // excluded — its ghost follows the cursor instead).
-    for (const placement of this._smartObjects) {
-      if (placement === dragging.source) {
-        continue;
+    // excluded — its ghost follows the cursor instead). Only actors on the
+    // active base layer are marked, matching the resting view.
+    if (this.showMarkers) {
+      for (const placement of this.actorsOnActiveLayer()) {
+        const { x, y } = this.actorBox(placement);
+        this.strokeOutline(ctx, x, y, TILE_SIZE, TILE_SIZE, { color: '#ef4444', dash: [] });
       }
-      const definition = findSmartObjectDefinition(placement.id);
-      if (definition?.baking !== 'actor') {
-        continue;
-      }
-      const { x, y } = this.actorBox(placement);
-      this.strokeOutline(ctx, x, y, TILE_SIZE, TILE_SIZE, { color: '#ef4444', dash: [] });
     }
 
     // Actor-baked objects draw their actor sprite instead of tiles.

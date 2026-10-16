@@ -14,7 +14,9 @@ import { ButtonComponent } from '../../component/button/button.component';
 import { SystemColumnComponent } from '../../component/system-column/system-column.component';
 import { ToolboxColumnComponent } from '../../component/toolbox-column/toolbox-column.component';
 import {
-  RoomCanvasComponent,
+  RoomLayersComponent,
+} from '../../component/room-layers/room-layers.component';
+import {
   RoomGroundChange,
   RoomTileChange,
 } from '../../component/room-canvas/room-canvas.component';
@@ -77,7 +79,7 @@ import { nextPaint } from '../../util/paint';
     LoadingOverlayComponent,
     SystemColumnComponent,
     ToolboxColumnComponent,
-    RoomCanvasComponent,
+    RoomLayersComponent,
     ThemePickerComponent,
   ],
   templateUrl: './room-page.html',
@@ -165,16 +167,6 @@ export class RoomPage implements OnInit, OnDestroy {
 
   /** Selected ground's id (bound to the toolbox Ground box). */
   readonly selectedGroundId = computed(() => this.selectedGround()?.id ?? '');
-
-  /**
-   * The ground grid for the active base layer (row-major tile ids, `null` when
-   * this layer has no ground painted yet). Drawn under the room layers.
-   */
-  readonly activeGroundTiles = computed<number[] | null>(() => {
-    const base = this.layerIndex();
-    const layer = this.groundLayers().find((entry) => entry.baseLayerId === base);
-    return layer ? layer.bottomLayerTiles : null;
-  });
 
   /** Whether the brush currently paints ground (a ground is selected). */
   readonly groundMode = computed(() => this.selectedGround() !== null);
@@ -310,8 +302,8 @@ export class RoomPage implements OnInit, OnDestroy {
   /** Teardown for the `beforeunload` listener (installed while on this page). */
   private removeUnloadListener: (() => void) | null = null;
 
-  /** The room canvas (used to force a redraw after a theme change). */
-  private readonly roomCanvas = viewChild(RoomCanvasComponent);
+  /** The room layer stack (used to force a redraw after a theme change). */
+  private readonly roomCanvas = viewChild(RoomLayersComponent);
 
   /**
    * Snapshot of the ground grids baked into the room layers at the last save,
@@ -712,8 +704,8 @@ export class RoomPage implements OnInit, OnDestroy {
   selectTheme(theme: TilesetTheme): void {
     if (this.themeService.applyTheme(this.stageId(), theme)) {
       this.stageEditor.setDirty(this.stageId(), true);
-      // The tileset lives on the shared renderer; force the canvas to repaint.
-      void this.roomCanvas()?.redraw();
+      // The tileset lives on the shared renderer; force the layers to repaint.
+      this.roomCanvas()?.redrawAll();
     }
     this.closeTheme();
   }

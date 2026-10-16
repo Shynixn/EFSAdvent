@@ -1,0 +1,46 @@
+<!-- Stacked base layers: one always-open section per base layer (0-7). -->
+<div #stack class="relative flex flex-col gap-3">
+  @for (base of baseLayers; track base) {
+    <section class="rounded-lg border border-slate-700 bg-slate-900/60">
+      <!-- Section header (not collapsible — every layer stays visible) -->
+      <div
+        class="flex w-full items-center justify-between gap-2 border-b border-slate-800 px-3 py-2 text-left"
+      >
+        <span class="flex min-w-0 items-center gap-2">
+          <span class="text-sm font-semibold text-slate-100">{{ layerName(base) }}</span>
+        </span>
+      </div>
+
+      <div class="p-2">
+        <app-room-canvas
+          [room]="room"
+          [index]="index"
+          [renderer]="renderer"
+          [layerIndex]="base"
+          [gba]="gba"
+          [topLayer]="topLayer"
+          [paintTop]="paintTop"
+          [tile]="tile"
+          [tool]="tool"
+          [smartObjects]="smartObjects"
+          [groundTiles]="groundFor(base)"
+          [groundTile]="groundTile"
+          [groundMode]="groundMode"
+          [groundBaseLayerId]="base"
+          [interactive]="base === layerIndex"
+          [showMarkers]="base === layerIndex"
+          (tileChanged)="tileChanged.emit($event)"
+          (groundChanged)="groundChanged.emit($event)"
+          (decorationPlaced)="decorationPlaced.emit($event)"
+          (decorationMoved)="decorationMoved.emit($event)"
+          (decorationDeleted)="decorationDeleted.emit($event)"
+          (decorationRotated)="decorationRotated.emit($event)"
+        />
+      </div>
+    </section>
+  }
+
+  <!-- Cross-layer warp link overlay, spanning every section. -->
+  <canvas #warpOverlay class="pointer-events-none absolute left-0 top-0 z-10"></canvas>
+</div>
+
