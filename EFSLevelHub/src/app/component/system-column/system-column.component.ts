@@ -22,7 +22,7 @@ import { StageData } from '../../entity/fsalib.entity';
  *   [stage]="stageData()"
  *   [selectedRoom]="roomIndex()"
  *   [themeName]="themeName()"
- *   [stageJson]="stageJson()"
+ *   [roomJson]="roomJson()"
  *   [gba]="gba()"
  *   [topLayer]="topLayer()"
  *   [paintTop]="paintTop()"
@@ -46,8 +46,8 @@ export class SystemColumnComponent {
   @Input() selectedRoom: number | null = null;
   /** Display name of the stage's current tileset theme. */
   @Input() themeName = '';
-  /** Pretty-printed JSON of the stage's definition file (null while loading). */
-  @Input() stageJson: string | null = null;
+  /** Pretty-printed JSON of the room's current in-memory data (null while loading). */
+  @Input() roomJson: string | null = null;
 
   /** Whether the GBA tileset/layer is drawn. */
   @Input() gba = false;

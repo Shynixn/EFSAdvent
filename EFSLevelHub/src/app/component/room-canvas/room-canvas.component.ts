@@ -712,9 +712,14 @@ export class RoomCanvasComponent implements AfterViewInit {
       return;
     }
 
-    // Replace any existing connection, then attach a WARP child at the source
-    // door's anchor pointing at the target door's anchor tile/layer.
+    // Replace any existing connection, then attach a WARP child centred in the
+    // source door, pointing at the target door's anchor tile/layer.
     const others = (source.children ?? []).filter((child) => child.id !== WARP_ACTOR_ID);
+    const sourceDef = findSmartObjectDefinition(source.id);
+    const bounds = sourceDef ? smartObjectBounds(sourceDef, source.variantIndex ?? 0) : null;
+    // Half-tile offsets that land the warp on the door's visual centre.
+    const centreDx = bounds ? bounds.minCol * 2 + bounds.cols : 0;
+    const centreDy = bounds ? bounds.minRow * 2 + bounds.rows : 0;
     const warp = createWarpChild(
       source.baseLayerId,
       source.anchorRow,
@@ -722,6 +727,9 @@ export class RoomCanvasComponent implements AfterViewInit {
       target.anchorRow,
       target.anchorCol,
       target.baseLayerId,
+      0,
+      centreDx,
+      centreDy,
     );
     const updated = withChildren(source, [...others, warp]);
     this.placementUpdated.emit({ from: source, to: updated });
@@ -1236,10 +1244,10 @@ export class RoomCanvasComponent implements AfterViewInit {
     const cursor = this.connectCursor();
     const sourceDef = findSmartObjectDefinition(source.id);
     const sourceBounds = sourceDef ? smartObjectBounds(sourceDef, source.variantIndex ?? 0) : null;
-    const fromX = (source.anchorCol + (sourceBounds?.minCol ?? 0) + (sourceBounds?.cols ?? 1) / 2) *
-      TILE_SIZE;
-    const fromY = (source.anchorRow + (sourceBounds?.minRow ?? 0) + (sourceBounds?.rows ?? 1) / 2) *
-      TILE_SIZE;
+    const fromX =
+      (source.anchorCol + (sourceBounds?.minCol ?? 0) + (sourceBounds?.cols ?? 1) / 2) * TILE_SIZE;
+    const fromY =
+      (source.anchorRow + (sourceBounds?.minRow ?? 0) + (sourceBounds?.rows ?? 1) / 2) * TILE_SIZE;
 
     // Outline the source door.
     if (sourceBounds) {
@@ -1270,7 +1278,12 @@ export class RoomCanvasComponent implements AfterViewInit {
     // Highlight a valid target door under the cursor.
     const target = cursor ? this.findPlacementAt(cursor) : null;
     const targetDef = target ? findSmartObjectDefinition(target.id) : null;
-    if (target && target !== source && targetDef?.baking === 'tile' && targetDef.section === 'Doors') {
+    if (
+      target &&
+      target !== source &&
+      targetDef?.baking === 'tile' &&
+      targetDef.section === 'Doors'
+    ) {
       const tb = smartObjectBounds(targetDef, target.variantIndex ?? 0);
       this.strokeOutline(
         ctx,

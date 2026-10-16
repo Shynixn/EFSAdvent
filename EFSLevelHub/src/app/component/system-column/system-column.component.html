@@ -48,7 +48,7 @@
       </svg>
     </button>
 
-    <!-- Debug (collapsible): layer options + the live stage JSON -->
+    <!-- Debug (collapsible): layer options + the live room JSON -->
     <div class="rounded-lg border border-slate-800">
       <button
         type="button"
@@ -93,25 +93,25 @@
             </label>
           </div>
 
-          <!-- Stage JSON: the current definition file, with unsaved edits -->
+          <!-- Room JSON: the room's current in-memory data -->
           <div class="flex flex-col gap-2">
             <div class="flex items-center justify-between gap-2">
               <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                Stage JSON
+                Room JSON
               </h3>
               <button
                 type="button"
                 (click)="clearRoomData.emit()"
                 class="cursor-pointer rounded border border-red-500/40 bg-red-500/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-red-400 transition hover:border-red-400 hover:bg-red-500/20"
-                title="Remove all smart objects and ground from this room in the stage JSON"
+                title="Remove all smart objects and ground from this room"
               >
                 Clear room data
               </button>
             </div>
-            @if (stageJson) {
+            @if (roomJson) {
               <pre
                 class="max-h-96 overflow-auto rounded-lg border border-slate-700 bg-slate-950/80 p-3 font-mono text-[10px] leading-relaxed text-slate-300"
-              ><code>{{ stageJson }}</code></pre>
+              ><code>{{ roomJson }}</code></pre>
             } @else {
               <p class="text-xs text-slate-500">Loading…</p>
             }

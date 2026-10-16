@@ -20,7 +20,7 @@ import {
 } from '../../component/room-canvas/room-canvas.component';
 import { ThemePickerComponent } from '../../component/theme-picker/theme-picker.component';
 import { LoadingOverlayComponent } from '../../component/loading-overlay/loading-overlay.component';
-import { StageService, StageFile } from '../../service/stage.service';
+import { StageService } from '../../service/stage.service';
 import { FSALibService } from '../../service/fsalib.service';
 import { StageTabsService } from '../../service/stage-tabs.service';
 import { StageEditorService } from '../../service/stage-editor.service';
@@ -186,58 +186,29 @@ export class RoomPage implements OnInit, OnDestroy {
   readonly groundTile = computed(() => this.selectedGround()?.tile ?? 0);
 
   /**
-   * The stage's definition file as last read from disk (null while loading).
-   * The displayed {@link stageJson} is derived from this plus the current
-   * room's in-memory smart objects, so the preview reflects unsaved edits.
+   * Live, pretty-printed JSON of the room's **current in-memory data** —
+   * `smartObjects` (with their children), the legacy actors and the painted
+   * ground. Dumped straight from the signals (no merging with the on-disk stage
+   * file), so it always mirrors exactly what the editor holds right now.
    */
-  private readonly stageFile = signal<StageFile | null>(null);
-
-  /**
-   * Live, pretty-printed JSON of the stage's definition file with the current
-   * room's in-memory smart objects and ground merged in — so newly placed/
-   * moved decorations and painted ground show here immediately, before a save.
-   */
-  readonly stageJson = computed<string | null>(() => {
-    const file = this.stageFile();
-    if (!file) {
+  readonly roomJson = computed<string | null>(() => {
+    const grid = this.roomGridPosition();
+    if (!this.room()) {
       return null;
     }
-    const grid = this.roomGridPosition();
-    if (!grid) {
-      return JSON.stringify(file, null, 2);
-    }
-    const merged = this.composeRoomRecord(file, grid);
-    return JSON.stringify(merged, null, 2);
+    const ground = this.groundLayers();
+    return JSON.stringify(
+      {
+        row: grid?.row ?? null,
+        col: grid?.col ?? null,
+        legacyActors: this.legacyActors(),
+        smartObjects: this.smartObjects(),
+        ground,
+      },
+      null,
+      2,
+    );
   });
-
-  /**
-   * Returns a copy of the stage file with this room's in-memory smart objects
-   * and ground merged into its `rooms` array (reflecting unsaved edits).
-   */
-  private composeRoomRecord(file: StageFile, grid: { row: number; col: number }): StageFile {
-    // `smartObjects` is the single source of truth for everything placed in the
-    // room — tile-baked decorations AND actor-baked enemies alike.
-    const placements = this.smartObjects();
-    const ground = this.groundLayers().filter(
-      (layer) =>
-        layer.bottomLayerTiles.some((t) => t !== 0) || layer.topLayerTiles.some((t) => t !== 0),
-    );
-    const rooms = (file.rooms ?? []).filter(
-      (room) => !(room.row === grid.row && room.col === grid.col),
-    );
-    if (placements.length > 0 || ground.length > 0) {
-      const entry: (typeof rooms)[number] = {
-        row: grid.row,
-        col: grid.col,
-        smartObjects: placements,
-      };
-      if (ground.length > 0) {
-        entry.ground = ground;
-      }
-      rooms.push(entry);
-    }
-    return { ...file, rooms: rooms.length > 0 ? rooms : undefined };
-  }
 
   /**
    * Whether this stage has unsaved edits (tile changes and/or a theme change),
@@ -471,15 +442,11 @@ export class RoomPage implements OnInit, OnDestroy {
       await this.prepareEnemySprites();
       await this.ensureEnemies();
 
-      // Show the stage's current definition file in the System column.
-      this.stageFile.set(await this.stageService.getStageFile(stageId));
-
       // Inject any legacy actors (archive actors not previously recorded) into
       // the room's `smartObjects` entry right away, so the stage JSON becomes the
       // single source of truth for every actor in the room.
       if (legacy.length > 0 && grid) {
         await this.persistRoomRecord(stageId, grid);
-        this.stageFile.set(await this.stageService.getStageFile(stageId));
       }
 
       // Register this room as an open tab and mark the stage active so the side
@@ -975,9 +942,6 @@ export class RoomPage implements OnInit, OnDestroy {
       if (grid) {
         await this.persistRoomRecord(id, grid);
       }
-
-      // Refresh the displayed stage JSON now that it has been rewritten.
-      this.stageFile.set(await this.stageService.getStageFile(id));
 
       // Regenerate this room's cached preview so the stage page thumbnail /
       // map grid stay in sync with the edit.

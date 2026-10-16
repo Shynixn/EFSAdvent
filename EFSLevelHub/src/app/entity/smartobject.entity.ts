@@ -99,6 +99,15 @@ export interface SmartObjectPlacement {
    * Used e.g. to attach a `WARP` actor to a door when connecting two doors.
    */
   children?: SmartObjectPlacement[];
+  /**
+   * Extra half-tile offset applied when converting this placement to an actor
+   * (see {@link placementToActor}). Lets an actor sit at a sub-tile position —
+   * e.g. a door's `WARP` child centred in a 2×2 door rather than on its anchor.
+   *
+   * Ignored for tile-baked placements. Defaults to 0.
+   */
+  halfTileDx?: number;
+  halfTileDy?: number;
 }
 
 /**
@@ -205,8 +214,8 @@ export function placementToActor(placement: SmartObjectPlacement): ActorData {
   return {
     Id: placement.id,
     Layer: placement.baseLayerId,
-    X: placement.anchorCol * 2,
-    Y: placement.anchorRow * 2,
+    X: placement.anchorCol * 2 + (placement.halfTileDx ?? 0),
+    Y: placement.anchorRow * 2 + (placement.halfTileDy ?? 0),
     Variable: placement.actorVariable ?? 0,
   };
 }
@@ -353,12 +362,14 @@ export function withChildren(
  * coordinate space.
  *
  * @param sourceLayer  Base layer the source door (and thus the warp) sits on.
- * @param sourceRow    Source door's anchor tile row (where the warp actor sits).
+ * @param sourceRow    Source door's anchor tile row (the warp's base position).
  * @param sourceCol    Source door's anchor tile column.
  * @param destRow      Destination tile row (the target door's anchor).
  * @param destCol      Destination tile column.
  * @param destLayer    Destination base layer.
  * @param type         Warp type/style byte (see `WARP.json`).
+ * @param centreDx     Half-tile X offset to centre the warp in the source door.
+ * @param centreDy     Half-tile Y offset to centre the warp in the source door.
  */
 export function createWarpChild(
   sourceLayer: number,
@@ -368,6 +379,8 @@ export function createWarpChild(
   destCol: number,
   destLayer: number,
   type = 0,
+  centreDx = 0,
+  centreDy = 0,
 ): SmartObjectPlacement {
   const variable =
     ((type & 0xff) |
@@ -375,7 +388,7 @@ export function createWarpChild(
       (((destCol * 2) & 0xff) << 16) |
       ((destLayer & 0x07) << 24)) >>>
     0;
-  return {
+  const warp: SmartObjectPlacement = {
     id: WARP_ACTOR_ID,
     variantIndex: 0,
     baseLayerId: sourceLayer,
@@ -385,6 +398,11 @@ export function createWarpChild(
     topLayerTiles: [],
     actorVariable: variable,
   };
+  if (centreDx !== 0 || centreDy !== 0) {
+    warp.halfTileDx = centreDx;
+    warp.halfTileDy = centreDy;
+  }
+  return warp;
 }
 
 /**
