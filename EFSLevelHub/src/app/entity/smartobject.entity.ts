@@ -364,7 +364,9 @@ export function actorVariableProperties(variable: number): ActorVariableProperti
  * fields. Deriving it on demand (instead of storing it in the stage JSON) keeps
  * the persisted data untouched and always in sync with `actorVariable`.
  */
-export function withActorProperties(placements: readonly SmartObjectPlacement[]): SmartObjectPlacement[] {
+export function withActorProperties(
+  placements: readonly SmartObjectPlacement[],
+): SmartObjectPlacement[] {
   const decorate = (placement: SmartObjectPlacement): SmartObjectPlacement => {
     const definition = findSmartObjectDefinition(placement.id);
     const children = placement.children ? placement.children.map(decorate) : undefined;
@@ -560,10 +562,7 @@ export function repointWarpChild(
   }
   const { b1 } = actorVariableBytes(placement.actorVariable ?? 0);
   const variable =
-    ((b1 & 0xff) |
-      ((destY & 0xff) << 8) |
-      ((destX & 0xff) << 16) |
-      ((destLayer & 0x07) << 24)) >>>
+    ((b1 & 0xff) | ((destY & 0xff) << 8) | ((destX & 0xff) << 16) | ((destLayer & 0x07) << 24)) >>>
     0;
   return { ...placement, actorVariable: variable };
 }

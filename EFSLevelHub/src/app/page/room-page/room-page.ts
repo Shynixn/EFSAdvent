@@ -665,10 +665,7 @@ export class RoomPage implements OnInit, OnDestroy {
    * end of the connection is updated — a moved **target** re-points the source's
    * warp, a moved **source** refreshes its target's back-reference.
    */
-  private reanchorDoorConnections(
-    from: SmartObjectPlacement,
-    to: SmartObjectPlacement,
-  ): void {
+  private reanchorDoorConnections(from: SmartObjectPlacement, to: SmartObjectPlacement): void {
     const { references, repointed } = reanchorConnections(from, to, this.smartObjects());
     let touched = false;
     for (const change of [...references, ...repointed]) {

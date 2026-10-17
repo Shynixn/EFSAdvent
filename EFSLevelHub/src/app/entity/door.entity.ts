@@ -58,9 +58,7 @@ export function isDoorDefinition(definition: SmartObjectDefinition | undefined):
  * The `WARP` actor child that connects a door to another door, or `undefined`.
  * A door is a connection **source** iff it has one.
  */
-export function warpChildOf(
-  placement: SmartObjectPlacement,
-): SmartObjectPlacement | undefined {
+export function warpChildOf(placement: SmartObjectPlacement): SmartObjectPlacement | undefined {
   return (placement.children ?? []).find((child) => child.id === WARP_ACTOR_ID);
 }
 
@@ -113,7 +111,12 @@ export function findSourceOf(
       continue;
     }
     const dest = warpChildDestination(child);
-    if (dest && dest.row === target.anchorRow && dest.col === target.anchorCol && dest.layer === (target.baseLayerId ?? 0)) {
+    if (
+      dest &&
+      dest.row === target.anchorRow &&
+      dest.col === target.anchorCol &&
+      dest.layer === (target.baseLayerId ?? 0)
+    ) {
       return placement;
     }
   }
@@ -270,7 +273,10 @@ export function detachConnections(
       dest.layer === (deleted.baseLayerId ?? 0)
     ) {
       const others = (other.children ?? []).filter((c) => c !== child);
-      changes.push({ from: other, to: { ...other, children: others.length > 0 ? others : undefined } });
+      changes.push({
+        from: other,
+        to: { ...other, children: others.length > 0 ? others : undefined },
+      });
     }
   }
 
