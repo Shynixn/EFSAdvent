@@ -21,6 +21,7 @@ import {
   SmartObjectDefinition,
   SmartObjectTileOffset,
   SmartObjectVariant,
+  findSmartObjectDefinition,
   variantsForSubType,
 } from './smartobject.definition';
 
@@ -105,6 +106,13 @@ export interface SmartObjectPlacement {
    * placed. Undefined for tile-baked objects.
    */
   actorVariable?: number;
+  /**
+   * Decoded fields of {@link actorVariable}, exposed as separate properties so
+   * the debug JSON can be read without decoding the bits by hand.
+   *
+   * Derived on demand (never persisted) — see {@link withActorProperties}.
+   */
+  properties?: Record<string, unknown>;
   /**
    * Child placements attached to this one.
    *
@@ -253,15 +261,21 @@ export const WARP_ACTOR_ID = 'WARP';
 /**
  * A resolved warp link: a `WARP` actor and the tile it teleports to.
  *
- * The actor's `Variable` packs the destination:
- * - byte 1 (bits 0-7)   — warp type / style (see `WARP.json`),
- * - byte 2 (bits 8-15)  — destination tile **Y** (0 = the actor's own tile),
- * - byte 3 (bits 16-23) — destination tile **X** (0 = the actor's own tile),
- * - byte 4 bits 0-2     — destination base layer (0-7).
+ * The actor's `Variable` packs the destination exactly as FSALib's
+ * `assets/actors/WARP.json` defines it:
+ * - byte 1 (bits 0-7)   — **Warp Type** / style (enum values in `WARP.json`),
+ * - byte 2 (bits 8-15)  — **Destination Y** (tile row; 0 = the actor's own),
+ * - byte 3 (bits 16-23) — **Destination X** (tile column; 0 = the actor's own),
+ * - byte 4 bits 0-2     — **Layer** (destination base layer, 0-7),
+ * - byte 4 bits 3-7     — **Activation Variable** (0 = always active).
  *
  * The destination bytes hold **tile** coordinates (the game draws the marker at
- * `byte * ACTOR_PIXELS_PER_COORDINATE` = `byte * 8` px = `byte` tiles — see
- * EFSAdvent's `DrawActor`), NOT the actor's half-tile units.
+ * `byte * ACTOR_PIXELS_PER_COORDINATE` = `byte * 8` px = `byte` tiles), NOT the
+ * actor's half-tile units.
+ *
+ * Note the FIELD ORDER: row (Y) comes first, column (X) second. Swapping the
+ * two makes a horizontal connection arrive one tile above instead of beside the
+ * destination door.
  */
 export interface WarpLink {
   /** Starting tile (the warp actor's anchor tile). */
@@ -269,8 +283,9 @@ export interface WarpLink {
   fromCol: number;
   /** Base layer the warp actor sits on (0-7). */
   fromLayer: number;
-  /** Destination tile. */
+  /** Destination tile row (**Destination Y**). */
   toRow: number;
+  /** Destination tile column (**Destination X**). */
   toCol: number;
   /** Destination base layer (0-7). */
   toLayer: number;
@@ -281,7 +296,16 @@ export interface WarpLink {
 }
 
 /** Extracts the four variable bytes (1-4) of a little-endian actor variable. */
-function actorVariableBytes(variable: number): { b1: number; b2: number; b3: number; b4: number } {
+export function actorVariableBytes(variable: number): {
+  /** Warp Type / style (or an actor-specific value). */
+  b1: number;
+  /** Destination Y (tile row). */
+  b2: number;
+  /** Destination X (tile column). */
+  b3: number;
+  /** Layer (bits 0-2) + Activation Variable (bits 3-7). */
+  b4: number;
+} {
   const v = variable >>> 0;
   return {
     b1: v & 0xff,
@@ -289,6 +313,71 @@ function actorVariableBytes(variable: number): { b1: number; b2: number; b3: num
     b3: (v >>> 16) & 0xff,
     b4: (v >>> 24) & 0xff,
   };
+}
+
+/**
+ * Debug view of an actor's packed `Variable`, exposing every field as its own
+ * property so the room JSON can be read without decoding the bits by hand.
+ *
+ * For a `WARP` actor the destination fields are meaningful (see
+ * {@link WarpLink}); for any other actor they simply show the same bytes.
+ */
+export interface ActorVariableProperties {
+  /** Raw 32-bit actor variable (unsigned). */
+  variable: number;
+  /** Byte 1: warp type/style (see `WARP.json`); actor-specific otherwise. */
+  type: number;
+  /** Byte 2: **Destination Y** (tile row) — see `WARP.json`. */
+  destY: number;
+  /** Byte 3: **Destination X** (tile column) — see `WARP.json`. */
+  destX: number;
+  /** Byte 4 bits 0-2: destination base layer (0-7). */
+  destLayer: number;
+  /** Byte 4 bits 3-7: local activation variable (0 = always active). */
+  activationVariable: number;
+  /** Raw variable bytes as `0x..` hex strings, for quick eyeballing. */
+  rawBytes: { b1: string; b2: string; b3: string; b4: string };
+}
+
+/** Decodes an actor `Variable` into its individual fields (for debugging). */
+export function actorVariableProperties(variable: number): ActorVariableProperties {
+  const { b1, b2, b3, b4 } = actorVariableBytes(variable);
+  const hex = (value: number): string => `0x${value.toString(16).padStart(2, '0')}`;
+  return {
+    variable: variable >>> 0,
+    type: b1,
+    // Byte 2 is Destination Y (row), byte 3 is Destination X (column), per
+    // WARP.json. Naming them by axis avoids the classic swap bug.
+    destY: b2,
+    destX: b3,
+    destLayer: b4 & 0x07,
+    activationVariable: b4 >> 3,
+    rawBytes: { b1: hex(b1), b2: hex(b2), b3: hex(b3), b4: hex(b4) },
+  };
+}
+
+/**
+ * Attaches the decoded `properties` breakdown to every actor-baked placement
+ * (recursively, children included). Tile-baked placements are returned as-is.
+ *
+ * Used by the debug room JSON so each actor shows its variable bits as separate
+ * fields. Deriving it on demand (instead of storing it in the stage JSON) keeps
+ * the persisted data untouched and always in sync with `actorVariable`.
+ */
+export function withActorProperties(placements: readonly SmartObjectPlacement[]): SmartObjectPlacement[] {
+  const decorate = (placement: SmartObjectPlacement): SmartObjectPlacement => {
+    const definition = findSmartObjectDefinition(placement.id);
+    const children = placement.children ? placement.children.map(decorate) : undefined;
+    const base: SmartObjectPlacement = children ? { ...placement, children } : placement;
+    if (definition?.baking !== 'actor' && placement.id !== WARP_ACTOR_ID) {
+      return base;
+    }
+    return {
+      ...base,
+      properties: { ...base.properties, ...actorVariableProperties(placement.actorVariable ?? 0) },
+    };
+  };
+  return placements.map(decorate);
 }
 
 /**
@@ -393,8 +482,8 @@ export function withChildren(
  * @param sourceLayer  Base layer the source door (and thus the warp) sits on.
  * @param sourceRow    Source door's anchor tile row (the warp's base position).
  * @param sourceCol    Source door's anchor tile column.
- * @param destRow      Destination tile row (the target door's anchor).
- * @param destCol      Destination tile column.
+ * @param destY        **Destination Y** (tile row) — byte 2.
+ * @param destX        **Destination X** (tile column) — byte 3.
  * @param destLayer    Destination base layer.
  * @param type         Warp type/style byte (see `WARP.json`).
  * @param centreDx     Half-tile X offset to centre the warp in the source door.
@@ -404,8 +493,8 @@ export function createWarpChild(
   sourceLayer: number,
   sourceRow: number,
   sourceCol: number,
-  destRow: number,
-  destCol: number,
+  destY: number,
+  destX: number,
   destLayer: number,
   type = 0,
   centreDx = 0,
@@ -413,8 +502,8 @@ export function createWarpChild(
 ): SmartObjectPlacement {
   const variable =
     ((type & 0xff) |
-      ((destRow & 0xff) << 8) |
-      ((destCol & 0xff) << 16) |
+      ((destY & 0xff) << 8) |
+      ((destX & 0xff) << 16) |
       ((destLayer & 0x07) << 24)) >>>
     0;
   const warp: SmartObjectPlacement = {
@@ -448,6 +537,9 @@ export function warpChildDestination(
   if (b2 === 0 && b3 === 0) {
     return null;
   }
+  // Byte 2 is Destination Y (row), byte 3 is Destination X (column) — the order
+  // WARP.json defines. Swapping them lands a horizontal connection above the
+  // destination door instead of beside it.
   return { row: b2, col: b3, layer: b4 & 0x07 };
 }
 
@@ -459,8 +551,8 @@ export function warpChildDestination(
  */
 export function repointWarpChild(
   placement: SmartObjectPlacement,
-  destRow: number,
-  destCol: number,
+  destY: number,
+  destX: number,
   destLayer: number,
 ): SmartObjectPlacement {
   if (placement.id !== WARP_ACTOR_ID) {
@@ -469,8 +561,8 @@ export function repointWarpChild(
   const { b1 } = actorVariableBytes(placement.actorVariable ?? 0);
   const variable =
     ((b1 & 0xff) |
-      ((destRow & 0xff) << 8) |
-      ((destCol & 0xff) << 16) |
+      ((destY & 0xff) << 8) |
+      ((destX & 0xff) << 16) |
       ((destLayer & 0x07) << 24)) >>>
     0;
   return { ...placement, actorVariable: variable };

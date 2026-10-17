@@ -6,9 +6,9 @@
  * A **door** is a tile-baked smart object in the `Doors` section. Two doors can
  * be *connected*: the **source** door owns a child `WARP` actor whose `Variable`
  * encodes the destination tile + layer, and the **target** door records a
- * `connectedFrom` back-reference to the source's tile. These "Entrance to Side
- * View" warps auto-return, so a connection needs only the single warp on the
- * source door.
+ * `connectedFrom` back-reference to the source's tile. The warp uses one of the
+ * auto-return "Default … Entrance" types (25/26/27/28), so a connection needs
+ * only the single warp on the source door.
  *
  * Everything in this module is **pure** — it takes placements (and a way to
  * resolve their definitions) and returns new placement lists, without touching
@@ -39,11 +39,12 @@ export const DOOR_SECTION = 'Doors';
 
 /**
  * Warp types for a connected door, indexed by the door's variant (rotation):
- * `0 → 21` (north, the default), `1 → 23` (east), `2 → 22` (south), `3 → 24`
- * (west). These are the "Entrance to Side View" types from `WARP.json`; they
- * auto-return, so a connection needs only ONE warp (on the source door).
+ * `0 → 25` (north, the default), `1 → 27` (east), `2 → 26` (south), `3 → 28`
+ * (west). These are the "Default North/South/East/West Entrance" types from
+ * `WARP.json`, which always auto-return — that is what makes a two-way door
+ * work without a second warp on the other end.
  */
-export const DOOR_WARP_TYPES = [21, 23, 22, 24] as const;
+export const DOOR_WARP_TYPES = [25, 27, 26, 28] as const;
 
 /**
  * Whether a definition is a **door** — a tile-baked object in the `Doors`
@@ -75,7 +76,10 @@ export function isConnected(placement: SmartObjectPlacement): boolean {
 
 /**
  * The warp type byte that matches a door variant (rotation):
- * `0 → 21` (north), `1 → 23` (east), `2 → 22` (south), `3 → 24` (west).
+ * `0 → 25` (north), `1 → 27` (east), `2 → 26` (south), `3 → 28` (west).
+ *
+ * These are the auto-return "Default … Entrance" types, so the destination
+ * door does not need its own warp to send the player back.
  */
 export function warpTypeForVariant(variantIndex: number): number {
   return DOOR_WARP_TYPES[variantIndex % DOOR_WARP_TYPES.length];
@@ -154,14 +158,17 @@ export interface DoorConnectionChange {
 }
 
 /**
- * Connects two doors: attaches a single `WARP` actor to the **source** door,
- * pointing at the target's anchor tile + layer, and records the source's
- * position as the target's `connectedFrom` back-reference.
+ * Connects two doors **both ways**: each door gets its own `WARP` actor child
+ * pointing at the other door's anchor tile + layer.
  *
- * The warp sits at the source door's OWN anchor (the game draws a warp at
+ * The warp sits at the door's OWN anchor (the game draws a warp at
  * `X*8, Y*8` — no centring) and its type follows the source door's facing, so
- * the entrance direction matches the sprite. These entrance types auto-return,
- * so no second warp is needed.
+ * the entrance direction matches the sprite. The type used is an auto-return
+ * "Default … Entrance" one (25/26/27/28), which already brings the player back
+ * — a connection therefore needs only this ONE warp.
+ *
+ * The target additionally records a `connectedFrom` back-reference so the
+ * editor can select/disconnect the connection from either end.
  *
  * Pure: returns `{from,to}` pairs; the caller decides where to store them.
  */

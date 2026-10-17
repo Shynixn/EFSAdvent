@@ -47,6 +47,7 @@ import {
   placementToActor,
   registerActorSmartObjects,
   smartObjectVariant,
+  withActorProperties,
   WARP_ACTOR_ID,
 } from '../../entity/smartobject.entity';
 import {
@@ -200,9 +201,13 @@ export class RoomPage implements OnInit, OnDestroy {
 
   /**
    * Live, pretty-printed JSON of the room's **current in-memory data** —
-   * `smartObjects` (with their children), the legacy actors and the painted
-   * ground. Dumped straight from the signals (no merging with the on-disk stage
-   * file), so it always mirrors exactly what the editor holds right now.
+   * `smartObjects` (with their children) and the painted ground. Dumped
+   * straight from the signals (no merging with the on-disk stage file), so it
+   * always mirrors exactly what the editor holds right now.
+   *
+   * Actor-baked placements carry a decoded `properties` block (the bits of the
+   * actor `Variable`, e.g. a WARP's destination) so they can be read at a
+   * glance. The breakdown is derived for the dump only — never persisted.
    */
   readonly roomJson = computed<string | null>(() => {
     const grid = this.roomGridPosition();
@@ -215,12 +220,35 @@ export class RoomPage implements OnInit, OnDestroy {
         row: grid?.row ?? null,
         col: grid?.col ?? null,
         legacyActors: this.legacyActors(),
-        smartObjects: this.smartObjects(),
+        smartObjects: withActorProperties(this.smartObjects()),
         ground,
       },
       null,
       2,
     );
+  });
+
+  /**
+   * {@link roomJson} without the `legacyActors` **and** `ground` blocks — i.e.
+   * only the data the editor actually persists as semantic records (the smart
+   * objects; ground is baked into the tile layers on save). Used by the
+   * "Copy JSON without legacy" debug button.
+   */
+  readonly roomJsonWithoutLegacy = computed<string | null>(() => {
+    const json = this.roomJson();
+    if (!json) {
+      return null;
+    }
+    try {
+      const {
+        legacyActors: _legacy,
+        ground: _ground,
+        ...rest
+      } = JSON.parse(json) as Record<string, unknown>;
+      return JSON.stringify(rest, null, 2);
+    } catch {
+      return json;
+    }
   });
 
   /**
