@@ -16,7 +16,6 @@ import { StageRenderer } from '../../service/render/stage-renderer';
 import {
   applySmartObject,
   clearSmartObject,
-  createWarpChild,
   findSmartObjectDefinition,
   flattenPlacements,
   placementToActor,
@@ -24,14 +23,19 @@ import {
   smartObjectBounds,
   smartObjectVariant,
   variantsForSubType,
-  warpChildDestination,
   withChildren,
   SmartObjectDefinition,
   SmartObjectPlacement,
   SmartObjectSubType,
   SmartObjectTileOffset,
-  WARP_ACTOR_ID,
 } from '../../entity/smartobject.entity';
+import {
+  connectDoors,
+  disconnectDoor,
+  isConnected,
+  isDoorDefinition,
+  withRotatedWarpType,
+} from '../../entity/door.entity';
 import { SmartObjectDragService } from '../../service/smart-object-drag.service';
 
 /** A tile edit produced by painting on the canvas. */
@@ -66,13 +70,13 @@ const DIMENSION = 32;
  */
 const HIDDEN_ACTOR_MARKERS = new Set(['SWEV', 'TINB', 'GFBS', 'BGMN']);
 
-/**
- * Warp types for a connected door, indexed by the door's variant (rotation):
- * `0 → 21` (north, the default), `1 → 23` (east), `2 → 22` (south), `3 → 24`
- * (west). These are the "Entrance to Side View" types from `WARP.json`; they
- * auto-return, so a connection needs only ONE warp (on the source door).
- */
-const DOOR_WARP_TYPES = [21, 23, 22, 24] as const;
+/** Merges two optional skip sets into one (either may be undefined/empty). */
+function mergeSkip(a: Set<number> | undefined, b: Set<number>): Set<number> {
+  if (!a || a.size === 0) {
+    return b;
+  }
+  return new Set([...a, ...b]);
+}
 
 /**
  * RoomCanvasComponent
@@ -234,7 +238,8 @@ export class RoomCanvasComponent implements AfterViewInit {
    *
    * The placement currently being dragged with the hand tool is omitted, so the
    * grabbed sprite disappears from its old cell while it follows the cursor
-   * (tile-baked objects achieve the same by clearing their stamped tiles).
+   * (tile-baked objects achieve the same by being skipped in the render, see
+   * {@link dragGhostSet} — their tiles are never cleared on grab).
    */
   private get actors(): ActorData[] {
     const draggingSource = this.dragging?.source ?? null;
@@ -456,9 +461,27 @@ export class RoomCanvasComponent implements AfterViewInit {
     if (this.groundTiles) {
       renderer.drawGround(buffer, this.groundTiles, this.gba);
     }
-    renderer.drawSingleLayer(buffer, this.index, this.layerIndex, this.gba, skip);
+    // The grabbed object is HIDDEN (not erased) while it follows the cursor: its
+    // footprint tiles are skipped in the composite so the tiles underneath (and
+    // any overlapped object) show instead of its old sprite. The room layers
+    // themselves stay untouched, so a cancel/drop can never lose tiles.
+    const dragGhost = this.dragGhostSet();
+    renderer.drawSingleLayer(
+      buffer,
+      this.index,
+      this.layerIndex,
+      this.gba,
+      dragGhost.size > 0 ? mergeSkip(skip, dragGhost) : skip,
+    );
     if (this.topLayer) {
-      renderer.drawSingleLayer(buffer, this.index, this.layerIndex + 8, this.gba);
+      const ghostTop = this.dragGhostSet(this.layerIndex + 8);
+      renderer.drawSingleLayer(
+        buffer,
+        this.index,
+        this.layerIndex + 8,
+        this.gba,
+        ghostTop.size > 0 ? ghostTop : undefined,
+      );
     }
 
     // Actors (enemies) on the active layer, drawn over the tiles.
@@ -482,6 +505,70 @@ export class RoomCanvasComponent implements AfterViewInit {
     // The overlay shares the canvas with the actor markers + hover outline, so
     // repaint it whenever the room is redrawn.
     this.drawHoverOutline();
+  }
+
+  /**
+   * Tile offsets (row*32+col) our footprint occupies on the given layer, or an
+   * empty set when nothing is being dragged. Used to skip the grabbed object's
+   * tiles in the render so it visibly detaches from the room without any tile
+   * being cleared (see {@link restampPlacement}).
+   *
+   * The SOURCE's recorded anchor/variant is used (not the live drag variant):
+   * after a rotation the object may still be stamped in a different shape than
+   * the one being dragged, and that old shape is what must disappear.
+   */
+  private dragGhostSet(layerIndex = this.layerIndex): Set<number> {
+    const ghost = new Set<number>();
+    const dragging = this.dragging;
+    if (!dragging) {
+      return ghost;
+    }
+    // Actor-baked objects bake no tiles (the sprite is excluded from `actors`).
+    if (dragging.definition.baking === 'actor') {
+      return ghost;
+    }
+    for (const offsets of this.footprintOffsets(dragging.source, layerIndex)) {
+      for (const offset of offsets) {
+        const row = (dragging.source?.anchorRow ?? dragging.anchorRow) + offset.dRow;
+        const col = (dragging.source?.anchorCol ?? dragging.anchorCol) + offset.dCol;
+        if (row < 0 || row >= DIMENSION || col < 0 || col >= DIMENSION) {
+          continue;
+        }
+        ghost.add(row * DIMENSION + col);
+      }
+    }
+    return ghost;
+  }
+
+  /**
+   * The tile offsets a placement writes to `layerIndex`, for its recorded
+   * variant (bottom tiles on `baseLayerId`, top tiles on `baseLayerId + 8`).
+   * Returns `[]` when the placement does not touch that layer.
+   */
+  private footprintOffsets(
+    placement: SmartObjectPlacement | null,
+    layerIndex: number,
+  ): SmartObjectTileOffset[][] {
+    if (!placement) {
+      return [];
+    }
+    const definition = findSmartObjectDefinition(placement.id);
+    if (!definition) {
+      return [];
+    }
+    const variant = smartObjectVariant(
+      definition,
+      placement.variantIndex ?? 0,
+      placement.subTypeIndex ?? 0,
+    );
+    const baseLayerId = placement.baseLayerId ?? 0;
+    if (layerIndex === baseLayerId + 8) {
+      return [variant.topLayerTiles];
+    }
+    if (layerIndex === baseLayerId) {
+      return [variant.bottomLayerTiles];
+    }
+    return [];
   }
 
   /**
@@ -530,7 +617,9 @@ export class RoomCanvasComponent implements AfterViewInit {
     return skip;
   }
 
-  /** Starts painting/erasing, or grabs a smart object when the hand tool is active. */
+  /**
+   * Starts painting/erasing, or grabs a smart object when the hand tool is active.
+   */
   onPointerDown(event: PointerEvent): void {
     if (event.button !== 0) {
       return;
@@ -706,8 +795,7 @@ export class RoomCanvasComponent implements AfterViewInit {
     if (!placement) {
       return false;
     }
-    const definition = findSmartObjectDefinition(placement.id);
-    return definition?.baking === 'tile' && definition.section === 'Doors';
+    return isDoorDefinition(findSmartObjectDefinition(placement.id));
   }
 
   /**
@@ -717,39 +805,7 @@ export class RoomCanvasComponent implements AfterViewInit {
    */
   isContextPlacementConnected(): boolean {
     const placement = this.contextMenu()?.placement;
-    if (!placement) {
-      return false;
-    }
-    return this.connectionOf(placement) !== undefined || placement.connectedFrom !== undefined;
-  }
-
-  /** The `WARP` child that connects a door to another door, if any. */
-  private connectionOf(placement: SmartObjectPlacement): SmartObjectPlacement | undefined {
-    return (placement.children ?? []).find((child) => child.id === WARP_ACTOR_ID);
-  }
-
-  /**
-   * Finds the door that owns a `WARP` child pointing at `target` (the source of
-   * `target`'s connection), or null. Used so a connection can be cleared from
-   * the target's side too.
-   */
-  private findSourceOf(target: SmartObjectPlacement): SmartObjectPlacement | null {
-    for (const placement of this.smartObjects) {
-      const child = this.connectionOf(placement);
-      if (!child) {
-        continue;
-      }
-      const dest = warpChildDestination(child);
-      if (
-        dest &&
-        dest.row === target.anchorRow &&
-        dest.col === target.anchorCol &&
-        dest.layer === (target.baseLayerId ?? 0)
-      ) {
-        return placement;
-      }
-    }
-    return null;
+    return placement ? isConnected(placement) : false;
   }
 
   /**
@@ -765,51 +821,20 @@ export class RoomCanvasComponent implements AfterViewInit {
     this.contextMenu.set(null);
     this.hoveredPlacement = null;
 
-    const child = this.connectionOf(placement);
-    if (child) {
-      // Source: drop the warp child and clear the target's back-reference.
-      const target = this.findTargetOf(placement);
-      const list = this.smartObjects.map((entry) =>
-        entry === placement
-          ? this.withWarpChild(placement, null)
-          : entry === target
-            ? { ...entry, connectedFrom: undefined }
-            : entry,
-      );
-      this.redrawSmartObjects({ list, skip: [placement] });
-      this.placementUpdated.emit({ from: placement, to: this.withWarpChild(placement, null) });
-      if (target) {
-        this.placementUpdated.emit({ from: target, to: { ...target, connectedFrom: undefined } });
-      }
-    } else if (placement.connectedFrom) {
-      // Target: clear the source's warp child too.
-      const source = this.findSourceOf(placement);
-      this.placementUpdated.emit({
-        from: placement,
-        to: { ...placement, connectedFrom: undefined },
-      });
-      if (source) {
-        this.placementUpdated.emit({ from: source, to: this.withWarpChild(source, null) });
-      }
+    const changes = disconnectDoor(placement, this.smartObjects);
+    if (changes.length === 0) {
+      return;
+    }
+    // Replace each changed placement in the in-memory list by identity, then
+    // re-stamp the survivors so the removed `WARP` child stops drawing.
+    const list = this.smartObjects.map(
+      (entry) => changes.find((change) => change.from === entry)?.to ?? entry,
+    );
+    this.redrawSmartObjects({ list, skip: [] });
+    for (const change of changes) {
+      this.placementUpdated.emit(change);
     }
     void this.redraw();
-  }
-
-  /** The door a source placement's warp points at, if any. */
-  private findTargetOf(source: SmartObjectPlacement): SmartObjectPlacement | null {
-    const child = this.connectionOf(source);
-    const dest = child ? warpChildDestination(child) : null;
-    if (!dest) {
-      return null;
-    }
-    return (
-      this.smartObjects.find(
-        (entry) =>
-          entry.anchorRow === dest.row &&
-          entry.anchorCol === dest.col &&
-          (entry.baseLayerId ?? 0) === dest.layer,
-      ) ?? null
-    );
   }
 
   /**
@@ -836,9 +861,9 @@ export class RoomCanvasComponent implements AfterViewInit {
   }
 
   /**
-   * Completes a connect drag: if another door is under the pointer, attaches a
-   * child `WARP` actor to the **source** door that points at the target door's
-   * anchor tile, then reports the updated source placement.
+   * Completes a connect drag: if another door is under the pointer, delegates to
+   * {@link connectDoors} to attach a child `WARP` actor to the **source** door
+   * and record the target's back-reference, then reports both updates.
    */
   private finishConnect(event: PointerEvent): void {
     const source = this.connectingFrom();
@@ -854,61 +879,19 @@ export class RoomCanvasComponent implements AfterViewInit {
       return;
     }
 
-    // Attach a single warp to the SOURCE door, at the door's OWN anchor (the
-    // game draws a warp at `X*8, Y*8`, no centring). Its type follows the
-    // door's current facing (variant 0 = north → 21, then 23/22/24 for E/S/W),
-    // so the entrance direction matches the door sprite. The return trip needs
-    // no second warp (these entrance types auto-return).
-    const type = this.doorWarpTypeForVariant(source.variantIndex ?? 0);
-    const warp = createWarpChild(
-      source.baseLayerId,
-      source.anchorRow,
-      source.anchorCol,
-      target.anchorRow,
-      target.anchorCol,
-      target.baseLayerId,
-      type,
-    );
-
-    // The source door holds the warp child (points at the target). The TARGET
-    // door records a back-reference so it can be selected and moved too — when
-    // it moves, the source's warp destination follows (see RoomPage).
-    const sourceUpdated = this.withWarpChild(source, warp);
-    const targetUpdated: SmartObjectPlacement = {
-      ...target,
-      connectedFrom: {
-        row: source.anchorRow,
-        col: source.anchorCol,
-        layer: source.baseLayerId ?? 0,
-      },
-    };
+    // The door rules (warp type, anchor, back-reference) live in the door module
+    // so the canvas only reports interaction; the host page persists the result.
+    const { source: sourceChange, target: targetChange } = connectDoors(source, target);
     // Apply both to this canvas's in-memory list so a second connect/render is
     // consistent even before the host round-trips the state.
     const list = this.smartObjects.map((placement) =>
-      placement === source ? sourceUpdated : placement === target ? targetUpdated : placement,
+      placement === source ? sourceChange.to : placement === target ? targetChange.to : placement,
     );
     this.redrawSmartObjects({ list, skip: [source, target] });
-    this.placementUpdated.emit({ from: source, to: sourceUpdated });
-    this.placementUpdated.emit({ from: target, to: targetUpdated });
+    this.placementUpdated.emit(sourceChange);
+    this.placementUpdated.emit(targetChange);
     this.drawHoverOutline();
     void this.redraw();
-  }
-
-  /**
-   * The warp type byte that matches a door variant (rotation):
-   * `0 → 21` (north), `1 → 23` (east), `2 → 22` (south), `3 → 24` (west).
-   */
-  private doorWarpTypeForVariant(variantIndex: number): number {
-    return DOOR_WARP_TYPES[variantIndex % DOOR_WARP_TYPES.length];
-  }
-
-  /** Returns a copy of `placement` whose `WARP` child is replaced by `warp` (or removed when null). */
-  private withWarpChild(
-    placement: SmartObjectPlacement,
-    warp: SmartObjectPlacement | null,
-  ): SmartObjectPlacement {
-    const others = (placement.children ?? []).filter((child) => child.id !== WARP_ACTOR_ID);
-    return withChildren(placement, warp ? [...others, warp] : others);
   }
 
   /**
@@ -918,7 +901,7 @@ export class RoomCanvasComponent implements AfterViewInit {
   private findDoorAtAnyLayer(tile: { x: number; y: number }): SmartObjectPlacement | null {
     for (const placement of this.smartObjects) {
       const definition = findSmartObjectDefinition(placement.id);
-      if (definition?.baking !== 'tile' || definition.section !== 'Doors') {
+      if (!definition || !isDoorDefinition(definition)) {
         continue;
       }
       const bounds = smartObjectBounds(
@@ -965,9 +948,12 @@ export class RoomCanvasComponent implements AfterViewInit {
     // Re-stamp the next variant at the same anchor, keeping the same stacking.
     // A connected door also advances its WARP child's type (21→23→22→24) so the
     // entrance direction matches the sprite facing.
-    const rotated = this.withRotatedWarpType({ ...from, variantIndex: nextVariant }, nextVariant);
+    const rotated = withRotatedWarpType({ ...from, variantIndex: nextVariant }, nextVariant);
     const list = this.smartObjects.map((placement) => (placement === from ? rotated : placement));
-    this.redrawSmartObjects({ list, skip: [from] });
+    // `stale: [from]` tears down the OLD variant's footprint — essential for
+    // large objects like the big door whose footprint changes drastically when
+    // rotated (6×2 ↔ 2×6), otherwise the old tiles linger as ghosts.
+    this.redrawSmartObjects({ list, skip: [from], stale: [from] });
     this.contextMenu.set(null);
     this.hoveredPlacement = null;
     this.decorationRotated.emit({ from, to: rotated });
@@ -1016,7 +1002,7 @@ export class RoomCanvasComponent implements AfterViewInit {
     }
     const changed: SmartObjectPlacement = { ...from, subTypeIndex };
     const list = this.smartObjects.map((placement) => (placement === from ? changed : placement));
-    this.redrawSmartObjects({ list, skip: [from] });
+    this.redrawSmartObjects({ list, skip: [from], stale: [from] });
     this.contextMenu.set(null);
     this.hoveredPlacement = null;
     this.placementUpdated.emit({ from, to: changed });
@@ -1025,36 +1011,23 @@ export class RoomCanvasComponent implements AfterViewInit {
   }
 
   /**
-   * Advances the warp type of a rotated door's `WARP` child so the entrance
-   * direction follows the sprite facing (north → east → south → west, i.e.
-   * types 21 → 23 → 22 → 24). Doors with no connection are returned unchanged.
-   */
-  private withRotatedWarpType(
-    placement: SmartObjectPlacement,
-    variantIndex: number,
-  ): SmartObjectPlacement {
-    const child = this.connectionOf(placement);
-    if (!child) {
-      return placement;
-    }
-    const type = DOOR_WARP_TYPES[variantIndex % DOOR_WARP_TYPES.length];
-    const variable = ((child.actorVariable ?? 0) & ~0xff) | (type & 0xff);
-    const updatedChild: SmartObjectPlacement = { ...child, actorVariable: variable >>> 0 };
-    const children = (placement.children ?? []).map((c) => (c === child ? updatedChild : c));
-    return { ...placement, children };
-  }
-
-  /**
-   * Re-stamps every placed smart object onto the room layers, except `skip`.
+   * Re-stamps every placed smart object onto the room layers.
    *
-   * Each placement records its own definition id + anchor + absolute tiles, so
-   * clearing and re-applying them restores the correct composite (useful after a
-   * deletion, where the removed object's tiles must not leave holes in objects
-   * that overlapped it).
+   * Each placement records its own definition id + anchor + variant, so clearing
+   * and re-applying them restores the correct composite (useful after a
+   * deletion/rotate, where the replaced object's tiles must not leave holes or
+   * ghosts in objects that overlapped it).
+   *
+   * The footprint teardown always clears the union of the CURRENT placements
+   * ({@link smartObjects}), the incoming `override.list` and any explicit
+   * `override.stale` entries, then re-stamps `override.list` minus `skip`. This
+   * is what makes a footprint-CHANGING edit (e.g. rotating the 6×2 ↔ 2×6 big
+   * door) remove the OLD variant's tiles rather than only the new one's.
    */
   private redrawSmartObjects(override?: {
     list: SmartObjectPlacement[];
-    skip: SmartObjectPlacement[];
+    skip?: SmartObjectPlacement[];
+    stale?: SmartObjectPlacement[];
   }): void {
     const room = this.room;
     if (!room) {
@@ -1063,11 +1036,19 @@ export class RoomCanvasComponent implements AfterViewInit {
     // Children are baked into the layers too, so tear down and re-stamp the
     // flattened list (roots + descendants).
     const source = flattenPlacements(override ? override.list : this.smartObjects);
-    // Skipping a placement also skips its descendants (removing a parent removes
-    // its children with it).
-    const skip = flattenPlacements(override ? override.skip : []);
+    // The placements whose footprints must be cleared: the objects currently on
+    // the layers (which hold the OLD state — e.g. the pre-rotation variant) plus
+    // any explicit `stale` entries not in `this.smartObjects`, plus the incoming
+    // list itself (so a footprint that only exists in the new state is cleared
+    // too, before being re-stamped uniformly).
+    const staleSource = flattenPlacements([
+      ...this.smartObjects,
+      ...(override?.list ?? []),
+      ...(override?.stale ?? []),
+    ]);
     // The placements that will remain stamped, in their stored order (later
     // ones draw on top of earlier ones at shared tiles).
+    const skip = flattenPlacements(override?.skip ?? []);
     const stampOrder = source.filter((placement) => !skip.includes(placement));
 
     // Tiles a survivor will (re)stamp, per layer. A tile claimed by any survivor
@@ -1105,10 +1086,10 @@ export class RoomCanvasComponent implements AfterViewInit {
     }
 
     // Tear down every placement being replaced/removed, but keep any tile a
-    // survivor still claims. The footprint is derived from each placement's
-    // definition (same as `claimed`), NOT its recorded refs, so the two stay
+    // survivor still claims. Each footprint is derived from the placement's
+    // definition + recorded variant (same source as `claimed`), so the two stay
     // consistent even when the refs have drifted (rotate/move/loaded JSON).
-    for (const placement of source) {
+    for (const placement of staleSource) {
       const definition = findSmartObjectDefinition(placement.id);
       if (!definition) {
         continue;
@@ -1323,14 +1304,13 @@ export class RoomCanvasComponent implements AfterViewInit {
       this.drawPreview();
       return;
     }
-    // Clear the original tiles right away so the object is *grabbed* in the
-    // view (it follows the cursor) rather than copied and removed on drop.
-    // Use the placement's OWN base layer (not the viewed layer) so grabbing an
-    // object on another base layer does not wipe tiles on the wrong layers.
-    clearSmartObject(placement, room.Layers, placement.baseLayerId);
+    // Do NOT clear the tiles here. The footprint is only HIDDEN from the view
+    // while dragging (see `dragGhost`), so cancelling a grab, dropping on
+    // nothing, or dropping an object whose footprint changed shape (the big
+    // door rotates 6×2 ↔ 2×6) can never destroy neighbour tiles or leave part
+    // of the door stuck in the room.
     // Set `dragging` BEFORE redrawing: the actor-baked sprite is excluded from
-    // the rendered actor list while it is being dragged (tile-baked objects
-    // disappear via the tile clear above).
+    // the rendered actor list and tile-baked objects are skipped by footprint.
     this.dragging = {
       definition,
       source: placement,
@@ -1346,6 +1326,119 @@ export class RoomCanvasComponent implements AfterViewInit {
     this.draggingObject.set(true);
     this.hoveringObject.set(false);
     this.drawPreview();
+  }
+
+  /**
+   * Re-stamps a smart object at a NEW anchor (or with its recorded data
+   * unchanged), compositing it over every OTHER placement.
+   *
+   * The object's footprint is torn down from its **recorded** anchor/variant
+   * (which may differ from the target — e.g. after a rotation of a 6×2 ↔ 2×6
+   * big door) and only tiles that no other placement still claims are cleared,
+   * then every other placement is re-stamped and the moved one is stamped last
+   * (top-most, as a hand-dropped object should be).
+   *
+   * This is deliberately non-destructive: the object was never removed from the
+   * layers on grab, so blindly stamping would overwrite overlapped objects and
+   * blindly clearing would wipe them — and would leave the old variant's tiles
+   * stuck when the footprint changed shape.
+   */
+  private restampPlacement(
+    source: SmartObjectPlacement,
+    target: { anchorRow: number; anchorCol: number },
+  ): SmartObjectPlacement {
+    const room = this.room;
+    const definition = findSmartObjectDefinition(source.id);
+    const baseLayerId = source.baseLayerId ?? 0;
+    const variantIndex = source.variantIndex ?? 0;
+    const subTypeIndex = source.subTypeIndex ?? 0;
+    if (!room || !definition) {
+      return source;
+    }
+    const base = { anchorRow: target.anchorRow, anchorCol: target.anchorCol };
+
+    // Every OTHER placement (children included) keeps its tiles: build the set
+    // of tiles they claim so the teardown below never zeroes them.
+    const others = flattenPlacements(this.smartObjects.filter((entry) => entry !== source));
+    const claimed = new Map<number, Set<number>>();
+    for (const placement of others) {
+      const otherDefinition = findSmartObjectDefinition(placement.id);
+      if (!otherDefinition) {
+        continue;
+      }
+      const variant = smartObjectVariant(
+        otherDefinition,
+        placement.variantIndex ?? 0,
+        placement.subTypeIndex ?? 0,
+      );
+      const add = (layerIndex: number, offsets: SmartObjectTileOffset[]): void => {
+        let set = claimed.get(layerIndex);
+        if (!set) {
+          set = new Set<number>();
+          claimed.set(layerIndex, set);
+        }
+        for (const offset of offsets) {
+          const row = placement.anchorRow + offset.dRow;
+          const col = placement.anchorCol + offset.dCol;
+          if (row < 0 || row >= DIMENSION || col < 0 || col >= DIMENSION) {
+            continue;
+          }
+          set.add(row * DIMENSION + col);
+        }
+      };
+      add(placement.baseLayerId, variant.bottomLayerTiles);
+      add(placement.baseLayerId + 8, variant.topLayerTiles);
+    }
+
+    // Tear down the object's OLD footprint (the tiles actually on the layers —
+    // derived from the placement's RECORDED anchor/variant, not the target) but
+    // keep any tile another placement claims.
+    const oldVariant = smartObjectVariant(definition, variantIndex, subTypeIndex);
+    const clear = (layerIndex: number, offsets: SmartObjectTileOffset[]): void => {
+      const layer = room.Layers[layerIndex];
+      if (!layer) {
+        return;
+      }
+      for (const offset of offsets) {
+        const row = source.anchorRow + offset.dRow;
+        const col = source.anchorCol + offset.dCol;
+        if (row < 0 || row >= DIMENSION || col < 0 || col >= DIMENSION) {
+          continue;
+        }
+        const index = row * DIMENSION + col;
+        if (!claimed.get(layerIndex)?.has(index)) {
+          layer.Tiles[index] = 0;
+        }
+      }
+    };
+    clear(baseLayerId, oldVariant.bottomLayerTiles);
+    clear(baseLayerId + 8, oldVariant.topLayerTiles);
+
+    // Re-stamp the survivors, then the moved object on top of them.
+    for (const placement of others) {
+      const otherDefinition = findSmartObjectDefinition(placement.id);
+      if (!otherDefinition) {
+        continue;
+      }
+      applySmartObject(
+        otherDefinition,
+        placement.anchorRow,
+        placement.anchorCol,
+        room.Layers,
+        placement.baseLayerId,
+        placement.variantIndex ?? 0,
+        placement.subTypeIndex ?? 0,
+      );
+    }
+    return applySmartObject(
+      definition,
+      base.anchorRow,
+      base.anchorCol,
+      room.Layers,
+      baseLayerId,
+      variantIndex,
+      subTypeIndex,
+    );
   }
 
   /** Returns the top-most placement covering a tile, or null. */
@@ -1441,18 +1534,16 @@ export class RoomCanvasComponent implements AfterViewInit {
         void this.redraw();
         return;
       }
-      // The old tiles were already cleared when the grab started, so just
-      // re-stamp at the new anchor (on the placement's own base layer) and
-      // report the move.
-      const moved = applySmartObject(
-        dragging.definition,
-        dragging.anchorRow,
-        dragging.anchorCol,
-        room.Layers,
-        dragging.source.baseLayerId,
-        dragging.variantIndex,
-        dragging.subTypeIndex,
-      );
+      // Re-stamp the object at the new anchor (on the placement's own base
+      // layer), compositing over the survivors instead of blindly overwriting
+      // them: the grab only HID the footprint from the view, so the source is
+      // still stamped. Clearing would wipe overlapped neighbours, and for a
+      // footprint-changing object (the big door's 6×2 ↔ 2×6 rotation) it would
+      // leave the OLD variant's tiles stuck in the room.
+      const moved = this.restampPlacement(dragging.source, {
+        anchorRow: dragging.anchorRow,
+        anchorCol: dragging.anchorCol,
+      });
       // A child (e.g. the connecting WARP actor) travels with its parent: keep
       // the children but translate their anchors by the same delta so the
       // connection stays attached to the moved door. Their `actorVariable`
@@ -1736,7 +1827,7 @@ export class RoomCanvasComponent implements AfterViewInit {
       return;
     }
 
-    const bounds = smartObjectBounds(dragging.definition, dragging.variantIndex);
+    const bounds = smartObjectBounds(dragging.definition, dragging.variantIndex, dragging.subTypeIndex);
     const originX = (dragging.anchorCol + bounds.minCol) * TILE_SIZE;
     const originY = (dragging.anchorRow + bounds.minRow) * TILE_SIZE;
 
@@ -1745,6 +1836,7 @@ export class RoomCanvasComponent implements AfterViewInit {
       dragging.definition,
       this.gba,
       dragging.variantIndex,
+      dragging.subTypeIndex,
     );
     const image = new ImageData(new Uint8ClampedArray(buffer.pixels), buffer.width, buffer.height);
     ctx.globalAlpha = 0.5;

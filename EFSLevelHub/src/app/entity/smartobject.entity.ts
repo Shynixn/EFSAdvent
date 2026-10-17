@@ -525,9 +525,10 @@ export function renderSmartObjectPreview(
   definition: SmartObjectDefinition,
   drawTile: (target: ImageBuffer, px: number, py: number, tileId: number) => void,
   variantIndex = 0,
+  subTypeIndex = 0,
 ): ImageBuffer {
-  const variant = smartObjectVariant(definition, variantIndex);
-  const bounds = smartObjectBounds(definition, variantIndex);
+  const variant = smartObjectVariant(definition, variantIndex, subTypeIndex);
+  const bounds = smartObjectBounds(definition, variantIndex, subTypeIndex);
   const width = bounds.cols * TILE_SIZE;
   const height = bounds.rows * TILE_SIZE;
   const buffer = new ImageBuffer(width, height);

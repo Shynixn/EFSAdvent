@@ -648,11 +648,13 @@ export class StageRenderer {
     definition: SmartObjectDefinition,
     gba = false,
     variantIndex = 0,
+    subTypeIndex = 0,
   ): ImageBuffer {
     return renderSmartObjectPreview(
       definition,
       (target, px, py, tileId) => this.drawTilesetTile(target, px, py, tileId, gba),
       variantIndex,
+      subTypeIndex,
     );
   }
 

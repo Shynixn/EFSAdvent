@@ -46,11 +46,14 @@ import {
   flattenPlacements,
   placementToActor,
   registerActorSmartObjects,
-  repointWarpChild,
   smartObjectVariant,
-  warpChildDestination,
   WARP_ACTOR_ID,
 } from '../../entity/smartobject.entity';
+import {
+  detachConnections as detachDoorConnections,
+  reanchorConnections,
+  warpChildOf,
+} from '../../entity/door.entity';
 import { actorSmartObjects, enemyDefinitions } from '../../entity/enemy.definition';
 import { TilesetTheme } from '../../entity/tileset.util';
 import { StageRenderer } from '../../service/render/stage-renderer';
@@ -619,74 +622,32 @@ export class RoomPage implements OnInit, OnDestroy {
       this.stageRoom.markLayerDirty(this.roomIndex(), base + 8);
       // A moved door carries its connecting `WARP` child actor along, so the
       // actor list changed position too.
-      if ((event.to.children ?? []).some((child) => child.id === WARP_ACTOR_ID)) {
+      if (warpChildOf(event.to)) {
         this.stageRoom.markActorsDirty(this.roomIndex());
       }
     }
     this.replacePlacement(event.from, event.to);
-    // A moved TARGET door must re-point the source door's warp at its new anchor
-    // so the drawn connection follows it.
-    this.repointInboundWarps(event.from, event.to);
-    // A moved SOURCE door must refresh its target's back-reference, which stores
-    // the source's position (the warp destination is unchanged, so the link
-    // itself is still correct — only the recorded source anchor is stale).
-    this.refreshSourceReferences(event.from, event.to);
+    // Re-derive both ends of any connection this door is part of (the moved door
+    // may be a source or a target) through the shared door module.
+    this.reanchorDoorConnections(event.from, event.to);
   }
 
   /**
-   * Refreshes the `connectedFrom` back-reference on a moved **source** door's
-   * target, so the target records the source's new position.
+   * Applies {@link reanchorConnections}: when a connected door moves, the OTHER
+   * end of the connection is updated — a moved **target** re-points the source's
+   * warp, a moved **source** refreshes its target's back-reference.
    */
-  private refreshSourceReferences(from: SmartObjectPlacement, to: SmartObjectPlacement): void {
-    const child = (to.children ?? []).find((c) => c.id === WARP_ACTOR_ID);
-    const dest = child ? warpChildDestination(child) : null;
-    if (!dest) {
-      return;
+  private reanchorDoorConnections(
+    from: SmartObjectPlacement,
+    to: SmartObjectPlacement,
+  ): void {
+    const { references, repointed } = reanchorConnections(from, to, this.smartObjects());
+    let touched = false;
+    for (const change of [...references, ...repointed]) {
+      this.replacePlacement(change.from, change.to);
+      touched = true;
     }
-    const target = this.smartObjects().find(
-      (entry) =>
-        entry.anchorRow === dest.row &&
-        entry.anchorCol === dest.col &&
-        (entry.baseLayerId ?? 0) === dest.layer,
-    );
-    if (target?.connectedFrom) {
-      this.replacePlacement(target, {
-        ...target,
-        connectedFrom: { row: to.anchorRow, col: to.anchorCol, layer: to.baseLayerId ?? 0 },
-      });
-    }
-  }
-
-  /**
-   * Re-points any door whose `WARP` child targeted `from` so it now targets
-   * `to`'s new anchor (used when the connected **target** door moves). No-op
-   * when nothing pointed at `from`.
-   */
-  private repointInboundWarps(from: SmartObjectPlacement, to: SmartObjectPlacement): void {
-    const changed: SmartObjectPlacement[] = [];
-    for (const placement of this.smartObjects()) {
-      const child = (placement.children ?? []).find((c) => c.id === WARP_ACTOR_ID);
-      if (!child) {
-        continue;
-      }
-      const dest = warpChildDestination(child);
-      if (
-        !dest ||
-        dest.row !== from.anchorRow ||
-        dest.col !== from.anchorCol ||
-        dest.layer !== (from.baseLayerId ?? 0)
-      ) {
-        continue;
-      }
-      const updatedChild = repointWarpChild(child, to.anchorRow, to.anchorCol, to.baseLayerId ?? 0);
-      const updated: SmartObjectPlacement = {
-        ...placement,
-        children: (placement.children ?? []).map((c) => (c === child ? updatedChild : c)),
-      };
-      this.replacePlacement(placement, updated);
-      changed.push(updated);
-    }
-    if (changed.length > 0) {
+    if (touched) {
       this.stageRoom.markActorsDirty(this.roomIndex());
     }
   }
@@ -704,7 +665,7 @@ export class RoomPage implements OnInit, OnDestroy {
     const base = event.to.baseLayerId;
     this.stageRoom.markLayerDirty(this.roomIndex(), base);
     this.stageRoom.markLayerDirty(this.roomIndex(), base + 8);
-    if ((event.to.children ?? []).some((child) => child.id === WARP_ACTOR_ID)) {
+    if (warpChildOf(event.to)) {
       this.stageRoom.markActorsDirty(this.roomIndex());
     }
     this.replacePlacement(event.from, event.to);
@@ -788,56 +749,18 @@ export class RoomPage implements OnInit, OnDestroy {
   }
 
   /**
-   * Clears every connection involving `placement`:
+   * Clears every connection involving `placement` via the door module:
    * - drops the `WARP` child from any door that pointed at `placement`, and
    * - clears `connectedFrom` on the door `placement`'s own warp pointed at.
    *
    * Returns how many other placements were changed (0 when it had no links).
    */
   private detachConnections(placement: SmartObjectPlacement): number {
-    let touched = 0;
-
-    // Other doors -> placement (placement is a target).
-    for (const other of this.smartObjects()) {
-      if (other === placement) {
-        continue;
-      }
-      const child = (other.children ?? []).find((c) => c.id === WARP_ACTOR_ID);
-      const dest = child ? warpChildDestination(child) : null;
-      if (
-        child &&
-        dest &&
-        dest.row === placement.anchorRow &&
-        dest.col === placement.anchorCol &&
-        dest.layer === (placement.baseLayerId ?? 0)
-      ) {
-        const others = (other.children ?? []).filter((c) => c !== child);
-        const updated: SmartObjectPlacement = {
-          ...other,
-          children: others.length > 0 ? others : undefined,
-        };
-        this.replacePlacement(other, updated);
-        touched++;
-      }
+    const changes = detachDoorConnections(placement, this.smartObjects());
+    for (const change of changes) {
+      this.replacePlacement(change.from, change.to);
     }
-
-    // placement -> its target (placement is a source): clear the back-reference.
-    const own = (placement.children ?? []).find((c) => c.id === WARP_ACTOR_ID);
-    const ownDest = own ? warpChildDestination(own) : null;
-    if (ownDest) {
-      const target = this.smartObjects().find(
-        (entry) =>
-          entry.anchorRow === ownDest.row &&
-          entry.anchorCol === ownDest.col &&
-          (entry.baseLayerId ?? 0) === ownDest.layer,
-      );
-      if (target && target.connectedFrom) {
-        this.replacePlacement(target, { ...target, connectedFrom: undefined });
-        touched++;
-      }
-    }
-
-    return touched;
+    return changes.length;
   }
 
   /** Loads the placable enemy catalog (actor-baked smart objects) once. */
