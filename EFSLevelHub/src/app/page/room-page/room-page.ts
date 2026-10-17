@@ -57,10 +57,7 @@ import {
   warpChildOf,
   warpTypeForVariant,
 } from '../../entity/door.entity';
-import {
-  createWarpChild,
-  withChildren,
-} from '../../entity/smartobject.entity';
+import { createWarpChild, withChildren } from '../../entity/smartobject.entity';
 import { actorSmartObjects, enemyDefinitions } from '../../entity/enemy.definition';
 import { TilesetTheme } from '../../entity/tileset.util';
 import { StageRenderer } from '../../service/render/stage-renderer';
@@ -182,8 +179,7 @@ export class RoomPage implements OnInit, OnDestroy {
     // actor catalog has not been registered yet (or omits it), otherwise door
     // warps would silently never reach the archive.
     const isActorBaked = (placement: SmartObjectPlacement): boolean =>
-      placement.id === WARP_ACTOR_ID ||
-      findSmartObjectDefinition(placement.id)?.baking === 'actor';
+      placement.id === WARP_ACTOR_ID || findSmartObjectDefinition(placement.id)?.baking === 'actor';
     const smartActors = flattenPlacements(this.smartObjects())
       .filter(isActorBaked)
       .map(placementToActor);
@@ -670,20 +666,17 @@ export class RoomPage implements OnInit, OnDestroy {
     // TEMPORARY TEST: every door automatically gets a WARP child whose exit is
     // 2 tiles above the door (-Y). No connection logic, no pairing.
     const recorded = isDoorDefinition(definition)
-      ? withChildren(
-          placement,
-          [
-            createWarpChild(
-              placement.baseLayerId ?? 0,
-              placement.anchorRow,
-              placement.anchorCol,
-              placement.anchorRow - 2,
-              placement.anchorCol,
-              placement.baseLayerId ?? 0,
-              warpTypeForVariant(placement.variantIndex ?? 0),
-            ),
-          ],
-        )
+      ? withChildren(placement, [
+          createWarpChild(
+            placement.baseLayerId ?? 0,
+            placement.anchorRow,
+            placement.anchorCol,
+            placement.anchorRow - 2,
+            placement.anchorCol,
+            placement.baseLayerId ?? 0,
+            warpTypeForVariant(placement.variantIndex ?? 0),
+          ),
+        ])
       : placement;
     if (recorded !== placement) {
       this.stageRoom.markActorsDirty(this.roomIndex());
