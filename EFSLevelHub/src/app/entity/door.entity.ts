@@ -426,12 +426,7 @@ export function reanchorConnections(
     ) {
       continue;
     }
-    const updatedChild = repointWarpChild(
-      child,
-      destRow,
-      destCol,
-      after.baseLayerId ?? 0,
-    );
+    const updatedChild = repointWarpChild(child, destRow, destCol, after.baseLayerId ?? 0);
     repointed.push({
       from: other,
       to: {
@@ -448,8 +443,7 @@ export function reanchorConnections(
   const ownDest = own ? warpChildDestination(own) : null;
   if (ownDest) {
     const target = placements.find(
-      (entry) =>
-        entry !== before && entry !== after && destinationTargets(ownDest, entry),
+      (entry) => entry !== before && entry !== after && destinationTargets(ownDest, entry),
     );
     if (target?.connectedFrom) {
       references.push({
@@ -490,11 +484,7 @@ export function withRotatedWarpType(
   const variable = ((child.actorVariable ?? 0) & ~0xff) | (type & 0xff);
   let updatedChild: SmartObjectPlacement = { ...child, actorVariable: variable >>> 0 };
   if (definition) {
-    const bounds = smartObjectBounds(
-      definition,
-      variantIndex,
-      placement.subTypeIndex ?? 0,
-    );
+    const bounds = smartObjectBounds(definition, variantIndex, placement.subTypeIndex ?? 0);
     const centreDx = Math.floor(bounds.cols / 2);
     const centreDy = Math.floor(bounds.rows / 2);
     if (centreDx !== 0 || centreDy !== 0) {
