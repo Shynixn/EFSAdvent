@@ -1827,7 +1827,11 @@ export class RoomCanvasComponent implements AfterViewInit {
       return;
     }
 
-    const bounds = smartObjectBounds(dragging.definition, dragging.variantIndex, dragging.subTypeIndex);
+    const bounds = smartObjectBounds(
+      dragging.definition,
+      dragging.variantIndex,
+      dragging.subTypeIndex,
+    );
     const originX = (dragging.anchorCol + bounds.minCol) * TILE_SIZE;
     const originY = (dragging.anchorRow + bounds.minRow) * TILE_SIZE;
 
