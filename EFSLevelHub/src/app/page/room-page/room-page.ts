@@ -667,7 +667,14 @@ export class RoomPage implements OnInit, OnDestroy {
     // door's OLD anchor, so it must run against the PRE-move list — with the
     // moved door swapped in as its new self, so its own child stays consistent.
     const others = this.smartObjects().map((entry) => (entry === event.from ? event.to : entry));
-    const { references, repointed } = reanchorConnections(event.from, event.to, others);
+    // The moved door's definition lets the re-pointed warps re-centre their
+    // destination on its footprint (destinations are stored in half-tiles).
+    const { references, repointed } = reanchorConnections(
+      event.from,
+      event.to,
+      others,
+      findSmartObjectDefinition(event.to.id),
+    );
     this.replacePlacement(event.from, event.to);
     let touched = false;
     for (const change of [...references, ...repointed]) {

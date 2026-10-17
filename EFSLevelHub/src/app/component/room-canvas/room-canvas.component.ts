@@ -881,7 +881,16 @@ export class RoomCanvasComponent implements AfterViewInit {
 
     // The door rules (warp type, anchor, back-reference) live in the door module
     // so the canvas only reports interaction; the host page persists the result.
-    const { source: sourceChange, target: targetChange } = connectDoors(source, target);
+    // Both definitions are passed so the warp actor AND its destination are
+    // centred on their respective door footprints (actors use half-tiles).
+    const sourceDefinition = findSmartObjectDefinition(source.id);
+    const targetDefinition = findSmartObjectDefinition(target.id);
+    const { source: sourceChange, target: targetChange } = connectDoors(
+      source,
+      target,
+      sourceDefinition,
+      targetDefinition,
+    );
     // Apply both to this canvas's in-memory list so a second connect/render is
     // consistent even before the host round-trips the state.
     const list = this.smartObjects.map((placement) =>
@@ -947,8 +956,13 @@ export class RoomCanvasComponent implements AfterViewInit {
     const nextVariant = ((from.variantIndex ?? 0) + 1) % set.length;
     // Re-stamp the next variant at the same anchor, keeping the same stacking.
     // A connected door also advances its WARP child's type (21→23→22→24) so the
-    // entrance direction matches the sprite facing.
-    const rotated = withRotatedWarpType({ ...from, variantIndex: nextVariant }, nextVariant);
+    // entrance direction matches the sprite facing, and re-centres it because a
+    // rotation can change the door's footprint (big door 6×2 ↔ 2×6).
+    const rotated = withRotatedWarpType(
+      { ...from, variantIndex: nextVariant },
+      nextVariant,
+      definition,
+    );
     const list = this.smartObjects.map((placement) => (placement === from ? rotated : placement));
     // `stale: [from]` tears down the OLD variant's footprint — essential for
     // large objects like the big door whose footprint changes drastically when

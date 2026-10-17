@@ -30,6 +30,7 @@ import {
   createWarpChild,
   flattenPlacements,
   repointWarpChild,
+  smartObjectBounds,
   warpChildDestination,
   withChildren,
 } from './smartobject.entity';
@@ -96,6 +97,25 @@ export function withWarpChild(
 }
 
 /**
+ * Whether a warp destination lands on `placement`'s door.
+ *
+ * Destinations are **centred** on the target footprint, so they are frequently
+ * fractional (e.g. tile 13.5 for a 2×2 door anchored at row 13). Comparing the
+ * whole tile the destination falls in keeps every lookup working whether the
+ * warp was centred or wrote the bare anchor.
+ */
+export function destinationTargets(
+  dest: { row: number; col: number; layer: number },
+  placement: SmartObjectPlacement,
+): boolean {
+  return (
+    Math.floor(dest.row) === placement.anchorRow &&
+    Math.floor(dest.col) === placement.anchorCol &&
+    dest.layer === (placement.baseLayerId ?? 0)
+  );
+}
+
+/**
  * Finds the door that owns a `WARP` child pointing at `target` — i.e. the
  * **source** of `target`'s connection — or null. The warp destination is
  * authoritative, so this works even when the target's back-reference is absent
@@ -111,12 +131,7 @@ export function findSourceOf(
       continue;
     }
     const dest = warpChildDestination(child);
-    if (
-      dest &&
-      dest.row === target.anchorRow &&
-      dest.col === target.anchorCol &&
-      dest.layer === (target.baseLayerId ?? 0)
-    ) {
+    if (dest && destinationTargets(dest, target)) {
       return placement;
     }
   }
@@ -136,14 +151,7 @@ export function findTargetOf(
   if (!dest) {
     return null;
   }
-  return (
-    placements.find(
-      (entry) =>
-        entry.anchorRow === dest.row &&
-        entry.anchorCol === dest.col &&
-        (entry.baseLayerId ?? 0) === dest.layer,
-    ) ?? null
-  );
+  return placements.find((entry) => destinationTargets(dest, entry)) ?? null;
 }
 
 /** A single placement update: the original plus its replacement. */
@@ -175,18 +183,68 @@ export interface DoorConnectionChange {
  *
  * Pure: returns `{from,to}` pairs; the caller decides where to store them.
  */
+/**
+ * Connects two doors: the **source** door gets a child `WARP` actor pointing at
+ * the target door's anchor tile + layer, and the target records a
+ * `connectedFrom` back-reference so the connection can be managed from either
+ * end.
+ *
+ * The warp actor sits on the source door's **centre**: actors are positioned in
+ * half-tiles, so a 2×2 door gets `+1/+1` (its true centre) rather than sitting
+ * on the anchor's top-left corner. Its **destination** is likewise centred on
+ * the target door's footprint, so the player arrives in the middle of the door
+ * rather than on its top-left corner.
+ *
+ * The warp type follows the source door's facing (25/26/27/28, the auto-return
+ * "Default … Entrance" styles).
+ *
+ * Pure: returns `{from,to}` pairs; the caller decides where to store them.
+ *
+ * @param sourceDefinition Optional source-door definition, used to centre the
+ *   warp in the source door's footprint.
+ * @param targetDefinition Optional target-door definition, used to centre the
+ *   destination in the target door's footprint.
+ */
 export function connectDoors(
   source: SmartObjectPlacement,
   target: SmartObjectPlacement,
+  sourceDefinition?: SmartObjectDefinition,
+  targetDefinition?: SmartObjectDefinition,
 ): DoorConnectionChange {
+  const centreOf = (
+    definition: SmartObjectDefinition | undefined,
+    placement: SmartObjectPlacement,
+  ): { dx: number; dy: number } => {
+    if (!definition) {
+      return { dx: 0, dy: 0 };
+    }
+    const bounds = smartObjectBounds(
+      definition,
+      placement.variantIndex ?? 0,
+      placement.subTypeIndex ?? 0,
+    );
+    // Half-tile offset from the anchor corner to the footprint's centre.
+    return {
+      dx: Math.floor(bounds.cols / 2),
+      dy: Math.floor(bounds.rows / 2),
+    };
+  };
+
+  const sourceCentre = centreOf(sourceDefinition, source);
+  const targetCentre = centreOf(targetDefinition, target);
+
+  // Destination is stored in HALF-TILES, so the target's tile anchor plus its
+  // centre offset lands the player on the target door's real centre.
   const warp = createWarpChild(
     source.baseLayerId,
     source.anchorRow,
     source.anchorCol,
-    target.anchorRow,
-    target.anchorCol,
+    target.anchorRow + targetCentre.dy / 2,
+    target.anchorCol + targetCentre.dx / 2,
     target.baseLayerId,
     warpTypeForVariant(source.variantIndex ?? 0),
+    sourceCentre.dx,
+    sourceCentre.dy,
   );
   return {
     source: { from: source, to: withWarpChild(source, warp) },
@@ -265,13 +323,7 @@ export function detachConnections(
     }
     const child = warpChildOf(other);
     const dest = child ? warpChildDestination(child) : null;
-    if (
-      child &&
-      dest &&
-      dest.row === deleted.anchorRow &&
-      dest.col === deleted.anchorCol &&
-      dest.layer === (deleted.baseLayerId ?? 0)
-    ) {
+    if (child && dest && destinationTargets(dest, deleted)) {
       const others = (other.children ?? []).filter((c) => c !== child);
       changes.push({
         from: other,
@@ -284,12 +336,7 @@ export function detachConnections(
   const own = warpChildOf(deleted);
   const ownDest = own ? warpChildDestination(own) : null;
   if (ownDest) {
-    const target = placements.find(
-      (entry) =>
-        entry.anchorRow === ownDest.row &&
-        entry.anchorCol === ownDest.col &&
-        (entry.baseLayerId ?? 0) === ownDest.layer,
-    );
+    const target = placements.find((entry) => destinationTargets(ownDest, entry));
     if (target?.connectedFrom) {
       changes.push({ from: target, to: { ...target, connectedFrom: undefined } });
     }
@@ -319,15 +366,37 @@ export interface DoorMoveChange {
  * Note the warp *destination* is unchanged when the source moves (it still
  * points at the target), so only the recorded source anchor needs refreshing.
  *
+ * When the moved door is a **target** and its `definition` is supplied, the
+ * re-pointed destination is re-centred on the target's footprint so it keeps
+ * arriving in the middle of the door.
+ *
  * Pure: returns `{from,to}` updates for the caller to apply.
  */
 export function reanchorConnections(
   before: SmartObjectPlacement,
   after: SmartObjectPlacement,
   placements: readonly SmartObjectPlacement[],
+  definition?: SmartObjectDefinition,
 ): DoorMoveChange {
   const references: DoorPlacementChange[] = [];
   const repointed: DoorPlacementChange[] = [];
+
+  // Half-tile offset from the moved door's anchor corner to its centre.
+  const centre = definition
+    ? (() => {
+        const bounds = smartObjectBounds(
+          definition,
+          after.variantIndex ?? 0,
+          after.subTypeIndex ?? 0,
+        );
+        return {
+          dx: Math.floor(bounds.cols / 2),
+          dy: Math.floor(bounds.rows / 2),
+        };
+      })()
+    : { dx: 0, dy: 0 };
+  const destRow = after.anchorRow + centre.dy / 2;
+  const destCol = after.anchorCol + centre.dx / 2;
 
   // Target moved: re-point every warp that still points at the OLD anchor.
   for (const other of placements) {
@@ -349,16 +418,18 @@ export function reanchorConnections(
     if (
       !child ||
       !dest ||
-      dest.row !== before.anchorRow ||
-      dest.col !== before.anchorCol ||
+      // The stored destination may be centred, so match the whole tile the
+      // target occupied rather than requiring an exact half-tile equality.
+      Math.floor(dest.row) !== before.anchorRow ||
+      Math.floor(dest.col) !== before.anchorCol ||
       dest.layer !== (before.baseLayerId ?? 0)
     ) {
       continue;
     }
     const updatedChild = repointWarpChild(
       child,
-      after.anchorRow,
-      after.anchorCol,
+      destRow,
+      destCol,
       after.baseLayerId ?? 0,
     );
     repointed.push({
@@ -378,11 +449,7 @@ export function reanchorConnections(
   if (ownDest) {
     const target = placements.find(
       (entry) =>
-        entry !== before &&
-        entry !== after &&
-        entry.anchorRow === ownDest.row &&
-        entry.anchorCol === ownDest.col &&
-        (entry.baseLayerId ?? 0) === ownDest.layer,
+        entry !== before && entry !== after && destinationTargets(ownDest, entry),
     );
     if (target?.connectedFrom) {
       references.push({
@@ -406,10 +473,14 @@ export function reanchorConnections(
  * Advances the warp type of `placement`'s `WARP` child so the entrance
  * direction follows the sprite facing (north → east → south → west, i.e. types
  * 21 → 23 → 22 → 24). A door with no connection is returned unchanged.
+ *
+ * When `definition` is supplied the child's half-tile centre is recomputed too,
+ * because rotating a door can change its footprint (the big door is 6×2 ↔ 2×6).
  */
 export function withRotatedWarpType(
   placement: SmartObjectPlacement,
   variantIndex: number,
+  definition?: SmartObjectDefinition,
 ): SmartObjectPlacement {
   const child = warpChildOf(placement);
   if (!child) {
@@ -417,7 +488,22 @@ export function withRotatedWarpType(
   }
   const type = warpTypeForVariant(variantIndex);
   const variable = ((child.actorVariable ?? 0) & ~0xff) | (type & 0xff);
-  const updatedChild: SmartObjectPlacement = { ...child, actorVariable: variable >>> 0 };
+  let updatedChild: SmartObjectPlacement = { ...child, actorVariable: variable >>> 0 };
+  if (definition) {
+    const bounds = smartObjectBounds(
+      definition,
+      variantIndex,
+      placement.subTypeIndex ?? 0,
+    );
+    const centreDx = Math.floor(bounds.cols / 2);
+    const centreDy = Math.floor(bounds.rows / 2);
+    if (centreDx !== 0 || centreDy !== 0) {
+      updatedChild = { ...updatedChild, halfTileDx: centreDx, halfTileDy: centreDy };
+    } else {
+      const { halfTileDx: _dx, halfTileDy: _dy, ...rest } = updatedChild;
+      updatedChild = rest;
+    }
+  }
   const children = (placement.children ?? []).map((c) => (c === child ? updatedChild : c));
   return { ...placement, children };
 }
