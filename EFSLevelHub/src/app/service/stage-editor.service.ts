@@ -223,4 +223,46 @@ export class StageEditorService {
       this.current.set(null);
     }
   }
+
+  /**
+   * Creates, pastes or deletes the room bound to a map-grid cell.
+   *
+   * The change is written straight to the stage archive (allocating/freeing the
+   * room slot and rebinding the cell in both map layouts, see
+   * `FsaInterop.SetRoomSlot`), so no in-memory dirty state is involved. The cache
+   * is invalidated — callers reload with {@link load} to get the new layout.
+   *
+   * @param stageId      Stage being edited.
+   * @param x            Grid column.
+   * @param y            Grid row.
+   * @param copyFromRoom Room whose content is copied (paste), or -1.
+   * @param deleteRoom   When true, delete the cell's room instead.
+   * @returns The new archive bytes, or null when the operation failed.
+   */
+  async setRoomSlot(
+    stageId: string,
+    x: number,
+    y: number,
+    copyFromRoom = -1,
+    deleteRoom = false,
+  ): Promise<Uint8Array | null> {
+    const loaded = this.cache.get(stageId);
+    if (!loaded) {
+      this.logger.warn(`StageEditor: nothing loaded for stage "${stageId}".`);
+      return null;
+    }
+
+    const bytes = await this.fsaLib.setRoomSlot(loaded.arcBytes, x, y, copyFromRoom, deleteRoom);
+    if (!bytes) {
+      this.logger.error(`StageEditor: room slot update failed at ${x},${y} in "${stageId}".`);
+      return null;
+    }
+
+    await this.editor.writeEditorFile(stageArcFilePath(stageId), bytes);
+    this.invalidate(stageId);
+    this.logger.info(
+      `StageEditor: ${deleteRoom ? 'deleted' : 'created'} room at ${x},${y} in "${stageId}".`,
+    );
+    return bytes;
+  }
 }

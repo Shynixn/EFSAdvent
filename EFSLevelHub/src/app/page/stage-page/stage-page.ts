@@ -66,8 +66,6 @@ export class StagePage implements OnInit, OnDestroy {
 
   /** Whether there are unsaved edits for this stage (tiles and/or theme). */
   readonly dirty = computed(() => this.stageEditor.isDirty(this.stageId()));
-  /** Whether a save is currently in flight. */
-  readonly saving = signal(false);
   /** ISO timestamp of the last successful save, if any. */
   readonly lastSaved = signal<string | null>(null);
 
@@ -99,13 +97,6 @@ export class StagePage implements OnInit, OnDestroy {
 
   /** Header title (the stage name). */
   readonly headerTitle = computed(() => this.stageName());
-
-  /**
-   * Whether the Save button is actionable. Saving is always allowed (it simply
-   * writes the current archive), except while a save is already running or the
-   * blocking preview-generation modal is up.
-   */
-  readonly canSave = computed(() => !this.saving() && !this.generatingPreviews());
 
   ngOnInit(): void {
     // Warn before a page refresh/close while this stage has unsaved edits.
@@ -248,55 +239,12 @@ export class StagePage implements OnInit, OnDestroy {
     await this.close();
   }
 
-  /**
-   * Applies pending edits back to the stage's archive and refreshes the derived
-   * previews (thumbnail + room PNGs).
-   *
-   * Saving is always permitted — even with no pending changes it simply
-   * re-writes the current archive — so the button is never a dead end.
-   */
-  async save(): Promise<void> {
-    const id = this.stageId();
-    if (this.saving() || this.generatingPreviews()) {
-      return;
-    }
-
-    this.saving.set(true);
-    this.previewError.set('');
-    // Let the "Saving..." overlay paint before the (blocking) serialization.
-    await nextPaint();
-    try {
-      const result = await this.stageEditor.save(id, this.stageRoom.dirtyLayers());
-      if (!result) {
-        this.previewError.set('Failed to save the stage.');
-        return;
-      }
-
-      await this.stageService.markSaved(id, result.savedAt);
-      this.lastSaved.set(result.savedAt.toISOString());
-      this.stageRoom.setDirty(false);
-      this.stageRoom.clearDirtyLayers();
-
-      // The archive changed, so regenerate previews and refresh the thumbnail.
-      const loaded = this.stageEditor.get(id);
-      if (loaded) {
-        this.stageData.set(loaded.data);
-        await this.generatePreviews(loaded.data, loaded.arcBytes, true);
-      }
-      this.logger.info(`StagePage: saved stage "${id}".`);
-    } catch (error) {
-      this.previewError.set(error instanceof Error ? error.message : 'Failed to save the stage.');
-      this.logger.error(`StagePage: failed to save stage "${id}"`, error);
-    } finally {
-      this.saving.set(false);
-    }
-  }
-
   /** Closes the stage tab and returns to the stages list. */
   async close(): Promise<void> {
     const id = this.stageId();
-    // Ask about unsaved changes; when the user agrees, save before leaving.
-    const proceed = await this.unsaved.confirmDiscard(id, 'close this stage', () => this.save());
+    // There is no Save button on this page any more (rooms are saved from the
+    // room page), so closing can only DISCARD pending room edits.
+    const proceed = await this.unsaved.confirmDiscard(id, 'close this stage');
     if (!proceed) {
       return;
     }

@@ -239,6 +239,122 @@ public static partial class FsaInterop
     }
 
     /// <summary>
+    /// Creates, replaces or deletes a room in the map layout and re-serializes
+    /// the stage.
+    /// </summary>
+    /// <remarks>
+    /// The map layout (<c>mapNNN.csv</c>) is what binds a (x, y) grid cell to a
+    /// room index, so creating a room means:
+    ///
+    /// 1. take the next free room slot (<see cref="Stage.GetNextFreeRoom"/>),
+    /// 2. give it an id and optional source content — either a copy of another
+    ///    room (<c>copyFromRoom &gt;= 0</c>) or a blank room,
+    /// 3. point the grid cell at it.
+    ///
+    /// Deleting clears the cell and then drops every room that no map layout
+    /// references any more (<see cref="Stage.RemoveUnusedRooms"/>), so no orphan
+    /// files are written back.
+    ///
+    /// The single-player layout (<c>mapNNN_1.csv</c>) is kept in sync, because
+    /// that is the map the game reads in normal play. Shadow-battle stages have
+    /// no single-player map and are handled by the null check.
+    /// </remarks>
+    /// <param name="arcData">Raw bytes of the stage archive.</param>
+    /// <param name="x">Grid column of the room cell.</param>
+    /// <param name="y">Grid row of the room cell.</param>
+    /// <param name="copyFromRoom">
+    /// Room index whose content is copied into the new room, or -1 for a blank
+    /// room. Ignored when deleting.
+    /// </param>
+    /// <param name="delete">When true, the cell is emptied instead.</param>
+    /// <returns>The re-serialized archive bytes, or an empty array on failure.</returns>
+    [JSExport]
+    public static byte[] SetRoomSlot(byte[] arcData, int x, int y, int copyFromRoom, bool delete)
+    {
+        try
+        {
+            using var stream = new MemoryStream(arcData, writable: false);
+            using var rarc = new Rarc(stream);
+            using var stage = new Stage(rarc);
+
+            if (!IsCellInBounds(stage.Map, x, y))
+            {
+                return Array.Empty<byte>();
+            }
+
+            if (delete)
+            {
+                stage.Map[x, y] = MapLayout.EMPTY_ROOM_VALUE;
+                if (stage.MapSingleplayer != null && IsCellInBounds(stage.MapSingleplayer, x, y))
+                {
+                    stage.MapSingleplayer[x, y] = MapLayout.EMPTY_ROOM_VALUE;
+                }
+                stage.RemoveUnusedRooms();
+                return SerializeStage(stage);
+            }
+
+            int roomIndex = stage.GetNextFreeRoom();
+            if (roomIndex < 0)
+            {
+                Console.Error.WriteLine("SetRoomSlot: no free room slot.");
+                return Array.Empty<byte>();
+            }
+
+            Room room;
+            if (copyFromRoom >= 0 && copyFromRoom < stage.Rooms.Length && stage.Rooms[copyFromRoom] is { } source)
+            {
+                room = CloneRoom(source);
+            }
+            else
+            {
+                room = new Room();
+            }
+            stage.Rooms[roomIndex] = room;
+
+            // Bind BOTH layouts to the new room: the game plays the
+            // single-player one, while the editor/previews read the shared map.
+            stage.Map[x, y] = roomIndex;
+            if (stage.MapSingleplayer != null && IsCellInBounds(stage.MapSingleplayer, x, y))
+            {
+                stage.MapSingleplayer[x, y] = roomIndex;
+            }
+
+            return SerializeStage(stage);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"SetRoomSlot failed: {ex}");
+            return Array.Empty<byte>();
+        }
+    }
+
+    private static bool IsCellInBounds(MapLayout layout, int x, int y)
+        => x >= 0 && y >= 0 && x < layout.XDimension && y < layout.YDimension;
+
+    /// <summary>
+    /// Deep-copies a room's layers and actors.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Room"/> exposes its layers as a <c>ReadOnlySpan</c> of mutable
+    /// <see cref="Layer"/> objects, so a new room is built by copying the tile
+    /// arrays across (the actor list is rebuilt from the source's actors).
+    /// </remarks>
+    private static Room CloneRoom(Room source)
+    {
+        var room = new Room();
+        var layers = source.Layers;
+        for (int i = 0; i < layers.Length; i++)
+        {
+            room.Layers[i].SetTiles(layers[i].Tiles, 0);
+        }
+        foreach (var actor in source.Actors)
+        {
+            room.Actors.Add(actor);
+        }
+        return room;
+    }
+
+    /// <summary>
     /// Replaces a room's actor list (the <c>d_enemy_mapMMM_RR.bin</c> contents) in
     /// a stage archive and re-serializes it.
     ///

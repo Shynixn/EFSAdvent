@@ -13,6 +13,7 @@ import { Subscription } from 'rxjs';
 import { ButtonComponent } from '../../component/button/button.component';
 import { SystemColumnComponent } from '../../component/system-column/system-column.component';
 import { ToolboxColumnComponent } from '../../component/toolbox-column/toolbox-column.component';
+import { RoomGridAction } from '../../component/map-grid/map-grid.component';
 import { RoomLayersComponent } from '../../component/room-layers/room-layers.component';
 import {
   RoomGroundChange,
@@ -310,6 +311,15 @@ export class RoomPage implements OnInit, OnDestroy {
 
   /** Whether a source ISO is available for a test export. */
   readonly canExport = signal(false);
+
+  /**
+   * Room index held on the grid's clipboard (Copy), or null.
+   * Copying is in-memory only: Paste re-reads the room from the current archive.
+   */
+  readonly copiedRoom = signal<number | null>(null);
+
+  /** Whether a grid room operation (create/paste/delete) is in flight. */
+  readonly roomOperation = signal(false);
 
   /** Whether an export is currently in flight (drives the loading overlay). */
   readonly exporting = signal(false);
@@ -906,6 +916,92 @@ export class RoomPage implements OnInit, OnDestroy {
       return;
     }
     void this.router.navigate(['/my-stages', this.stageId(), 'rooms', roomIndex]);
+  }
+
+  /**
+   * Handles a map-grid context-menu action (create / copy / paste / delete).
+   *
+   * `Copy` only records the room index. The rest are written straight into the
+   * stage archive via {@link StageEditorService.setRoomSlot}, which allocates or
+   * frees the room slot and rebinds the grid cell in both map layouts, so the
+   * page then reloads the stage (`saveVersion` drives `loadRoom`).
+   */
+  async onRoomAction(event: RoomGridAction): Promise<void> {
+    const { action, cell, room } = event;
+    if (action === 'copy') {
+      if (room != null) {
+        this.copiedRoom.set(room);
+        this.logger.info(`RoomPage: copied room ${room}.`);
+      }
+      return;
+    }
+
+    const id = this.stageId();
+    if (this.roomOperation()) {
+      return;
+    }
+
+    // Deleting removes the room's layers and actors — ask first.
+    if (action === 'delete') {
+      if (room == null) {
+        return;
+      }
+      const proceed = window.confirm(
+        `Delete room ${room}? Its tiles and actors are removed from the stage.`,
+      );
+      if (!proceed) {
+        return;
+      }
+    }
+
+    const copyFrom = action === 'paste' ? (this.copiedRoom() ?? -1) : -1;
+    if (action === 'paste' && copyFrom < 0) {
+      return;
+    }
+
+    this.roomOperation.set(true);
+    try {
+      const bytes = await this.stageEditor.setRoomSlot(
+        id,
+        cell.x,
+        cell.y,
+        copyFrom,
+        action === 'delete',
+      );
+      if (!bytes) {
+        this.loadError.set(`Failed to ${action} the room at ${cell.x},${cell.y}.`);
+        return;
+      }
+
+      await this.stageService.markSaved(id, new Date());
+      this.lastSaved.set(new Date().toISOString());
+      const reloaded = await this.stageEditor.load(id);
+      if (!reloaded) {
+        return;
+      }
+      this.stageData.set(reloaded.data);
+
+      // Deleting the room being edited leaves nothing to show: go back to the
+      // stage page. Otherwise stay put and reload this room from the new archive.
+      if (action === 'delete' && room === this.roomIndex()) {
+        this.close();
+        return;
+      }
+      if (action !== 'delete') {
+        // A new room slot exists; regenerate previews so the thumbnail is current.
+        try {
+          await this.stagePreview.ensurePreviews(id, reloaded.data, reloaded.arcBytes, undefined, true);
+        } catch (error) {
+          this.logger.warn(`RoomPage: preview refresh failed for "${id}"`, error);
+        }
+      }
+      this.logger.info(`RoomPage: ${action} room at ${cell.x},${cell.y}.`);
+    } catch (error) {
+      this.loadError.set(error instanceof Error ? error.message : `Failed to ${action}.`);
+      this.logger.error(`RoomPage: room ${action} failed`, error);
+    } finally {
+      this.roomOperation.set(false);
+    }
   }
 
   /** Opens the theme picker modal (loads tileset previews lazily). */

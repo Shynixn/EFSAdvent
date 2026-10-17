@@ -1,5 +1,5 @@
 import { Component, EventEmitter, Input, Output, signal } from '@angular/core';
-import { MapGridComponent } from '../map-grid/map-grid.component';
+import { MapGridComponent, RoomGridAction } from '../map-grid/map-grid.component';
 import { StageData } from '../../entity/fsalib.entity';
 
 /**
@@ -65,8 +65,14 @@ export class SystemColumnComponent {
   /** Whether the Debug section is expanded. */
   readonly debugOpen = signal(false);
 
+  /** Room index currently copied (grid context menu), or null. */
+  @Input() copiedRoom: number | null = null;
+
   /** Emits the clicked room index. */
   @Output() roomSelected = new EventEmitter<number>();
+
+  /** Emits a room context-menu action (create/copy/paste/delete) from the grid. */
+  @Output() roomAction = new EventEmitter<RoomGridAction>();
   /** Emits when the user opens the theme picker. */
   @Output() themeClicked = new EventEmitter<void>();
   /** Emits the new GBA-layer toggle state. */

@@ -9,15 +9,20 @@
   </h2>
 
   <div class="flex-1 space-y-4 px-4 py-4">
-    <!-- Map grid (compact, scales to the column width) -->
+    <!-- Map grid (compact, scales to the column width). Right-click edits rooms. -->
     @if (stage) {
       <app-map-grid
         [stage]="stage"
         [selectedRoom]="selectedRoom"
         [compact]="true"
+        [roomMenu]="true"
+        [copiedRoom]="copiedRoom"
         (roomSelected)="roomSelected.emit($event)"
+        (roomAction)="roomAction.emit($event)"
       />
-      <p class="text-[10px] text-slate-500">Green ring = start room. Click to swap.</p>
+      <p class="text-[10px] text-slate-500">
+        Green ring = start room. Click to swap, right-click to copy, paste, delete or create a room.
+      </p>
     } @else {
       <p class="text-xs text-slate-500">Loading…</p>
     }

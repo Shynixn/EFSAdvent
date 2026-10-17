@@ -23,15 +23,9 @@
     </div>
 
     <div class="flex flex-shrink-0 items-center gap-2">
-      <app-button
-        variant="primary"
-        color="indigo"
-        [disabled]="!canSave()"
-        [icon]="'M4 4a2 2 0 00-2 2v8a2 2 0 002 2h12a2 2 0 002-2V7.414A2 2 0 0017.414 6L14 2.586A2 2 0 0012.586 2H4zm0 2h8v3a1 1 0 001 1h4v6H4V6zm2 7v-2h8v2H6z'"
-        (clicked)="save()"
-      >
-        {{ saving() ? 'Saving…' : 'Save' }}
-      </app-button>
+      @if (generatingPreviews()) {
+        <span class="text-xs text-slate-400">Generating previews…</span>
+      }
     </div>
   </header>
 
@@ -46,8 +40,7 @@
           <section class="space-y-2">
             <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-400">Map Grid</h2>
             <div class="overflow-auto rounded-xl border border-slate-700 bg-slate-900/60 p-3">
-              <app-map-grid [stage]="stageData()" (roomSelected)="openRoom($event)" />
-            </div>
+              <app-map-grid [stage]="stageData()" (roomSelected)="openRoom($event)" />            </div>
             <p class="text-xs text-slate-500">Green ring = start room. Click a room to edit it.</p>
           </section>
 
@@ -84,6 +77,3 @@
 
 <!-- Semi-transparent loading overlay -->
 <app-loading-overlay [open]="isLoading()" message="Loading..." />
-
-<!-- Save progress (reuses the loading overlay) -->
-<app-loading-overlay [open]="saving()" message="Saving..." />

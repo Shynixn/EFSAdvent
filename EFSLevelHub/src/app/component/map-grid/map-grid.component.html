@@ -1,36 +1,81 @@
-<div
-  [class]="'grid grid-flow-row gap-1 ' + (compact ? 'w-full' : 'inline-grid')"
-  [style.gridTemplateColumns]="
-    'repeat(' + width + ', ' + (compact ? 'minmax(0, 1fr)' : '3.5rem') + ')'
-  "
->
-  @for (y of rows; track y) {
-    @for (x of cols; track x) {
-      <button
-        type="button"
-        (click)="select(x, y)"
-        [disabled]="isEmpty(x, y)"
-        [title]="isEmpty(x, y) ? '' : 'Room ' + roomAt(x, y)"
-        [class]="
-          'flex flex-col items-center justify-center rounded border font-mono transition ' +
-          cellClass +
-          ' ' +
-          (isEmpty(x, y)
-            ? 'cursor-default border-slate-700 bg-slate-800/40 text-slate-600'
-            : 'cursor-pointer border-slate-500 bg-slate-700 text-slate-100 hover:border-indigo-400 hover:bg-slate-600') +
-          (isStart(x, y) ? ' ring-2 ring-emerald-400' : '') +
-          (isSelected(x, y) ? ' ring-2 ring-indigo-400 bg-indigo-500/30' : '')
-        "
-      >
-        @if (!isEmpty(x, y)) {
-          <span>{{ roomAt(x, y) }}</span>
-          @if (!compact) {
-            <span class="text-[10px] text-slate-500">{{ x }},{{ y }}</span>
-          }
+<div [class]="'map-grid-root relative ' + (compact ? 'block w-full' : 'inline-block')">
+  <div
+    [class]="'grid grid-flow-row gap-1 ' + (compact ? 'w-full' : 'inline-grid')"
+    [style.gridTemplateColumns]="
+      'repeat(' + width + ', ' + (compact ? 'minmax(0, 1fr)' : '3.5rem') + ')'
+    "
+  >
+    @for (y of rows; track y) {
+      @for (x of cols; track x) {
+        @if (roomMenu) {
+          <!-- Room-editing grid: empty cells are clickable so they can be right-clicked -->
+          <button
+            type="button"
+            (click)="select(x, y)"
+            (contextmenu)="onContextMenu($event, x, y)"
+            [title]="isEmpty(x, y) ? 'Empty — right-click to create a room' : 'Room ' + roomAt(x, y)"
+            [class]="cellClasses(x, y, true)"
+          >
+            @if (!isEmpty(x, y)) {
+              <span>{{ roomAt(x, y) }}</span>
+              @if (!compact) {
+                <span class="text-[10px] text-slate-500">{{ x }},{{ y }}</span>
+              }
+            } @else {
+              <span>—</span>
+            }
+          </button>
         } @else {
-          <span>—</span>
+          <!-- Plain grid: empty cells are inert, right-click does nothing -->
+          <button
+            type="button"
+            (click)="select(x, y)"
+            [disabled]="isEmpty(x, y)"
+            [title]="isEmpty(x, y) ? '' : 'Room ' + roomAt(x, y)"
+            [class]="cellClasses(x, y, false)"
+          >
+            @if (!isEmpty(x, y)) {
+              <span>{{ roomAt(x, y) }}</span>
+              @if (!compact) {
+                <span class="text-[10px] text-slate-500">{{ x }},{{ y }}</span>
+              }
+            } @else {
+              <span>—</span>
+            }
+          </button>
         }
-      </button>
+      }
     }
+  </div>
+
+  <!-- Cell context menu (Copy / Paste / Delete / Create) — opt-in only -->
+  @if (roomMenu && contextMenu(); as menu) {
+    <div
+      class="absolute z-30 min-w-32 overflow-hidden rounded-md border border-slate-700 bg-slate-800 py-1 shadow-xl"
+      [style.left.px]="menu.x"
+      [style.top.px]="menu.y"
+      role="menu"
+    >
+      @for (action of menuActions(); track action) {
+        <button
+          type="button"
+          role="menuitem"
+          (click)="runAction(action)"
+          class="block w-full cursor-pointer px-3 py-1.5 text-left text-xs transition"
+          [class.text-red-300]="isDestructive(action)"
+          [class.hover:bg-red-500/20]="isDestructive(action)"
+          [class.text-slate-200]="!isDestructive(action)"
+          [class.hover:bg-indigo-500/20]="!isDestructive(action)"
+        >
+          {{ actionLabel(action) }}
+        </button>
+      }
+    </div>
+    <!-- Backdrop: closes the menu on any outside click/right-click -->
+    <div
+      class="fixed inset-0 z-20"
+      (click)="closeMenu()"
+      (contextmenu)="$event.preventDefault(); closeMenu()"
+    ></div>
   }
 </div>

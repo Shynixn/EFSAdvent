@@ -44,6 +44,13 @@ interface DotnetExports {
           tilesJson: string,
         ): Uint8Array;
         SetRoomActors(arcData: Uint8Array, roomIndex: number, actorsJson: string): Uint8Array;
+        SetRoomSlot(
+          arcData: Uint8Array,
+          x: number,
+          y: number,
+          copyFromRoom: number,
+          deleteRoom: boolean,
+        ): Uint8Array;
         ListArchiveFiles(arcData: Uint8Array): string;
         ListArchiveTextures(arcData: Uint8Array): string;
         ReadArchiveFile(arcData: Uint8Array, path: string): Uint8Array;
@@ -342,6 +349,33 @@ export class FSALibService {
   async readArchiveFile(arcData: Uint8Array, path: string): Promise<Uint8Array> {
     const fsa = await this.getFsa();
     return fsa.ReadArchiveFile(arcData, path);
+  }
+
+  /**
+   * Creates, replaces or deletes the room bound to a map-grid cell.
+   *
+   * Creating allocates the next free room slot (optionally copying another
+   * room's layers and actors) and points the cell — in both the shared and the
+   * single-player map layout — at it. Deleting clears the cell and drops any
+   * room no layout references any more.
+   *
+   * @param arcData      Stage archive bytes.
+   * @param x            Grid column.
+   * @param y            Grid row.
+   * @param copyFromRoom Room index to copy the content from, or -1 for blank.
+   * @param deleteRoom   When true, delete the cell's room instead.
+   * @returns The re-serialized archive, or null on failure.
+   */
+  async setRoomSlot(
+    arcData: Uint8Array,
+    x: number,
+    y: number,
+    copyFromRoom = -1,
+    deleteRoom = false,
+  ): Promise<Uint8Array | null> {
+    const fsa = await this.getFsa();
+    const result = fsa.SetRoomSlot(arcData, x, y, copyFromRoom, deleteRoom);
+    return result && result.byteLength > 0 ? result : null;
   }
 
   /**
