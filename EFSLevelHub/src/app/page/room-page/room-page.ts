@@ -52,12 +52,9 @@ import {
 } from '../../entity/smartobject.entity';
 import {
   detachConnections as detachDoorConnections,
-  isDoorDefinition,
   reanchorConnections,
   warpChildOf,
-  warpTypeForVariant,
 } from '../../entity/door.entity';
-import { createWarpChild, withChildren } from '../../entity/smartobject.entity';
 import { actorSmartObjects, enemyDefinitions } from '../../entity/enemy.definition';
 import { TilesetTheme } from '../../entity/tileset.util';
 import { StageRenderer } from '../../service/render/stage-renderer';
@@ -503,30 +500,7 @@ export class RoomPage implements OnInit, OnDestroy {
       // so they cannot appear as editor placements. The canvas draws them (red)
       // from `legacyActors`, and the `actors` computed bakes them on save.
       this.legacyActors.set(legacy);
-      // TEMPORARY TEST: normalise every door so it carries a WARP whose exit is
-      // 2 tiles above it. This also repairs doors recorded with an older/incorrect
-      // encoding, which would otherwise keep their stale `actorVariable`.
-      this.smartObjects.set(
-        [...tilePlacements, ...recordedActors].map((placement) =>
-          isDoorDefinition(findSmartObjectDefinition(placement.id))
-            ? withChildren(placement, [
-                createWarpChild(
-                  placement.baseLayerId ?? 0,
-                  placement.anchorRow,
-                  placement.anchorCol,
-                  placement.anchorRow - 2,
-                  placement.anchorCol,
-                  placement.baseLayerId ?? 0,
-                  warpTypeForVariant(placement.variantIndex ?? 0),
-                ),
-              ])
-            : placement,
-        ),
-      );
-      // A corrected warp changes the actor list, so re-bake it on save.
-      if (tilePlacements.some((p) => isDoorDefinition(findSmartObjectDefinition(p.id)))) {
-        this.stageRoom.markActorsDirty(this.roomIndex());
-      }
+      this.smartObjects.set([...tilePlacements, ...recordedActors]);
       this.groundLayers.set((record?.ground ?? []).map((layer) => ({ ...layer })));
 
       // Load the sprite sheets/thumbnails first, then the placable enemy catalog
@@ -663,25 +637,7 @@ export class RoomPage implements OnInit, OnDestroy {
       this.stageRoom.markLayerDirty(this.roomIndex(), base);
       this.stageRoom.markLayerDirty(this.roomIndex(), base + 8);
     }
-    // TEMPORARY TEST: every door automatically gets a WARP child whose exit is
-    // 2 tiles above the door (-Y). No connection logic, no pairing.
-    const recorded = isDoorDefinition(definition)
-      ? withChildren(placement, [
-          createWarpChild(
-            placement.baseLayerId ?? 0,
-            placement.anchorRow,
-            placement.anchorCol,
-            placement.anchorRow - 2,
-            placement.anchorCol,
-            placement.baseLayerId ?? 0,
-            warpTypeForVariant(placement.variantIndex ?? 0),
-          ),
-        ])
-      : placement;
-    if (recorded !== placement) {
-      this.stageRoom.markActorsDirty(this.roomIndex());
-    }
-    this.smartObjects.update((list) => [...list, recorded]);
+    this.smartObjects.update((list) => [...list, placement]);
   }
 
   /**

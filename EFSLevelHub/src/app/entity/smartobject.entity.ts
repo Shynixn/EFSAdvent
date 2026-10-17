@@ -303,7 +303,8 @@ export function encodeWarpDestinationX(tile: number): number {
 
 /**
  * Rebuilds a `WARP` actor's `Variable` with a new destination, preserving its
- * type byte (bits 0-7). Used when a door moves so its child warp follows.
+ * type byte (bits 0-7). Useful when a warp's destination must be re-derived
+ * without touching its style (e.g. re-pointing an existing child).
  */
 export function encodeWarpVariable(
   existingVariable: number,

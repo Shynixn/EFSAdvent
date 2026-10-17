@@ -24,8 +24,6 @@ import {
   smartObjectVariant,
   variantsForSubType,
   withChildren,
-  encodeWarpVariable,
-  WARP_ACTOR_ID,
   SmartObjectDefinition,
   SmartObjectPlacement,
   SmartObjectSubType,
@@ -1546,9 +1544,11 @@ export class RoomCanvasComponent implements AfterViewInit {
         anchorRow: dragging.anchorRow,
         anchorCol: dragging.anchorCol,
       });
-      // A child (e.g. the door's WARP actor) travels with its parent. TEMPORARY
-      // TEST: the door's exit is always 2 tiles above it, so the child anchor
-      // AND its destination are re-derived from the door's new position.
+      // A child (e.g. the connecting WARP actor) travels with its parent: keep
+      // the children but translate their anchors by the same delta so the
+      // connection stays attached to the moved door. Their `actorVariable`
+      // (destination) is untouched; the host re-points the OTHER end of the
+      // connection via `reanchorConnections` on `decorationMoved`.
       const deltaRow = moved.anchorRow - dragging.source.anchorRow;
       const deltaCol = moved.anchorCol - dragging.source.anchorCol;
       let withChildrenMoved: SmartObjectPlacement = moved;
@@ -1559,16 +1559,6 @@ export class RoomCanvasComponent implements AfterViewInit {
             ...child,
             anchorRow: child.anchorRow + deltaRow,
             anchorCol: child.anchorCol + deltaCol,
-            ...(child.id === WARP_ACTOR_ID
-              ? {
-                  actorVariable: encodeWarpVariable(
-                    child.actorVariable ?? 0,
-                    moved.anchorRow - 2,
-                    moved.anchorCol,
-                    moved.baseLayerId ?? 0,
-                  ),
-                }
-              : {}),
           })),
         );
       }
