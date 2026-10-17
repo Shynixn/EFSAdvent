@@ -259,19 +259,82 @@ export function placementToActor(placement: SmartObjectPlacement): ActorData {
 export const WARP_ACTOR_ID = 'WARP';
 
 /**
+ * Decodes a destination **row** (Y) from a `WARP` variable byte.
+ *
+ * FSALib defines the fields of `WARP` (`assets/actors/WARP.json`) at:
+ * - `Destination Y` — bitOffset 8, 8 bits,
+ * - `Destination X` — bitOffset 16, 8 bits,
+ *
+ * The bytes are stored in **HALF-TILES**, the same coordinate space as
+ * `Actor.XCoord` / `Actor.YCoord` — NOT in tiles.
+ *
+ * Verified in-game: a door at tile row 13 wrote `destY=11` and the player
+ * arrived at row **5.5** (`11 / 2`), and `destX=14` arrived at column **7**
+ * (`14 / 2`).
+ *
+ * The return value is therefore a fractional tile row (e.g. `5.5`).
+ */
+export function decodeWarpDestination(byte: number): number {
+  return (byte & 0xff) / 2;
+}
+
+/**
+ * Encodes a destination **row** (Y) into a `WARP` variable byte.
+ *
+ * Exact inverse of {@link decodeWarpDestination}: the destination is stored in
+ * half-tiles (`tile * 2`), matching the actor coordinate space.
+ */
+export function encodeWarpDestination(tile: number): number {
+  return (tile * 2) & 0xff;
+}
+
+/** Decodes a destination **column** (X) from a `WARP` variable byte. */
+export function decodeWarpDestinationX(byte: number): number {
+  return (byte & 0xff) / 2;
+}
+
+/**
+ * Encodes a destination **column** (X) into a `WARP` variable byte —
+ * the exact inverse of {@link decodeWarpDestinationX}.
+ */
+export function encodeWarpDestinationX(tile: number): number {
+  return (tile * 2) & 0xff;
+}
+
+/**
+ * Rebuilds a `WARP` actor's `Variable` with a new destination, preserving its
+ * type byte (bits 0-7). Used when a door moves so its child warp follows.
+ */
+export function encodeWarpVariable(
+  existingVariable: number,
+  destY: number,
+  destX: number,
+  destLayer: number,
+): number {
+  const type = (existingVariable >>> 0) & 0xff;
+  return (
+    (type |
+      (encodeWarpDestination(destY) << 8) |
+      (encodeWarpDestinationX(destX) << 16) |
+      ((destLayer & 0x07) << 24)) >>>
+    0
+  );
+}
+
+/**
  * A resolved warp link: a `WARP` actor and the tile it teleports to.
  *
- * The actor's `Variable` packs the destination exactly as FSALib's
- * `assets/actors/WARP.json` defines it:
- * - byte 1 (bits 0-7)   — **Warp Type** / style (enum values in `WARP.json`),
- * - byte 2 (bits 8-15)  — **Destination Y** (tile row; 0 = the actor's own),
- * - byte 3 (bits 16-23) — **Destination X** (tile column; 0 = the actor's own),
- * - byte 4 bits 0-2     — **Layer** (destination base layer, 0-7),
- * - byte 4 bits 3-7     — **Activation Variable** (0 = always active).
+ * The actor's 32-bit `Variable` packs the destination exactly as FSALib's
+ * `assets/actors/WARP.json` defines it (bit offsets are into the variable):
+ * - bits 0-7   — **Warp Type** / style (enum values in `WARP.json`),
+ * - bits 8-15  — **Destination Y** (half-tile row; 0 = the actor's own),
+ * - bits 16-23 — **Destination X** (half-tile column; 0 = the actor's own),
+ * - bits 24-26 — **Layer** (destination base layer, 0-7),
+ * - bits 27-31 — **Activation Variable** (0 = always active).
  *
- * The destination bytes hold **tile** coordinates (the game draws the marker at
- * `byte * ACTOR_PIXELS_PER_COORDINATE` = `byte * 8` px = `byte` tiles), NOT the
- * actor's half-tile units.
+ * The destination bytes are in **HALF-TILES**, the same space as
+ * `Actor.XCoord` / `Actor.YCoord` — verified in-game (see
+ * {@link decodeWarpDestination}).
  *
  * Note the FIELD ORDER: row (Y) comes first, column (X) second. Swapping the
  * two makes a horizontal connection arrive one tile above instead of beside the
@@ -283,9 +346,9 @@ export interface WarpLink {
   fromCol: number;
   /** Base layer the warp actor sits on (0-7). */
   fromLayer: number;
-  /** Destination tile row (**Destination Y**). */
+  /** Destination row in tiles — may be fractional (half-tiles). */
   toRow: number;
-  /** Destination tile column (**Destination X**). */
+  /** Destination column in tiles — may be fractional (half-tiles). */
   toCol: number;
   /** Destination base layer (0-7). */
   toLayer: number;
@@ -295,15 +358,20 @@ export interface WarpLink {
   activationVariable: number;
 }
 
-/** Extracts the four variable bytes (1-4) of a little-endian actor variable. */
+/**
+ * Extracts the four variable bytes (1-4) of an actor `Variable`.
+ *
+ * Byte 1 is the least significant byte of the variable (bit offset 0), matching
+ * FSALib's `Actor.VariableByte1` and `WARP.json`'s `bitOffset` values.
+ */
 export function actorVariableBytes(variable: number): {
-  /** Warp Type / style (or an actor-specific value). */
+  /** Warp Type / style (bits 0-7; or an actor-specific value). */
   b1: number;
-  /** Destination Y (tile row). */
+  /** Destination Y — tile row (bits 8-15). */
   b2: number;
-  /** Destination X (tile column). */
+  /** Destination X — tile column (bits 16-23). */
   b3: number;
-  /** Layer (bits 0-2) + Activation Variable (bits 3-7). */
+  /** Layer (bits 0-2) + Activation Variable (bits 3-7) of this byte. */
   b4: number;
 } {
   const v = variable >>> 0;
@@ -346,10 +414,10 @@ export function actorVariableProperties(variable: number): ActorVariableProperti
   return {
     variable: variable >>> 0,
     type: b1,
-    // Byte 2 is Destination Y (row), byte 3 is Destination X (column), per
-    // WARP.json. Naming them by axis avoids the classic swap bug.
-    destY: b2,
-    destX: b3,
+    // Byte 2 is Destination Y (row), byte 3 is Destination X (column), both
+    // plain tile coordinates (see encodeWarpDestination*).
+    destY: decodeWarpDestination(b2),
+    destX: decodeWarpDestinationX(b3),
     destLayer: b4 & 0x07,
     activationVariable: b4 >> 3,
     rawBytes: { b1: hex(b1), b2: hex(b2), b3: hex(b3), b4: hex(b4) },
@@ -398,13 +466,12 @@ export function warpLinks(actors: readonly ActorData[]): WarpLink[] {
     }
     const { b1, b2, b3, b4 } = actorVariableBytes(actor.Variable);
     const isZero = b2 === 0 && b3 === 0;
-    // Actor X/Y are HALF-TILES where the tile is `value / 2`; the destination
-    // bytes hold TILE coordinates directly (the game draws the marker at
-    // `byte * 8` px = `byte` tiles).
-    const fromRow = Math.floor(actor.Y / 2);
-    const fromCol = Math.floor(actor.X / 2);
-    const toRow = isZero ? fromRow : b2;
-    const toCol = isZero ? fromCol : b3;
+    // Actor X/Y are HALF-TILES; the destination bytes use the SAME half-tile
+    // space (byte 2 = Y/row, byte 3 = X/column), so decode to tiles by /2.
+    const fromRow = actor.Y / 2;
+    const fromCol = actor.X / 2;
+    const toRow = isZero ? fromRow : decodeWarpDestination(b2);
+    const toCol = isZero ? fromCol : decodeWarpDestinationX(b3);
     links.push({
       fromRow,
       fromCol,
@@ -477,9 +544,9 @@ export function withChildren(
  * suitable for attaching as a child of the source door.
  *
  * The actor's `Variable` packs the destination (see {@link WarpLink}):
- * `type | destY<<8 | destX<<16 | destLayer<<24` where the destination tile
- * coordinates are stored as **tiles** (the game's own convention — it draws the
- * marker at `byte * 8` px = `byte` tiles).
+ * `type | destY<<8 | destX<<16 | destLayer<<24`, where the destination tile
+ * coordinates are stored as plain **tiles** (FSALib `WARP.json` bit offsets 8
+ * and 16; the game draws the marker at `byte * 8` px = `byte` tiles).
  *
  * @param sourceLayer  Base layer the source door (and thus the warp) sits on.
  * @param sourceRow    Source door's anchor tile row (the warp's base position).
@@ -504,8 +571,8 @@ export function createWarpChild(
 ): SmartObjectPlacement {
   const variable =
     ((type & 0xff) |
-      ((destY & 0xff) << 8) |
-      ((destX & 0xff) << 16) |
+      (encodeWarpDestination(destY) << 8) |
+      (encodeWarpDestinationX(destX) << 16) |
       ((destLayer & 0x07) << 24)) >>>
     0;
   const warp: SmartObjectPlacement = {
@@ -528,6 +595,9 @@ export function createWarpChild(
 /**
  * Reads a `WARP` actor placement's destination tile, or null when it does not
  * encode one (a zero destination means "the actor's own tile").
+ *
+ * `row`/`col` are in tiles and may be **fractional** — the stored bytes are
+ * half-tiles (see {@link decodeWarpDestination}).
  */
 export function warpChildDestination(
   placement: SmartObjectPlacement,
@@ -539,10 +609,13 @@ export function warpChildDestination(
   if (b2 === 0 && b3 === 0) {
     return null;
   }
-  // Byte 2 is Destination Y (row), byte 3 is Destination X (column) — the order
-  // WARP.json defines. Swapping them lands a horizontal connection above the
-  // destination door instead of beside it.
-  return { row: b2, col: b3, layer: b4 & 0x07 };
+  // Byte 2 is Destination Y (row), byte 3 is Destination X (column); both are
+  // HALF-TILES (FSALib `WARP.json` bits 8 and 16), decoded to tiles by /2.
+  return {
+    row: decodeWarpDestination(b2),
+    col: decodeWarpDestinationX(b3),
+    layer: b4 & 0x07,
+  };
 }
 
 /**
@@ -562,7 +635,10 @@ export function repointWarpChild(
   }
   const { b1 } = actorVariableBytes(placement.actorVariable ?? 0);
   const variable =
-    ((b1 & 0xff) | ((destY & 0xff) << 8) | ((destX & 0xff) << 16) | ((destLayer & 0x07) << 24)) >>>
+    ((b1 & 0xff) |
+      (encodeWarpDestination(destY) << 8) |
+      (encodeWarpDestinationX(destX) << 16) |
+      ((destLayer & 0x07) << 24)) >>>
     0;
   return { ...placement, actorVariable: variable };
 }

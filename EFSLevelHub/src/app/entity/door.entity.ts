@@ -329,9 +329,19 @@ export function reanchorConnections(
   const references: DoorPlacementChange[] = [];
   const repointed: DoorPlacementChange[] = [];
 
-  // Target moved: re-point every warp that pointed at the old anchor.
+  // Target moved: re-point every warp that still points at the OLD anchor.
   for (const other of placements) {
-    if (other === before) {
+    // Skip the moved door itself, matched by IDENTITY **or** by its new
+    // position (the caller may already have swapped it in the list).
+    if (other === before || other === after) {
+      continue;
+    }
+    if (
+      other.anchorRow === after.anchorRow &&
+      other.anchorCol === after.anchorCol &&
+      (other.baseLayerId ?? 0) === (after.baseLayerId ?? 0) &&
+      warpChildOf(other) === warpChildOf(after)
+    ) {
       continue;
     }
     const child = warpChildOf(other);
@@ -360,12 +370,16 @@ export function reanchorConnections(
     });
   }
 
-  // Source moved: refresh its target's back-reference.
+  // Source moved: refresh its target's back-reference. The destination in our
+  // own `WARP` child still points at the target (which did not move), so it is
+  // intentionally left untouched.
   const own = warpChildOf(after);
   const ownDest = own ? warpChildDestination(own) : null;
   if (ownDest) {
     const target = placements.find(
       (entry) =>
+        entry !== before &&
+        entry !== after &&
         entry.anchorRow === ownDest.row &&
         entry.anchorCol === ownDest.col &&
         (entry.baseLayerId ?? 0) === ownDest.layer,

@@ -52,9 +52,15 @@ import {
 } from '../../entity/smartobject.entity';
 import {
   detachConnections as detachDoorConnections,
+  isDoorDefinition,
   reanchorConnections,
   warpChildOf,
+  warpTypeForVariant,
 } from '../../entity/door.entity';
+import {
+  createWarpChild,
+  withChildren,
+} from '../../entity/smartobject.entity';
 import { actorSmartObjects, enemyDefinitions } from '../../entity/enemy.definition';
 import { TilesetTheme } from '../../entity/tileset.util';
 import { StageRenderer } from '../../service/render/stage-renderer';
@@ -171,8 +177,15 @@ export class RoomPage implements OnInit, OnDestroy {
    * though they are never kept in `smartObjects` or the stage JSON.
    */
   readonly actors = computed<ActorData[]>(() => {
+    // A placement bakes an actor when its definition says so. `WARP` is
+    // special-cased: it is a child actor that must ALWAYS be baked, even if the
+    // actor catalog has not been registered yet (or omits it), otherwise door
+    // warps would silently never reach the archive.
+    const isActorBaked = (placement: SmartObjectPlacement): boolean =>
+      placement.id === WARP_ACTOR_ID ||
+      findSmartObjectDefinition(placement.id)?.baking === 'actor';
     const smartActors = flattenPlacements(this.smartObjects())
-      .filter((placement) => findSmartObjectDefinition(placement.id)?.baking === 'actor')
+      .filter(isActorBaked)
       .map(placementToActor);
     const legacyActors = this.legacyActors().map(placementToActor);
     return [...smartActors, ...legacyActors];
@@ -494,7 +507,30 @@ export class RoomPage implements OnInit, OnDestroy {
       // so they cannot appear as editor placements. The canvas draws them (red)
       // from `legacyActors`, and the `actors` computed bakes them on save.
       this.legacyActors.set(legacy);
-      this.smartObjects.set([...tilePlacements, ...recordedActors]);
+      // TEMPORARY TEST: normalise every door so it carries a WARP whose exit is
+      // 2 tiles above it. This also repairs doors recorded with an older/incorrect
+      // encoding, which would otherwise keep their stale `actorVariable`.
+      this.smartObjects.set(
+        [...tilePlacements, ...recordedActors].map((placement) =>
+          isDoorDefinition(findSmartObjectDefinition(placement.id))
+            ? withChildren(placement, [
+                createWarpChild(
+                  placement.baseLayerId ?? 0,
+                  placement.anchorRow,
+                  placement.anchorCol,
+                  placement.anchorRow - 2,
+                  placement.anchorCol,
+                  placement.baseLayerId ?? 0,
+                  warpTypeForVariant(placement.variantIndex ?? 0),
+                ),
+              ])
+            : placement,
+        ),
+      );
+      // A corrected warp changes the actor list, so re-bake it on save.
+      if (tilePlacements.some((p) => isDoorDefinition(findSmartObjectDefinition(p.id)))) {
+        this.stageRoom.markActorsDirty(this.roomIndex());
+      }
       this.groundLayers.set((record?.ground ?? []).map((layer) => ({ ...layer })));
 
       // Load the sprite sheets/thumbnails first, then the placable enemy catalog
@@ -631,7 +667,28 @@ export class RoomPage implements OnInit, OnDestroy {
       this.stageRoom.markLayerDirty(this.roomIndex(), base);
       this.stageRoom.markLayerDirty(this.roomIndex(), base + 8);
     }
-    this.smartObjects.update((list) => [...list, placement]);
+    // TEMPORARY TEST: every door automatically gets a WARP child whose exit is
+    // 2 tiles above the door (-Y). No connection logic, no pairing.
+    const recorded = isDoorDefinition(definition)
+      ? withChildren(
+          placement,
+          [
+            createWarpChild(
+              placement.baseLayerId ?? 0,
+              placement.anchorRow,
+              placement.anchorCol,
+              placement.anchorRow - 2,
+              placement.anchorCol,
+              placement.baseLayerId ?? 0,
+              warpTypeForVariant(placement.variantIndex ?? 0),
+            ),
+          ],
+        )
+      : placement;
+    if (recorded !== placement) {
+      this.stageRoom.markActorsDirty(this.roomIndex());
+    }
+    this.smartObjects.update((list) => [...list, recorded]);
   }
 
   /**
@@ -654,19 +711,15 @@ export class RoomPage implements OnInit, OnDestroy {
         this.stageRoom.markActorsDirty(this.roomIndex());
       }
     }
-    this.replacePlacement(event.from, event.to);
     // Re-derive both ends of any connection this door is part of (the moved door
     // may be a source or a target) through the shared door module.
-    this.reanchorDoorConnections(event.from, event.to);
-  }
-
-  /**
-   * Applies {@link reanchorConnections}: when a connected door moves, the OTHER
-   * end of the connection is updated — a moved **target** re-points the source's
-   * warp, a moved **source** refreshes its target's back-reference.
-   */
-  private reanchorDoorConnections(from: SmartObjectPlacement, to: SmartObjectPlacement): void {
-    const { references, repointed } = reanchorConnections(from, to, this.smartObjects());
+    //
+    // IMPORTANT: `reanchorConnections` looks for warps pointing at the moved
+    // door's OLD anchor, so it must run against the PRE-move list — with the
+    // moved door swapped in as its new self, so its own child stays consistent.
+    const others = this.smartObjects().map((entry) => (entry === event.from ? event.to : entry));
+    const { references, repointed } = reanchorConnections(event.from, event.to, others);
+    this.replacePlacement(event.from, event.to);
     let touched = false;
     for (const change of [...references, ...repointed]) {
       this.replacePlacement(change.from, change.to);
