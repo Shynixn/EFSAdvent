@@ -9,10 +9,7 @@ import { ArchivePathResolver, StageRenderer } from './render/stage-renderer';
 import { StageData } from '../entity/fsalib.entity';
 import { ActorDefinition } from '../entity/actor-definition.entity';
 import { tileForActor } from '../entity/tile-actor.entity';
-import {
-  ACTOR_SPRITE_CACHE_DIR,
-  actorSpritePath,
-} from '../entity/actor-sprite.entity';
+import { ACTOR_SPRITE_CACHE_DIR, actorSpritePath } from '../entity/actor-sprite.entity';
 
 /** Progress callback used while generating the sprite cache. */
 export type SpriteProgress = (done: number, total: number, message: string) => void;
@@ -163,8 +160,7 @@ export class ActorSpriteService {
         // 1. The tile the game uses for this actor (authoritative).
         const tile = tileForActor(id, tileActors);
         const tileIcon = tile && tileRenderer ? this.drawTile(tileRenderer, tile.tile) : null;
-        const image =
-          tileIcon ?? (await this.pickIcon(definition, dataArc, textures));
+        const image = tileIcon ?? (await this.pickIcon(definition, dataArc, textures));
         const icon = image ?? this.placeholder(definition);
         const png = this.encodePng(icon);
         await this.editor.writeEditorFile(actorSpritePath(id), png);
@@ -247,7 +243,9 @@ export class ActorSpriteService {
   /** Tileset used for the generated tile icons (level 1's default). */
   private static readonly TILE_ICON_TILESHEET = 0;
 
-  /** Texture path index: lower-case bare file name → archive path. */  private async indexTextures(dataArc: Uint8Array): Promise<Map<string, string>> {
+  /** Texture path index: lower-case bare file name → archive path. */ private async indexTextures(
+    dataArc: Uint8Array,
+  ): Promise<Map<string, string>> {
     const index = new Map<string, string>();
     let files: { Path: string; Name: string }[] = [];
     try {
@@ -293,8 +291,11 @@ export class ActorSpriteService {
 
     // 2. A texture named after the actor id (`pont_0.bti` for `PONT`).
     const id = definition.Id.toLowerCase();
-    const byId = await this.readFirstTexture(dataArc, textures, (name) => name.startsWith(`${id}_`) ||
-      name === `${id}.bti`);
+    const byId = await this.readFirstTexture(
+      dataArc,
+      textures,
+      (name) => name.startsWith(`${id}_`) || name === `${id}.bti`,
+    );
     if (byId) {
       return byId;
     }
@@ -386,15 +387,22 @@ export class ActorSpriteService {
   private placeholder(definition: ActorDefinition): ImageBuffer {
     const size = 16;
     const image = new ImageBuffer(size, size);
-    const [r, g, b] = ActorSpriteService.CATEGORY_COLORS[definition.Category] ??
+    const [r, g, b] =
+      ActorSpriteService.CATEGORY_COLORS[definition.Category] ??
       ActorSpriteService.CATEGORY_COLORS['Default'];
 
     // Filled tile with a 1px darker border.
     for (let y = 0; y < size; y++) {
       for (let x = 0; x < size; x++) {
         const edge = x === 0 || y === 0 || x === size - 1 || y === size - 1;
-        image.set(x, y, edge ? Math.round(r * 0.55) : r, edge ? Math.round(g * 0.55) : g,
-          edge ? Math.round(b * 0.55) : b, 255);
+        image.set(
+          x,
+          y,
+          edge ? Math.round(r * 0.55) : r,
+          edge ? Math.round(g * 0.55) : g,
+          edge ? Math.round(b * 0.55) : b,
+          255,
+        );
       }
     }
 

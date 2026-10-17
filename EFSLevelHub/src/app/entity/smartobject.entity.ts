@@ -560,7 +560,7 @@ function findActorTemplatePlacement(
 ): SmartObjectDefinition | undefined {
   return ACTOR_TEMPLATE_SMART_OBJECTS.find(
     (definition) =>
-      definition.actorId === actorId && (definition.actorVariable ?? 0) === (variable >>> 0),
+      definition.actorId === actorId && (definition.actorVariable ?? 0) === variable >>> 0,
   );
 }
 

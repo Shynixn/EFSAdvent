@@ -194,7 +194,8 @@ const TEMPLATE_LINES: Record<ActorTemplateSection, readonly string[]> = {
 };
 
 /** Matches one template line: `Name;ID, L:n, X:n, Y:n, V:a,b,c,d.` */
-const TEMPLATE_RE = /^([^;]+);\s*([A-Za-z0-9]{4}),\s*L:\d+,\s*X:\d+,\s*Y:\d+,\s*V:(\d+),(\d+),(\d+),(\d+)/;
+const TEMPLATE_RE =
+  /^([^;]+);\s*([A-Za-z0-9]{4}),\s*L:\d+,\s*X:\d+,\s*Y:\d+,\s*V:(\d+),(\d+),(\d+),(\d+)/;
 
 /** Packs the four `V` bytes of an EFSAdvent template code (`byte4..byte1`). */
 function packVariable(b4: number, b3: number, b2: number, b1: number): number {

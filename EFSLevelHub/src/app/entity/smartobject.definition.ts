@@ -48,14 +48,7 @@ export interface SmartObjectVariant {
 
 /** Toolbox section a definition belongs to. */
 export type SmartObjectSection =
-  | 'Doors'
-  | 'Decorations'
-  | 'Enemies'
-  | 'Items'
-  | 'NPC'
-  | 'Objects'
-  | 'Special'
-  | 'Switches';
+  'Doors' | 'Decorations' | 'Enemies' | 'Items' | 'NPC' | 'Objects' | 'Special' | 'Switches';
 
 /**
  * A selectable sub-type of a definition (e.g. a door can be a plain door, a
