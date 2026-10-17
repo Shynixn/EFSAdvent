@@ -7,6 +7,7 @@ import { EditorService, WORLDMAP_FILE } from '../../service/editor.service';
 import { StageService, DEFAULT_WORLD_STAGE_COUNT } from '../../service/stage.service';
 import { WorldService } from '../../service/world.service';
 import { StagePreviewService } from '../../service/stage-preview.service';
+import { ActorSpriteService } from '../../service/actor-sprite.service';
 import { FSALibService } from '../../service/fsalib.service';
 import { LoggingService } from '../../service/logging.service';
 import { ButtonComponent } from '../button/button.component';
@@ -38,6 +39,7 @@ export class IsoExtractorComponent implements OnInit {
   private readonly stageService = inject(StageService);
   private readonly worldService = inject(WorldService);
   private readonly stagePreview = inject(StagePreviewService);
+  private readonly actorSprites = inject(ActorSpriteService);
   private readonly logger = inject(LoggingService);
 
   readonly selectedFileName = signal('');
@@ -175,7 +177,26 @@ export class IsoExtractorComponent implements OnInit {
     await this.generateWorldmap();
     await this.importDefaultStages();
     await this.generateTilesetPreviews();
+    await this.generateActorSprites();
     await this.dumpEditorStore();
+  }
+
+  /**
+   * Builds the actor-sprite icon cache used by the toolbox tabs (Items, NPC,
+   * Objects, Special, Switches) for actors the actor catalog cannot draw.
+   *
+   * Generated here — at import time — so nothing extra is shipped with the app.
+   * Non-fatal on failure (the toolbox falls back to plain cards).
+   */
+  private async generateActorSprites(): Promise<void> {
+    try {
+      this.statusMessage.set('Generating actor sprites…');
+      await this.actorSprites.ensureIcons((done, total, message) => {
+        this.statusMessage.set(total > 0 ? `${message} (${done}/${total})` : message);
+      });
+    } catch (error) {
+      this.logger.warn('UI: failed to generate actor sprites (non-fatal)', error);
+    }
   }
 
   /** Decodes the overworld map texture into `/editor/cache/image/worldmap.png`. */

@@ -47,7 +47,15 @@ export interface SmartObjectVariant {
 }
 
 /** Toolbox section a definition belongs to. */
-export type SmartObjectSection = 'Doors' | 'Decorations' | 'Enemies';
+export type SmartObjectSection =
+  | 'Doors'
+  | 'Decorations'
+  | 'Enemies'
+  | 'Items'
+  | 'NPC'
+  | 'Objects'
+  | 'Special'
+  | 'Switches';
 
 /**
  * A selectable sub-type of a definition (e.g. a door can be a plain door, a
@@ -904,9 +912,12 @@ const ACTOR_SMART_OBJECTS = new Map<string, SmartObjectDefinition>();
 /**
  * Registers actor-baked smart objects (enemies) so placements referring to them
  * can be resolved by id (for hover, move, delete and rotation).
+ *
+ * The registry is ADDITIVE: actor templates are seeded at module load (see the
+ * bottom of this file) and must survive the catalog registration that happens
+ * later, asynchronously.
  */
 export function registerActorSmartObjects(definitions: SmartObjectDefinition[]): void {
-  ACTOR_SMART_OBJECTS.clear();
   for (const definition of definitions) {
     ACTOR_SMART_OBJECTS.set(definition.id, definition);
   }

@@ -19,16 +19,27 @@ import {
   smartObjectBounds,
   renderSmartObjectPreview,
 } from '../../entity/smartobject.entity';
+import {
+  ACTOR_TEMPLATE_SECTIONS,
+  ActorTemplate,
+  ActorTemplateSection,
+  actorTemplatesFor,
+} from '../../entity/actor-template.entity';
 import { GROUND_DEFINITIONS, GroundDefinition } from '../../entity/ground.entity';
 import { SmartObjectDragService } from '../../service/smart-object-drag.service';
+import { ActorSpriteService } from '../../service/actor-sprite.service';
+import { EditorService } from '../../service/editor.service';
 import { ImageBuffer } from '../../service/render/gba-tile-renderer';
 
 /**
  * ToolboxColumnComponent
  * ----------------------
- * The room page's right "Toolbox" column. It hosts an **Advanced** collapsible
- * section (manual tile drawing + the {@link TilePaletteComponent}) and a
- * **Decorations** section listing the draggable smart objects with mini previews.
+ * The room page's right "Toolbox" column. It opens with **tabs for the actor
+ * templates** (Items, NPC, Objects, Special, Switches — the EFSAdvent
+ * `data/actortemplates` catalog), each listing draggable presets with mini
+ * previews. Below the tabs it hosts an **Advanced** collapsible section (manual
+ * tile drawing + the {@link TilePaletteComponent}), the Ground, Doors,
+ * Decorations and Enemies sections.
  *
  * The host owns the brush/tool state; this component renders the rail and
  * reports interactions (`tilePicked`, `advancedOpenChange`).
@@ -107,6 +118,13 @@ export class ToolboxColumnComponent implements AfterViewInit {
 
   private readonly dragService = inject(SmartObjectDragService);
 
+  /** Icons generated from the game data at ISO-import time (lazy fallback). */
+  private readonly actorSprites = inject(ActorSpriteService);
+  private readonly editor = inject(EditorService);
+
+  /** Decoded fallback icons, keyed by actor id (blob URLs are cheap to reuse). */
+  private readonly iconCache = new Map<string, ImageBitmap | null>();
+
   /** Whether the Advanced (manual drawing) section is expanded. */
   readonly advancedOpen = signal(false);
 
@@ -121,6 +139,17 @@ export class ToolboxColumnComponent implements AfterViewInit {
 
   /** Whether the Enemies section is expanded. */
   readonly enemiesOpen = signal(true);
+
+  /** The actor-template tabs, in display order. */
+  readonly sections = ACTOR_TEMPLATE_SECTIONS;
+
+  /** The tab currently selected (opens on the first one, Items). */
+  readonly activeSection = signal<ActorTemplateSection>(ACTOR_TEMPLATE_SECTIONS[0]);
+
+  /** Templates listed in the selected tab. */
+  get templates(): ActorTemplate[] {
+    return actorTemplatesFor(this.activeSection());
+  }
 
   /** Available decoration (smart-object) definitions, shown in the toolbox. */
   readonly decorations: SmartObjectDefinition[] = SMART_OBJECT_DEFINITIONS;
@@ -159,12 +188,17 @@ export class ToolboxColumnComponent implements AfterViewInit {
   /** The per-enemy mini preview canvases. */
   private readonly enemyCanvases = viewChildren<ElementRef<HTMLCanvasElement>>('enemyPreview');
 
+  /** The per-actor-template mini preview canvases. */
+  private readonly templateCanvases =
+    viewChildren<ElementRef<HTMLCanvasElement>>('templatePreview');
+
   constructor() {
     // Redraw the mini previews once the canvases are available.
     effect(() => {
       this.previewCanvases();
       this.groundCanvases();
       this.enemyCanvases();
+      this.templateCanvases();
       queueMicrotask(() => void this.drawPreviews());
     });
   }
@@ -230,6 +264,57 @@ export class ToolboxColumnComponent implements AfterViewInit {
       );
     }
 
+    // Actor-template thumbnails: render each preset's actor with ITS OWN
+    // variable, so e.g. the KEY0 presets show a key, the big key, a bracelet…
+    // (the actor picks its sprite from the variable's render variants).
+    const templateCanvases = this.templateCanvases();
+    if (templateCanvases.length > 0) {
+      try {
+        await renderer.prepareActors();
+      } catch {
+        // Sprite sheets may be missing for this stage; skip the thumbnails.
+      }
+      const byId = new Map(this.templates.map((template) => [template.id, template]));
+      for (const ref of templateCanvases) {
+        const id = ref.nativeElement.dataset['templateId'];
+        const template = id ? byId.get(id) : undefined;
+        const canvas = ref.nativeElement;
+        if (!template) {
+          continue;
+        }
+        // Bake with the template's variable (this is what makes the preview and
+        // the placement match).
+        const buffer = await renderer.renderActorPreview(
+          template.actorId,
+          template.variable,
+          32,
+          32,
+          this._gba,
+        );
+        if (!buffer) {
+          // No sprite this stage carries: fall back to the icon generated from
+          // the game data at import time, then to a blank card.
+          await this.drawIconFallback(canvas, template.actorId);
+          continue;
+        }
+        canvas.width = buffer.width;
+        canvas.height = buffer.height;
+        const scale = Math.min(64 / buffer.width, 64 / buffer.height);
+        canvas.style.width = `${Math.round(buffer.width * scale)}px`;
+        canvas.style.height = `${Math.round(buffer.height * scale)}px`;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          continue;
+        }
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.putImageData(
+          new ImageData(new Uint8ClampedArray(buffer.pixels), buffer.width, buffer.height),
+          0,
+          0,
+        );
+      }
+    }
+
     // Enemy thumbnails: render each actor's default variant into its canvas.
     const enemyCanvases = this.enemyCanvases();
     if (enemyCanvases.length > 0) {
@@ -245,7 +330,7 @@ export class ToolboxColumnComponent implements AfterViewInit {
         if (!enemy) {
           continue;
         }
-        const buffer = renderer.renderActorPreview(
+        const buffer = await renderer.renderActorPreview(
           id ?? '',
           enemy.actorVariable ?? 0,
           32,
@@ -275,6 +360,67 @@ export class ToolboxColumnComponent implements AfterViewInit {
           0,
         );
       }
+    }
+  }
+
+  /** Selects an actor-template tab. */
+  selectSection(section: ActorTemplateSection): void {
+    this.activeSection.set(section);
+  }
+
+  /**
+   * Draws the import-time generated icon for an actor into a thumbnail canvas.
+   *
+   * Used when the stage cannot render the actor (no sprite sheet / no render
+   * definition). Falls back to hiding the canvas when no icon exists either, so
+   * the card still shows its name.
+   */
+  private async drawIconFallback(canvas: HTMLCanvasElement, actorId: string): Promise<void> {
+    const hide = (): void => {
+      canvas.width = 1;
+      canvas.height = 1;
+      canvas.style.width = '0px';
+      canvas.style.height = '0px';
+    };
+    const path = await this.actorSprites.iconPathFor(actorId);
+    if (!path) {
+      hide();
+      return;
+    }
+    let bitmap = this.iconCache.get(actorId);
+    if (bitmap === undefined) {
+      bitmap = await this.loadIcon(path);
+      this.iconCache.set(actorId, bitmap ?? null);
+    }
+    if (!bitmap) {
+      hide();
+      return;
+    }
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const scale = Math.min(64 / bitmap.width, 64 / bitmap.height);
+    canvas.style.width = `${Math.round(bitmap.width * scale)}px`;
+    canvas.style.height = `${Math.round(bitmap.height * scale)}px`;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      return;
+    }
+    ctx.imageSmoothingEnabled = false;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(bitmap, 0, 0);
+  }
+
+  /** Decodes a PNG from the editor store into an ImageBitmap (null on failure). */
+  private async loadIcon(path: string): Promise<ImageBitmap | null> {
+    try {
+      const bytes = await this.editor.readEditorFile(path);
+      if (!bytes || bytes.byteLength === 0) {
+        return null;
+      }
+      const blob = new Blob([bytes as BlobPart], { type: 'image/png' });
+      return await createImageBitmap(blob);
+    } catch {
+      return null;
     }
   }
 
@@ -335,6 +481,36 @@ export class ToolboxColumnComponent implements AfterViewInit {
 
   /** Clears the shared drag state when the drag ends. */
   onDecorationDragEnd(): void {
+    this.dragService.clear();
+  }
+
+  /**
+   * Starts a native drag for an actor template.
+   *
+   * Templates are ordinary actor-baked smart objects (id `template:<tab>:<n>`)
+   * registered at module load, so the canvas resolves them through the same
+   * path as any other actor. The template's own `Variable` travels with the
+   * drag so the placement bakes exactly the preset (not the definition default).
+   */
+  onTemplateDragStart(event: DragEvent, template: ActorTemplate): void {
+    const definition = findSmartObjectDefinition(template.id);
+    if (!definition) {
+      return;
+    }
+    event.dataTransfer?.setData('application/x-smart-object', definition.id);
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'copy';
+      const blank = document.createElement('canvas');
+      blank.width = 1;
+      blank.height = 1;
+      event.dataTransfer.setDragImage(blank, 0, 0);
+    }
+    this.dragService.start(definition, 0, template.variable);
+    this.decorationDragStarted.emit();
+  }
+
+  /** Clears the shared drag state when a template drag ends. */
+  onTemplateDragEnd(): void {
     this.dragService.clear();
   }
 }

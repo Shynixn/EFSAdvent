@@ -25,15 +25,24 @@ export class SmartObjectDragService {
   /** Variant (rotation style) index the dragged object uses. */
   readonly variantIndex = signal(0);
 
+  /**
+   * Actor `Variable` the dragged object is placed with (actor-baked objects
+   * only; e.g. an actor template's preset). Undefined = the definition's
+   * default (`actorVariable`).
+   */
+  readonly actorVariable = signal<number | undefined>(undefined);
+
   /** Records a smart object being dragged (and the chosen variant). */
-  start(definition: SmartObjectDefinition, variantIndex = 0): void {
+  start(definition: SmartObjectDefinition, variantIndex = 0, actorVariable?: number): void {
     this.definition.set(definition);
     this.variantIndex.set(variantIndex);
+    this.actorVariable.set(actorVariable);
   }
 
   /** Clears the dragged definition. */
   clear(): void {
     this.definition.set(null);
     this.variantIndex.set(0);
+    this.actorVariable.set(undefined);
   }
 }

@@ -6,9 +6,67 @@
     Toolbox
   </h2>
 
+  <!-- Tabs: one tab per actor-template category (Items, NPC, Objects, …) -->
+  <div class="flex shrink-0 flex-wrap gap-1 border-b border-slate-800 px-2 py-2" role="tablist">
+    @for (section of sections; track section) {
+      <button
+        type="button"
+        role="tab"
+        [attr.aria-selected]="activeSection() === section"
+        (click)="selectSection(section)"
+        class="cursor-pointer rounded-md px-2 py-1 text-[11px] font-medium transition"
+        [class.bg-indigo-500]="activeSection() === section"
+        [class.text-white]="activeSection() === section"
+        [class.text-slate-400]="activeSection() !== section"
+        [class.hover:bg-slate-800]="activeSection() !== section"
+        [class.hover:text-slate-200]="activeSection() !== section"
+      >
+        {{ section }}
+      </button>
+    }
+  </div>
+
   <div class="min-h-0 flex-1 overflow-y-auto p-4">
-    <!-- Ground: pick a ground, then paint it onto the room with the brush -->
+    <!-- Active tab: draggable actor templates -->
     <div class="rounded-lg border border-slate-800">
+      <div class="border-b border-slate-800 px-3 py-2">
+        <p class="text-xs font-semibold uppercase tracking-wide text-slate-400">
+          {{ activeSection() }}
+        </p>
+        <p class="mt-1 text-[11px] text-slate-500">
+          Drag a preset onto the room canvas to place it. The preset already carries its actor
+          variable (e.g. which item a <code>KEY0</code> actor shows), so no extra setup is needed.
+        </p>
+      </div>
+      <div class="space-y-2 px-3 py-3">
+        <div class="flex flex-wrap gap-2">
+          @for (template of templates; track template.id) {
+            <button
+              type="button"
+              draggable="true"
+              (dragstart)="onTemplateDragStart($event, template)"
+              (dragend)="onTemplateDragEnd()"
+              class="flex w-24 cursor-grab flex-col items-center gap-2 rounded-lg border border-slate-700 bg-slate-800/70 px-2 py-2 text-xs text-slate-200 transition hover:border-indigo-400 hover:bg-slate-700/60 active:cursor-grabbing"
+              [title]="template.name + ' (' + template.actorId + ')'"
+            >
+              <span
+                class="flex h-16 w-16 items-center justify-center overflow-hidden rounded border border-slate-700 bg-slate-950/60"
+              >
+                <canvas
+                  #templatePreview
+                  [attr.data-template-id]="template.id"
+                  style="image-rendering: pixelated"
+                ></canvas>
+              </span>
+              <span class="w-full text-center leading-tight break-words">{{ template.name }}</span>
+            </button>
+          }
+        </div>
+      </div>
+    </div>
+
+    <!-- Ground: pick a ground, then paint it onto the room with the brush -->
+    <div class="mt-3 rounded-lg border border-slate-800">
       <button
         type="button"
         (click)="toggleGround()"

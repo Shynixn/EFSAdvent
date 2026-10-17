@@ -64,6 +64,22 @@ public sealed class RarcDirectoryDto
     public Dictionary<string, RarcDirectoryDto> Directories { get; set; } = new();
 }
 
+/// <summary>
+/// A tileset tile that implies an actor (from FSALib's <c>tileproperties.json</c>):
+/// e.g. tile 48 is the Chest tile, which places the <c>TKRA</c> actor.
+/// </summary>
+public sealed class TileActorDto
+{
+    /// <summary>Tileset tile id (0-1023).</summary>
+    public int Tile { get; set; }
+    /// <summary>Human-readable tile name, e.g. <c>Chest</c>.</summary>
+    public string Name { get; set; } = string.Empty;
+    /// <summary>The actor the tile requires, e.g. <c>TKRA</c>.</summary>
+    public string ActorId { get; set; } = string.Empty;
+    /// <summary>Default actor <c>Variable</c> for this tile.</summary>
+    public uint ActorValue { get; set; }
+}
+
 /// <summary>A single file entry inside a RARC archive.</summary>
 public sealed class ArchiveFileDto
 {

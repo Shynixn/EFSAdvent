@@ -45,9 +45,9 @@ export function toActorSmartObject(definition: ActorDefinition): SmartObjectDefi
     id: definition.Id,
     baking: 'actor',
     name: definition.Name || definition.Id,
-    // Only the Enemy subset is shown in the toolbox; other actors are registered
-    // purely so they resolve for rendering/interaction, so their section value is
-    // never displayed (the toolbox filters to 'Enemies').
+    // Only the Enemy subset is shown in the toolbox's Enemies section; other
+    // actors are registered purely so they resolve for rendering/interaction,
+    // so their section value is never displayed.
     section: definition.Category === ENEMY_CATEGORY ? 'Enemies' : 'Decorations',
     // Actors bake no tiles — a single, empty variant keeps the shared
     // smart-object geometry (bounds/anchor) working.

@@ -9,6 +9,15 @@ import { decodeTexture } from './render/bti-image';
 import { ImageBuffer, loadPalettes } from './render/gba-tile-renderer';
 import { TilesetRenderer } from './render/gba-sprite-renderer';
 import { TilesetTheme } from '../entity/tileset.util';
+import { TileActorDefinition, buildTileActors } from '../entity/tile-actor.entity';
+
+/** One tile → actor entry as returned by the wasm `GetTileActors` export. */
+interface TileActorDto {
+  Tile: number;
+  Name: string;
+  ActorId: string;
+  ActorValue: number;
+}
 import {
   ArchivePathResolver,
   RenderOptions,
@@ -36,12 +45,14 @@ interface DotnetExports {
         ): Uint8Array;
         SetRoomActors(arcData: Uint8Array, roomIndex: number, actorsJson: string): Uint8Array;
         ListArchiveFiles(arcData: Uint8Array): string;
+        ListArchiveTextures(arcData: Uint8Array): string;
         ReadArchiveFile(arcData: Uint8Array, path: string): Uint8Array;
         Unzip(zipData: Uint8Array): string;
         EnsureAssets(): string;
         GetTilesets(): string;
         GetStages(): string;
         GetActors(): string;
+        GetTileActors(): string;
         GetVersion(): string;
       };
     };
@@ -128,6 +139,9 @@ export class FSALibService {
 
   /** Cached actor definitions promise. */
   private actorsPromise: Promise<Record<string, ActorDefinition>> | null = null;
+
+  /** Cached tile → actor mapping promise (`tileproperties.json`). */
+  private tileActorsPromise: Promise<TileActorDefinition[]> | null = null;
 
   /**
    * Cached `data.arc` bytes. The archive is tens of MB and is needed by every
@@ -328,6 +342,40 @@ export class FSALibService {
   async readArchiveFile(arcData: Uint8Array, path: string): Promise<Uint8Array> {
     const fsa = await this.getFsa();
     return fsa.ReadArchiveFile(arcData, path);
+  }
+
+  /**
+   * Lists every `.bti` texture in a RARC archive.
+   *
+   * Used at ISO-import time to build the actor-sprite cache from the game's own
+   * textures (see `ActorSpriteService`).
+   *
+   * @param arcData Raw bytes of the archive (optionally YAZ0-compressed).
+   */
+  async listArchiveTextures(arcData: Uint8Array): Promise<ArchiveFile[]> {
+    const fsa = await this.getFsa();
+    const json = fsa.ListArchiveTextures(arcData);
+    const result = JSON.parse(json) as ArchiveFile[] | { error?: string };
+    if (!Array.isArray(result)) {
+      throw new Error(`FSALib failed to list archive textures: ${result.error ?? 'unknown error'}`);
+    }
+    return result;
+  }
+
+  /**
+   * The game's shared `data.arc` bytes, or null when the game is not extracted.
+   *
+   * Cached for the session (bytes + file listing), so repeated callers (stage
+   * rendering, preview generation, sprite lookup) share one read.
+   */
+  async dataArc(): Promise<Uint8Array | null> {
+    return this.readDataArc();
+  }
+
+  /** Every file path inside `data.arc` (empty when it is unavailable). */
+  async dataArcFilePaths(): Promise<string[]> {
+    await this.readDataArc();
+    return this.dataArcPaths;
   }
 
   /**
@@ -562,6 +610,9 @@ export class FSALibService {
       'SCH/gb_ch_obj_base_sch.szs',
       `SCH/gb_ch_obj_tr_sch${stage.Map.NpcSheetId.toString(16)}.szs`,
       'SCH/enemy_sch.szs',
+      'SCH/gals2_sch.szs',
+      'SCH/player_sch.szs',
+      'SCH/gals_sch.szs',
       'SOB/enemy_both_sob.bin',
       'SOB/enemy_both2_sob.bin',
       'SOB/enemy_gc_sob.bin',
@@ -729,6 +780,40 @@ export class FSALibService {
       }))
       .filter((theme) => includeDevelopment || !theme.development)
       .sort((a, b) => a.index - b.index);
+  }
+
+  /**
+   * Tiles that imply an actor, from FSALib's `tileproperties.json`
+   * (`RequiredActorID`). E.g. tile 48 is the Chest tile for `TKRA`.
+   */
+  async loadTileActors(): Promise<TileActorDefinition[]> {
+    if (!this.tileActorsPromise) {
+      this.tileActorsPromise = this.getFsa()
+        .then((fsa) => {
+          fsa.EnsureAssets();
+          const parsed = JSON.parse(fsa.GetTileActors()) as TileActorDto[] | { error?: string };
+          if (!Array.isArray(parsed)) {
+            throw new Error(parsed.error ?? 'unknown error');
+          }
+          return buildTileActors(
+            Object.fromEntries(
+              parsed.map((entry) => [
+                String(entry.Tile),
+                {
+                  Name: entry.Name,
+                  RequiredActorID: entry.ActorId,
+                  ActorValue: entry.ActorValue || undefined,
+                },
+              ]),
+            ),
+          );
+        })
+        .catch((error) => {
+          this.logger.warn('FSALib: failed to read tile actors from wasm', error);
+          return [] as TileActorDefinition[];
+        });
+    }
+    return this.tileActorsPromise;
   }
 
   /** Loads and caches the stage definitions FSALib has loaded from its assets. */

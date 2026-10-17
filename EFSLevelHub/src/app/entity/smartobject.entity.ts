@@ -15,6 +15,7 @@
  */
 
 import { ImageBuffer, TILE_SIZE } from '../service/render/gba-tile-renderer';
+import { ACTOR_TEMPLATES, ActorTemplate } from './actor-template.entity';
 import { ActorData } from './fsalib.entity';
 import { GroundLayer, ROOM_DIMENSION } from './ground.entity';
 import {
@@ -22,6 +23,7 @@ import {
   SmartObjectTileOffset,
   SmartObjectVariant,
   findSmartObjectDefinition,
+  registerActorSmartObjects,
   variantsForSubType,
 } from './smartobject.definition';
 
@@ -32,6 +34,8 @@ export {
   resolveSubTypeIndex,
   variantsForSubType,
 } from './smartobject.definition';
+export { ACTOR_TEMPLATE_SECTIONS, actorTemplatesFor } from './actor-template.entity';
+export type { ActorTemplate, ActorTemplateSection } from './actor-template.entity';
 export type {
   SmartObjectDefinition,
   SmartObjectSection,
@@ -40,6 +44,37 @@ export type {
   SmartObjectBaking,
   SmartObjectVariant,
 } from './smartobject.definition';
+
+/**
+ * Projects an EFSAdvent actor template (Items / NPC / Objects / Special /
+ * Switches preset) onto an actor-baked smart-object definition, so it travels
+ * through the shared drag/drop + placement pipeline like any other actor.
+ *
+ * The definition is built from the template alone (no actor catalog needed):
+ * the actor id and `Variable` are all that gets baked.
+ */
+export function toTemplateSmartObject(template: ActorTemplate): SmartObjectDefinition {
+  return {
+    id: template.id,
+    baking: 'actor',
+    name: template.name,
+    // The template's tab; the definition itself is still an actor placement.
+    section: template.section,
+    // Actors bake no tiles — one empty variant keeps the shared geometry.
+    set: [{ bottomLayerTiles: [], topLayerTiles: [] }],
+    actorId: template.actorId,
+    actorVariable: template.variable,
+  };
+}
+
+/** All actor templates as actor-baked smart objects (ids are `template:…`). */
+export const ACTOR_TEMPLATE_SMART_OBJECTS: readonly SmartObjectDefinition[] =
+  ACTOR_TEMPLATES.map(toTemplateSmartObject);
+
+// Seed the registry so a placed template (`id` = `template:…`) resolves for
+// hover, move, delete and of course baking. Runs once at module load; the actor
+// catalog registration that happens later adds to the same (additive) registry.
+registerActorSmartObjects([...ACTOR_TEMPLATE_SMART_OBJECTS]);
 
 /**
  * Returns the variant (rotation style) a definition uses for the given index,
@@ -246,8 +281,11 @@ export function clearSmartObject(
  * itself is drawn bottom-centre anchored from there.
  */
 export function placementToActor(placement: SmartObjectPlacement): ActorData {
+  const definition = findSmartObjectDefinition(placement.id);
   return {
-    Id: placement.id,
+    // Actor templates carry their actor id inside the definition (the placement
+    // id is the template's stable id, e.g. `template:Items:0`).
+    Id: definition?.actorId ?? placement.id,
     Layer: placement.baseLayerId,
     X: placement.anchorCol * 2 + (placement.halfTileDx ?? 0),
     Y: placement.anchorRow * 2 + (placement.halfTileDy ?? 0),
@@ -462,7 +500,9 @@ export function withActorProperties(
 export function warpLinks(actors: readonly ActorData[]): WarpLink[] {
   const links: WarpLink[] = [];
   for (const actor of actors) {
-    if (actor.Id !== WARP_ACTOR_ID) {
+    // A door's connecting warp is the `WARP` actor itself; the shared WARP id
+    // also covers a `WARP` actor template (its id is `template:…`).
+    if ((findSmartObjectDefinition(actor.Id)?.actorId ?? actor.Id) !== WARP_ACTOR_ID) {
       continue;
     }
     const { b1, b2, b3, b4 } = actorVariableBytes(actor.Variable);
@@ -491,8 +531,13 @@ export function warpLinks(actors: readonly ActorData[]): WarpLink[] {
 export function actorToPlacement(actor: ActorData): SmartObjectPlacement {
   const anchorCol = Math.floor(actor.X / 2);
   const anchorRow = Math.floor(actor.Y / 2);
+  // The archive stores the ACTOR id. Rebind it to the actor-template smart
+  // object when one carries the same id AND variable, so a room saved with a
+  // template reloads as that template (instead of a raw actor placement that
+  // would bake back under a different id).
+  const template = findActorTemplatePlacement(actor.Id, actor.Variable);
   return {
-    id: actor.Id,
+    id: template?.id ?? actor.Id,
     variantIndex: 0,
     baseLayerId: actor.Layer & 0x0f,
     anchorRow,
@@ -501,6 +546,22 @@ export function actorToPlacement(actor: ActorData): SmartObjectPlacement {
     topLayerTiles: [],
     actorVariable: actor.Variable,
   };
+}
+
+/**
+ * Finds the actor template whose smart object bakes exactly this actor id +
+ * variable. Several presets can share one code (e.g. the `KEY0` variants), so
+ * the first match wins — it only matters that the placement's VARIABLE is
+ * preserved, which it always is (see `actorToPlacement`).
+ */
+function findActorTemplatePlacement(
+  actorId: string,
+  variable: number,
+): SmartObjectDefinition | undefined {
+  return ACTOR_TEMPLATE_SMART_OBJECTS.find(
+    (definition) =>
+      definition.actorId === actorId && (definition.actorVariable ?? 0) === (variable >>> 0),
+  );
 }
 
 /**

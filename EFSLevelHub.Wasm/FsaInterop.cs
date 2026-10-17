@@ -319,6 +319,46 @@ public static partial class FsaInterop
     [JSExport]
     public static string GetVersion()
         => typeof(Stage).Assembly.GetName().Version?.ToString() ?? "unknown";
+
+    /// <summary>
+    /// Returns every tile that implies an actor, from FSALib's
+    /// <c>tileproperties.json</c> (<c>RequiredActorID</c>).
+    /// </summary>
+    /// <remarks>
+    /// The editor uses this to draw an actor's toolbox preview as the TILE that
+    /// represents it (e.g. tile 48, the chest, for <c>TKRA</c>) instead of a
+    /// sprite, since the game renders many actors through their tile.
+    /// </remarks>
+    [JSExport]
+    public static string GetTileActors()
+    {
+        try
+        {
+            EnsureAssets();
+            var tiles = new List<TileActorDto>();
+            foreach (var pair in FSALib.Assets.TileProperties)
+            {
+                var definition = pair.Value;
+                if (definition?.RequiredActorID is not { } actorId)
+                {
+                    continue;
+                }
+                tiles.Add(new TileActorDto
+                {
+                    Tile = pair.Key,
+                    Name = definition.Name,
+                    ActorId = actorId.ToString(),
+                    ActorValue = definition.ActorValue,
+                });
+            }
+
+            return JsonSerializer.Serialize(tiles, JsonOptions);
+        }
+        catch (Exception ex)
+        {
+            return JsonSerializer.Serialize(new { error = ex.Message }, JsonOptions);
+        }
+    }
     /// Merges one stage's *content* (map layout, rooms, actors and layers) into
     /// another stage's archive, keeping the destination's slot structure.
     /// </summary>
@@ -632,6 +672,35 @@ public static partial class FsaInterop
         file.Data.Position = 0;
         file.Data.CopyTo(ms);
         return ms.ToArray();
+    }
+
+    /// <summary>
+    /// Lists every <c>.bti</c> texture anywhere in a RARC archive, with the path
+    /// that <see cref="ReadArchiveFile"/> accepts.
+    /// </summary>
+    /// <remarks>
+    /// Used at ISO-import time to generate actor sprite icons from the game's own
+    /// textures. Returns a JSON array of <c>{ Path, Name, Size }</c>.
+    /// </remarks>
+    [JSExport]
+    public static string ListArchiveTextures(byte[] arcData)
+    {
+        try
+        {
+            using var stream = new MemoryStream(arcData, writable: false);
+            using var rarc = new Rarc(stream);
+
+            var list = new List<ArchiveFileDto>();
+            WalkDirectory(rarc.Root, string.Empty, list);
+            var textures = list
+                .Where(f => f.Path.EndsWith(".bti", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            return JsonSerializer.Serialize(textures, JsonOptions);
+        }
+        catch (Exception ex)
+        {
+            return JsonSerializer.Serialize(new { error = ex.Message }, JsonOptions);
+        }
     }
 
     /// <summary>

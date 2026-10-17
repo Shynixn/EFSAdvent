@@ -1264,11 +1264,15 @@ export class RoomCanvasComponent implements AfterViewInit {
       this.clearPreview();
       return;
     }
+    // An actor template bakes its OWN preset variable (e.g. a "Big Key" `KEY0`),
+    // so prefer the drag state's value over the definition default.
+    const actorVariable = this.dragService.actorVariable();
+    const placed = actorVariable !== undefined ? { ...definition, actorVariable } : definition;
     const anchorRow = dragging?.anchorRow ?? tile.y;
     const anchorCol = dragging?.anchorCol ?? tile.x;
 
     const placement = applySmartObject(
-      definition,
+      placed,
       anchorRow,
       anchorCol,
       room.Layers,

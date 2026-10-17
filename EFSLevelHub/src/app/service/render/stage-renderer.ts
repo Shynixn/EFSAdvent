@@ -75,6 +75,17 @@ export interface TilesetInfo {
 export type ResourceReader = (path: string) => Promise<Uint8Array>;
 
 /**
+ * The bare file name of a resource reference: strips any directory part.
+ *
+ * Actor definitions reference textures by bare name (`lift_00.bti`) while the
+ * cache is populated from archive paths, so both forms normalize to this.
+ */
+function baseName(path: string): string {
+  const normalized = path.replace(/\\/g, '/');
+  return normalized.slice(normalized.lastIndexOf('/') + 1);
+}
+
+/**
  * Resolves natural paths (`SCH/bg_a_sch.szs`) to the archive's real paths.
  *
  * RARC stores directory names as 4-character identifiers that are space-padded
@@ -123,6 +134,17 @@ export class StageRenderer {
   /** Raw BTI metadata by file name, so we can detect I4 "light" textures. */
   private readonly imageFormats = new Map<string, BtiTexture>();
 
+  /**
+   * TEXTURE PATHS actor definitions can reference (e.g. `lift_00.bti`), keyed by
+   * lower-case file name. Filled lazily from the resolver's file list on the
+   * first lookup, so an actor's texture is found even when the stage's TIMG
+   * folder does not list it.
+   */
+  private textureIndex: Map<string, string> | null = null;
+
+  /** In-flight texture decodes, keyed by lower-case file name (dedupe). */
+  private readonly textureLoads = new Map<string, Promise<ImageBuffer | null>>();
+
   private currentTilesetIndex = -1;
   private currentSobIndex = -1;
   private layoutLoaded = false;
@@ -169,23 +191,80 @@ export class StageRenderer {
   private async loadImages(): Promise<void> {
     // Discover TIMG files from the stage's resource directory listing.
     const timg = this.stage.Resources.Directories['TIMG'];
-    if (!timg) {
-      return;
-    }
-    for (const name of timg.Files) {
+    for (const name of timg?.Files ?? []) {
       if (!name.toLowerCase().endsWith('.bti')) {
         continue;
       }
-      const bytes = await this.tryRead(`TIMG/${name}`);
-      if (!bytes) {
-        continue;
+      await this.loadTexture(`TIMG/${name}`, name);
+    }
+  }
+
+  /** Reads + decodes one texture and caches it under `key` (and its bare name). */
+  private async loadTexture(path: string, key: string): Promise<ImageBuffer | null> {
+    const bytes = await this.tryRead(path);
+    if (!bytes) {
+      return null;
+    }
+    try {
+      const texture = parseBti(bytes);
+      const image = decodeTexture(texture);
+      this.imageFormats.set(key, texture);
+      this.images.set(key, image);
+      return image;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Resolves an actor texture by file name, decoding it on first use.
+   *
+   * Actor definitions reference textures by bare name (e.g. `lift_00.bti`).
+   * Those live in the stage archive or in `data.arc`'s TIMG folder, but not
+   * necessarily in THIS stage's TIMG folder — and decoding every game texture
+   * up front would be wasteful — so the file is located through the resolver
+   * (which already layers stage + `data.arc`) and decoded on demand.
+   *
+   * @param name Texture file name as referenced by the actor definition.
+   * @returns The decoded image, or undefined when the texture is unavailable.
+   */
+  async ensureTexture(name: string): Promise<ImageBuffer | undefined> {
+    if (!name) {
+      return undefined;
+    }
+    // `images` is keyed by the stage's TIMG names (already decoded in init).
+    const cached = this.images.get(name) ?? this.images.get(baseName(name));
+    if (cached) {
+      return cached;
+    }
+    const key = baseName(name).toLowerCase();
+    const pending = this.textureLoads.get(key);
+    if (pending) {
+      return (await pending) ?? undefined;
+    }
+    const load = (async (): Promise<ImageBuffer | null> => {
+      const candidates = [name, baseName(name), `TIMG/${baseName(name)}`];
+      for (const candidate of candidates) {
+        const real = this.resolver.resolve(candidate);
+        if (!real) {
+          continue;
+        }
+        const image = await this.loadTexture(real, baseName(name));
+        if (image) {
+          return image;
+        }
       }
-      try {
-        const texture = parseBti(bytes);
-        this.imageFormats.set(name, texture);
-        this.images.set(name, decodeTexture(texture));
-      } catch {
-        // Skip textures that fail to parse; they're optional for rendering.
+      return null;
+    })();
+    this.textureLoads.set(key, load);
+    return (await load) ?? undefined;
+  }
+
+  /** Ensures every texture an actor's resolved variants reference is decoded. */
+  async prepareActorTextures(id: string, variable: number): Promise<void> {
+    for (const variant of this.resolveVariants(id, variable)) {
+      if (variant.BtiFile) {
+        await this.ensureTexture(variant.BtiFile);
       }
     }
   }
@@ -588,7 +667,10 @@ export class StageRenderer {
 
   /**
    * Renders a single actor into a fresh transparent buffer sized to fit it (for
-   * the toolbox's Enemies thumbnails).
+   * the toolbox's Enemies/actor-template thumbnails).
+   *
+   * Asynchronous because BTI-texture actors are decoded on demand (see
+   * {@link ensureTexture}).
    *
    * @param id       Actor id (4 characters).
    * @param variable Actor variable value selecting the render variant.
@@ -598,14 +680,29 @@ export class StageRenderer {
    */
   renderActorPreview(
     id: string,
+    variable?: number,
+    width?: number,
+    height?: number,
+    gba?: boolean,
+  ): Promise<ImageBuffer | null>;
+  async renderActorPreview(
+    id: string,
     variable = 0,
     width = 32,
     height = 32,
     gba = false,
-  ): ImageBuffer | null {
+  ): Promise<ImageBuffer | null> {
     const variants = this.resolveVariants(id, variable);
     if (variants.length === 0) {
       return null;
+    }
+    // BTI-texture actors (e.g. `LIFT`, `CLOD`) reference the texture by bare
+    // name; decode it on demand so the preview is not blank when the stage's
+    // TIMG folder does not list it.
+    for (const variant of variants) {
+      if (variant.BtiFile) {
+        await this.ensureTexture(variant.BtiFile);
+      }
     }
 
     // Measure the sprite relative to an arbitrary origin, then compute the
@@ -799,6 +896,26 @@ export class StageRenderer {
     if (enemy) {
       this.spriteTV.loadInto(enemy, 0x8000);
       this.spriteGBA.loadInto(enemy, 0x8000);
+    }
+
+    // The remaining character sheets, at the offsets FSALib's `SpriteRenderer`
+    // constructor uses. NPC sprites (e.g. Kepora Gebora, placed by the actor
+    // templates) live in `gals_sch` / `gals2_sch`, so without these the sprite
+    // parts resolve but are fully transparent.
+    const gals2 = await this.tryRead('SCH/gals2_sch.szs');
+    if (gals2) {
+      this.spriteTV.loadInto(gals2, 0x8000 + 0x8000);
+      this.spriteGBA.loadInto(gals2, 0x8000 + 0x8000);
+    }
+    const player = await this.tryRead('SCH/player_sch.szs');
+    if (player) {
+      this.spriteTV.loadInto(player, 0x8000 + 0x8000 + 0x4000);
+      this.spriteGBA.loadInto(player, 0x8000 + 0x8000 + 0x4000);
+    }
+    const gals = await this.tryRead('SCH/gals_sch.szs');
+    if (gals) {
+      this.spriteTV.loadInto(gals, 0x8000 + 0x8000 + 0x8000);
+      this.spriteGBA.loadInto(gals, 0x8000 + 0x8000 + 0x8000);
     }
 
     const sobFiles = [
