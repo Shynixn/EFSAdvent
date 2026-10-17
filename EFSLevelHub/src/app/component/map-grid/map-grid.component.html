@@ -13,7 +13,9 @@
             type="button"
             (click)="select(x, y)"
             (contextmenu)="onContextMenu($event, x, y)"
-            [title]="isEmpty(x, y) ? 'Empty — right-click to create a room' : 'Room ' + roomAt(x, y)"
+            [title]="
+              isEmpty(x, y) ? 'Empty — right-click to create a room' : 'Room ' + roomAt(x, y)
+            "
             [class]="cellClasses(x, y, true)"
           >
             @if (!isEmpty(x, y)) {

@@ -990,7 +990,13 @@ export class RoomPage implements OnInit, OnDestroy {
       if (action !== 'delete') {
         // A new room slot exists; regenerate previews so the thumbnail is current.
         try {
-          await this.stagePreview.ensurePreviews(id, reloaded.data, reloaded.arcBytes, undefined, true);
+          await this.stagePreview.ensurePreviews(
+            id,
+            reloaded.data,
+            reloaded.arcBytes,
+            undefined,
+            true,
+          );
         } catch (error) {
           this.logger.warn(`RoomPage: preview refresh failed for "${id}"`, error);
         }
