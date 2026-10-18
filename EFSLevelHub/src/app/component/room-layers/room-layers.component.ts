@@ -14,11 +14,7 @@ import {
   RoomGroundChange,
   RoomTileChange,
 } from '../room-canvas/room-canvas.component';
-import {
-  DIMENSION,
-  isCroppedLayer,
-  roomCanvasTilesH,
-} from '../room-canvas/room-canvas.layout';
+import { DIMENSION, isCroppedLayer, roomCanvasTilesH } from '../room-canvas/room-canvas.layout';
 import { RoomData } from '../../entity/fsalib.entity';
 import { StageRenderer } from '../../service/render/stage-renderer';
 import { GroundLayer } from '../../entity/ground.entity';
