@@ -39,11 +39,14 @@
 
     <!-- Kind filter: segmented buttons -->
     <div class="flex overflow-hidden rounded-xl border border-slate-700">
-      @for (option of [
-        { kind: 'all', label: 'All' },
-        { kind: 'stage', label: 'Stages' },
-        { kind: 'world', label: 'Worlds' },
-      ]; track option.kind) {
+      @for (
+        option of [
+          { kind: 'all', label: 'All' },
+          { kind: 'stage', label: 'Stages' },
+          { kind: 'world', label: 'Worlds' },
+        ];
+        track option.kind
+      ) {
         <button
           type="button"
           (click)="setKind($any(option.kind))"
@@ -65,7 +68,9 @@
   }
 
   @if (loading()) {
-    <p class="rounded-xl border border-dashed border-slate-700 bg-slate-800/40 p-8 text-center text-slate-400">
+    <p
+      class="rounded-xl border border-dashed border-slate-700 bg-slate-800/40 p-8 text-center text-slate-400"
+    >
       Loading published levels…
     </p>
   } @else if (error()) {
@@ -113,4 +118,3 @@
     </p>
   }
 </div>
-

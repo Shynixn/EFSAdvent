@@ -4,7 +4,11 @@ import { ButtonComponent } from '../../component/button/button.component';
 import { LevelCardComponent } from '../../component/level-card/level-card.component';
 import { SortDropdownComponent } from '../../component/sort-dropdown/sort-dropdown.component';
 import { DEFAULT_SORT, SortState, sortItems } from '../../component/sort-dropdown/sort.util';
-import { LEVEL_FALLBACK_PREVIEW, LevelIndexEntry, LevelKind } from '../../entity/level-index.entity';
+import {
+  LEVEL_FALLBACK_PREVIEW,
+  LevelIndexEntry,
+  LevelKind,
+} from '../../entity/level-index.entity';
 import { EditorService, WORLDMAP_FILE } from '../../service/editor.service';
 import { LevelIndexService } from '../../service/level-index.service';
 import { LoggingService } from '../../service/logging.service';
@@ -87,7 +91,9 @@ export class LevelExplorerPage implements OnInit {
     try {
       const bytes = await this.editor.readEditorFile(WORLDMAP_FILE);
       if (bytes) {
-        this.previewUrl.set(URL.createObjectURL(new Blob([bytes as unknown as BlobPart], { type: 'image/png' })));
+        this.previewUrl.set(
+          URL.createObjectURL(new Blob([bytes as unknown as BlobPart], { type: 'image/png' })),
+        );
       }
     } catch (error) {
       this.logger.warn('LevelExplorer: world map preview unavailable', error);
@@ -149,4 +155,3 @@ export class LevelExplorerPage implements OnInit {
     void this.router.navigate([kind === 'stages' ? '/my-stages' : '/my-worlds']);
   }
 }
-

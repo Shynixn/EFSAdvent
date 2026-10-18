@@ -81,9 +81,7 @@ export class LevelIndexService {
 
       this.nameIndex = this.importField(index?.index?.['name']);
       this.authorIndex = this.importField(index?.index?.['author']);
-      this.logger.info(
-        `LevelIndex: loaded ${entries.length} published entr(ies) from ${url}.`,
-      );
+      this.logger.info(`LevelIndex: loaded ${entries.length} published entr(ies) from ${url}.`);
     } catch (error) {
       this.error.set('Could not load the published levels.');
       this.logger.error('LevelIndex: failed to load the search index', error);
@@ -150,7 +148,9 @@ export class LevelIndexService {
         ...this.nameIndex.search(term).map(String),
         ...this.authorIndex.search(term).map(String),
       ]);
-      results = [...ids].map((id) => byId.get(id)).filter((entry): entry is LevelIndexEntry => !!entry);
+      results = [...ids]
+        .map((id) => byId.get(id))
+        .filter((entry): entry is LevelIndexEntry => !!entry);
       // Preserve a sensible order for equally-matching entries.
       results = results.filter(
         (entry) =>
@@ -167,10 +167,7 @@ export class LevelIndexService {
   }
 
   /** Sorts entries by name (default) or newest first. */
-  sortEntries(
-    entries: LevelIndexEntry[],
-    sort: 'name' | 'newest' = 'name',
-  ): LevelIndexEntry[] {
+  sortEntries(entries: LevelIndexEntry[], sort: 'name' | 'newest' = 'name'): LevelIndexEntry[] {
     const copy = [...entries];
     if (sort === 'newest') {
       copy.sort((a, b) => (b.creationDate ?? '').localeCompare(a.creationDate ?? ''));

@@ -61,13 +61,17 @@ function toEntry(guid, manifest) {
   // A `stages` array marks a world; everything else is a stage.
   const isWorld = Array.isArray(manifest.stages);
   const stageIds = isWorld
-    ? manifest.stages.map((stage) => (stage && typeof stage.id === 'string' ? stage.id : '')).filter(Boolean)
+    ? manifest.stages
+        .map((stage) => (stage && typeof stage.id === 'string' ? stage.id : ''))
+        .filter(Boolean)
     : [];
 
   return {
     id: guid,
     kind: isWorld ? 'world' : 'stage',
-    name: (typeof manifest.name === 'string' && manifest.name.trim()) || (isWorld ? 'Untitled World' : 'Untitled Stage'),
+    name:
+      (typeof manifest.name === 'string' && manifest.name.trim()) ||
+      (isWorld ? 'Untitled World' : 'Untitled Stage'),
     author: (typeof manifest.author === 'string' && manifest.author.trim()) || 'Unknown',
     ...(typeof manifest.creationDate === 'string' ? { creationDate: manifest.creationDate } : {}),
     ...(isWorld ? { stageCount: stageIds.length, stages: stageIds } : {}),
