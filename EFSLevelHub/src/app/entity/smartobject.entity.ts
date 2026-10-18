@@ -281,16 +281,28 @@ export function clearSmartObject(
  * itself is drawn bottom-centre anchored from there.
  */
 export function placementToActor(placement: SmartObjectPlacement): ActorData {
-  const definition = findSmartObjectDefinition(placement.id);
   return {
-    // Actor templates carry their actor id inside the definition (the placement
-    // id is the template's stable id, e.g. `template:Items:0`).
-    Id: definition?.actorId ?? placement.id,
+    Id: bakedActorId(placement),
     Layer: placement.baseLayerId,
     X: placement.anchorCol * 2 + (placement.halfTileDx ?? 0),
     Y: placement.anchorRow * 2 + (placement.halfTileDy ?? 0),
     Variable: placement.actorVariable ?? 0,
   };
+}
+
+/**
+ * The **actor id** a placement bakes into the archive.
+ *
+ * This is the definition's `actorId` when it has one — actor templates are
+ * recorded under their own stable id (`template:Items:0`) but bake the actor
+ * they encode — otherwise the placement id itself (e.g. a door's `WARP` child).
+ *
+ * Always use this (not `placement.id`) when comparing a placement with an actor
+ * read back from the archive: comparing the placement id makes a recorded
+ * template look like a "legacy" actor that was never recorded.
+ */
+export function bakedActorId(placement: SmartObjectPlacement): string {
+  return findSmartObjectDefinition(placement.id)?.actorId ?? placement.id;
 }
 
 /** Actor id of the warp smart object. */

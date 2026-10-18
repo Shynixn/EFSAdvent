@@ -30,6 +30,7 @@
           [groundMode]="groundMode"
           [groundBaseLayerId]="base"
           [showMarkers]="true"
+          (connectDragChanged)="onConnectDragChanged($event)"
           (tileChanged)="tileChanged.emit($event)"
           (groundChanged)="groundChanged.emit($event)"
           (decorationPlaced)="decorationPlaced.emit($event)"

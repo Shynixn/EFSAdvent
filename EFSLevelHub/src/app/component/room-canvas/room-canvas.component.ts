@@ -4,7 +4,9 @@ import {
   ElementRef,
   EventEmitter,
   Input,
+  OnDestroy,
   Output,
+  computed,
   inject,
   signal,
   viewChild,
@@ -106,7 +108,7 @@ function mergeSkip(a: Set<number> | undefined, b: Set<number>): Set<number> {
   selector: 'app-room-canvas',
   templateUrl: './room-canvas.component.html',
 })
-export class RoomCanvasComponent implements AfterViewInit {
+export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
   private readonly dragService = inject(SmartObjectDragService);
 
   /** The room to edit. */
@@ -372,6 +374,13 @@ export class RoomCanvasComponent implements AfterViewInit {
   }>();
 
   /**
+   * Emits `true` when a connect drag starts, and `false` when it ends (released,
+   * completed or cancelled). The host uses this to own the connect line's
+   * cross-layer overlay — see {@link startConnect}.
+   */
+  @Output() connectDragChanged = new EventEmitter<boolean>();
+
+  /**
    * Emits when a placement's recorded data changes without moving it — used for
    * connecting/disconnecting two doors (which adds/removes a child `WARP` actor).
    */
@@ -384,6 +393,15 @@ export class RoomCanvasComponent implements AfterViewInit {
   private readonly canvasRef = viewChild<ElementRef<HTMLCanvasElement>>('canvas');
   /** The transparent overlay canvas used for drag previews. */
   private readonly previewRef = viewChild<ElementRef<HTMLCanvasElement>>('preview');
+  /**
+   * The cross-layer overlay: a canvas the HOST paints connect lines onto, so a
+   * line can run from a door in one layer section to a pointer (or door) in
+   * another. Sized by the host to cover the whole layer stack.
+   */
+  private readonly overlayRef = viewChild<ElementRef<HTMLCanvasElement>>('overlay');
+
+  /** Whether a connect drag is currently in progress (see {@link startConnect}). */
+  readonly connecting = computed(() => this.connectingFrom() !== null);
 
   /** Whether the left mouse button is held (for drag-painting). */
   private painting = false;
@@ -436,6 +454,13 @@ export class RoomCanvasComponent implements AfterViewInit {
   private hoveredPlacement: SmartObjectPlacement | null = null;
 
   /**
+   * Resolver supplied by the host (the stacked layer view): maps a page-wide
+   * pointer position to the door under it **on any layer**, so a connect drag
+   * can start on one layer's canvas and end on another's.
+   */
+  resolveDoor: ((clientX: number, clientY: number) => SmartObjectPlacement | null) | null = null;
+
+  /**
    * Right-click context menu state: the smart object placement it targets, plus
    * its position (in CSS pixels, relative to the canvas wrapper). `null` when
    * closed. Enemies are placements too, so no separate actor target is needed.
@@ -458,9 +483,174 @@ export class RoomCanvasComponent implements AfterViewInit {
     void this.redraw();
   }
 
+  ngOnDestroy(): void {
+    this.stopConnectTracking();
+  }
+
   /** The canvas element (used by the stacked layer view to align its overlay). */
   canvasElement(): HTMLCanvasElement | null {
     return this.canvasRef()?.nativeElement ?? null;
+  }
+
+  /** The cross-layer overlay element the host paints connect lines onto. */
+  overlayElement(): HTMLCanvasElement | null {
+    return this.overlayRef()?.nativeElement ?? null;
+  }
+
+  /** This canvas's crop flag, as set through the {@link cropped} input. */
+  get isCropped(): boolean {
+    return this._cropped;
+  }
+
+  /**
+   * The canvas's top-left corner relative to a container, in the container's
+   * CSS pixels.
+   *
+   * Cropped (Main Layer) and uncropped (Dark World / Gameboy) canvases have
+   * different heights, but every section wraps its canvas in the same `p-2`
+   * padding and the stack is a single column — so a container-relative rect is
+   * all the host needs to place a cross-layer connect line.
+   */
+  canvasOffsetIn(container: HTMLElement | null): { x: number; y: number } | null {
+    const canvas = this.canvasRef()?.nativeElement;
+    if (!canvas || !container) {
+      return null;
+    }
+    const canvasRect = canvas.getBoundingClientRect();
+    const containerRect = container.getBoundingClientRect();
+    return { x: canvasRect.left - containerRect.left, y: canvasRect.top - containerRect.top };
+  }
+
+  /**
+   * Canvas-space centre of a tile, in CSS pixels relative to the canvas's
+   * top-left corner (works for cropped and uncropped layers because the canvas
+   * element itself is already the visible window).
+   */
+  tileCentreInCanvas(tile: { x: number; y: number }): { x: number; y: number } | null {
+    const canvas = this.canvasRef()?.nativeElement;
+    if (!canvas) {
+      return null;
+    }
+    const rect = canvas.getBoundingClientRect();
+    const tileW = rect.width / DIMENSION;
+    const tileH = rect.height / roomCanvasTilesH(this._cropped);
+    return { x: (tile.x + 0.5) * tileW, y: (tile.y + 0.5) * tileH };
+  }
+
+  /**
+   * Pixel box (CSS px, canvas-relative) of a placement's footprint on **this**
+   * canvas. Used by the host to outline a hovered/connectable door that lives
+   * in another layer's section.
+   */
+  placementBoxInCanvas(placement: SmartObjectPlacement): {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null {
+    const canvas = this.canvasRef()?.nativeElement;
+    const definition = findSmartObjectDefinition(placement.id);
+    if (!canvas || !definition) {
+      return null;
+    }
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = rect.width / canvas.width;
+    const scaleY = rect.height / canvas.height;
+    const box = this.boxOf(placement, definition);
+    return {
+      x: box.x * scaleX,
+      y: box.y * scaleY,
+      width: box.width * scaleX,
+      height: box.height * scaleY,
+    };
+  }
+
+  /**
+   * A placement's footprint in canvas pixel coordinates, for any baking mode
+   * (tile-baked bounds, or an actor sprite's real bounds).
+   */
+  private boxOf(
+    placement: SmartObjectPlacement,
+    definition: SmartObjectDefinition,
+  ): { x: number; y: number; width: number; height: number } {
+    if (definition.baking === 'actor') {
+      return this.actorBox(placement);
+    }
+    const bounds = smartObjectBounds(
+      definition,
+      placement.variantIndex ?? 0,
+      placement.subTypeIndex ?? 0,
+    );
+    return {
+      x: (placement.anchorCol + bounds.minCol) * TILE_SIZE,
+      y: (placement.anchorRow + bounds.minRow) * TILE_SIZE,
+      width: bounds.cols * TILE_SIZE,
+      height: bounds.rows * TILE_SIZE,
+    };
+  }
+
+  /**
+   * The door covering a **page-wide** pointer position on THIS canvas, or null
+   * when the pointer is not over this canvas.
+   *
+   * The connect drag is owned by the source door's canvas, but the pointer can
+   * be over any layer's canvas — or over the padded gaps between sections. The
+   * host walks every section with this and lets the one under the pointer
+   * resolve the door, which is what makes a connection cross layers.
+   */
+  doorAtViewport(clientX: number, clientY: number): SmartObjectPlacement | null {
+    const canvas = this.canvasRef()?.nativeElement;
+    if (!canvas) {
+      return null;
+    }
+    const rect = canvas.getBoundingClientRect();
+    if (
+      rect.width === 0 ||
+      rect.height === 0 ||
+      clientX < rect.left ||
+      clientX >= rect.right ||
+      clientY < rect.top ||
+      clientY >= rect.bottom
+    ) {
+      return null;
+    }
+    const canvasX = ((clientX - rect.left) / rect.width) * canvas.width;
+    const canvasY = ((clientY - rect.top) / rect.height) * canvas.height;
+    const tile = {
+      x: Math.floor(canvasX / TILE_SIZE),
+      y: Math.floor(canvasY / TILE_SIZE),
+    };
+    if (tile.x < 0 || tile.x >= DIMENSION || tile.y < 0 || tile.y >= DIMENSION) {
+      return null;
+    }
+    return this.doorAtTile(tile);
+  }
+
+  /**
+   * Finds a **door** covering a tile on THIS canvas's layer.
+   *
+   * Connect is cross-layer: a door may be targeted from another layer's drag,
+   * so this ignores the currently edited layer and only requires the placement
+   * to belong to this canvas's base layer.
+   */
+  doorAtTile(tile: { x: number; y: number }): SmartObjectPlacement | null {
+    for (let i = this.smartObjects.length - 1; i >= 0; i--) {
+      const placement = this.smartObjects[i];
+      if ((placement.baseLayerId ?? 0) !== this.layerIndex) {
+        continue;
+      }
+      const definition = findSmartObjectDefinition(placement.id);
+      if (!definition || !isDoorDefinition(definition)) {
+        continue;
+      }
+      const box = this.boxOf(placement, definition);
+      const px = tile.x * TILE_SIZE;
+      const py = tile.y * TILE_SIZE;
+      if (px >= box.x && px < box.x + box.width && py >= box.y && py < box.y + box.height) {
+        return placement;
+      }
+    }
+    return null;
   }
 
   /**
@@ -928,6 +1118,13 @@ export class RoomCanvasComponent implements AfterViewInit {
     this.connectingFrom.set(placement);
     this.connectCursor.set(null);
     this.contextMenu.set(null);
+    // The line may have to leave this canvas entirely (the target door can live
+    // in another layer's section), so the HOST draws it on a stack-wide
+    // overlay. Track the pointer window-wide: releasing outside this canvas must
+    // still complete (or cancel) the connection.
+    window.addEventListener('pointermove', this.onWindowConnectMove);
+    window.addEventListener('pointerup', this.onWindowConnectUp);
+    this.connectDragChanged.emit(true);
     void this.redraw();
   }
 
@@ -935,8 +1132,28 @@ export class RoomCanvasComponent implements AfterViewInit {
   cancelConnect(): void {
     this.connectingFrom.set(null);
     this.connectCursor.set(null);
+    this.stopConnectTracking();
+    this.connectDragChanged.emit(false);
     this.drawHoverOutline();
   }
+
+  /** Stops listening for the connect drag once it leaves this canvas. */
+  private stopConnectTracking(): void {
+    window.removeEventListener('pointermove', this.onWindowConnectMove);
+    window.removeEventListener('pointerup', this.onWindowConnectUp);
+  }
+
+  private readonly onWindowConnectMove = (event: PointerEvent): void => {
+    if (this.connectingFrom()) {
+      this.drawConnectLine(event);
+    }
+  };
+
+  private readonly onWindowConnectUp = (event: PointerEvent): void => {
+    if (this.connectingFrom()) {
+      this.finishConnect(event);
+    }
+  };
 
   /**
    * Completes a connect drag: if another door is under the pointer, delegates to
@@ -950,8 +1167,13 @@ export class RoomCanvasComponent implements AfterViewInit {
     }
     this.connectingFrom.set(null);
     this.connectCursor.set(null);
-    const tile = this.tileAt(event);
-    const target = tile ? this.findDoorAtAnyLayer(tile) : null;
+    this.stopConnectTracking();
+    // The drag is over however it ends — the host clears its cross-layer line.
+    this.connectDragChanged.emit(false);
+    // Ask the HOST which door is under the pointer: the target may live in
+    // another base layer's section (its own canvas), so this canvas cannot
+    // resolve it on its own.
+    const target = this.doorAtPointer(event);
     if (!target || target === source) {
       this.drawHoverOutline();
       return;
@@ -982,31 +1204,39 @@ export class RoomCanvasComponent implements AfterViewInit {
   }
 
   /**
-   * Finds a **door** placement under a tile regardless of base layer, so a
-   * connection can be drawn from a door on one layer to a door on another.
+   * Resolves the door under a page-wide pointer position, through the host when
+   * the pointer is outside this canvas.
+   *
+   * Inside this canvas the local hit-test is used directly; otherwise
+   * {@link doorAtViewport} ask the host, which knows every layer's canvas.
    */
-  private findDoorAtAnyLayer(tile: { x: number; y: number }): SmartObjectPlacement | null {
-    for (const placement of this.smartObjects) {
-      const definition = findSmartObjectDefinition(placement.id);
-      if (!definition || !isDoorDefinition(definition)) {
-        continue;
-      }
-      const bounds = smartObjectBounds(
-        definition,
-        placement.variantIndex ?? 0,
-        placement.subTypeIndex ?? 0,
-      );
-      if (
-        tile.y >= placement.anchorRow + bounds.minRow &&
-        tile.y <= placement.anchorRow + bounds.maxRow &&
-        tile.x >= placement.anchorCol + bounds.minCol &&
-        tile.x <= placement.anchorCol + bounds.maxCol
-      ) {
-        return placement;
+  private doorAtPointer(event: PointerEvent): SmartObjectPlacement | null {
+    if (this.isPointerOverCanvas(event)) {
+      const tile = this.tileAt(event);
+      const local = tile ? this.doorAtTile(tile) : null;
+      if (local) {
+        return local;
       }
     }
-    return null;
+    return this.resolveDoor?.(event.clientX, event.clientY) ?? null;
   }
+
+  /** Whether a pointer position lies over this canvas's visible area. */
+  private isPointerOverCanvas(event: PointerEvent): boolean {
+    const canvas = this.canvasRef()?.nativeElement;
+    if (!canvas) {
+      return false;
+    }
+    const rect = canvas.getBoundingClientRect();
+    return (
+      event.clientX >= rect.left &&
+      event.clientX < rect.right &&
+      event.clientY >= rect.top &&
+      event.clientY < rect.bottom
+    );
+  }
+
+  /** The door covering a tile on THIS canvas's layer (see {@link doorAtTile}). */
 
   /**
    * Rotates the smart object targeted by the context menu to the next variant in
@@ -1783,18 +2013,23 @@ export class RoomCanvasComponent implements AfterViewInit {
   }
 
   /**
-   * Records the cursor position during a connect drag and repaints the overlay
-   * so the connect line follows the pointer.
+   * Records the pointer position during a connect drag and repaints the local
+   * overlay.
+   *
+   * The line leans on the host's stack-wide overlay: once the pointer leaves
+   * this canvas the line is drawn there instead (see
+   * {@link connectDragChanged}), so this only tracks the local cursor tile.
    */
   private drawConnectLine(event: PointerEvent): void {
-    const tile = this.tileAt(event);
-    this.connectCursor.set(tile);
+    this.connectCursor.set(this.isPointerOverCanvas(event) ? this.tileAt(event) : null);
     this.drawHoverOutline();
   }
 
   /**
-   * Draws the in-progress connect line onto the overlay: a dashed line from the
-   * source door to the cursor, and a green outline around a valid target door.
+   * Draws the in-progress connect line onto the LOCAL overlay: a dashed line
+   * from the source door to the cursor, and a green outline around a valid
+   * target door. Only used while the pointer is over this canvas — the
+   * cross-layer part of the line is drawn by the host.
    */
   private paintConnectLine(ctx: CanvasRenderingContext2D): void {
     const source = this.connectingFrom();
@@ -1802,6 +2037,9 @@ export class RoomCanvasComponent implements AfterViewInit {
       return;
     }
     const cursor = this.connectCursor();
+    if (!cursor) {
+      return;
+    }
     const sourceDef = findSmartObjectDefinition(source.id);
     const sourceBounds = sourceDef ? smartObjectBounds(sourceDef, source.variantIndex ?? 0) : null;
     const fromX =
@@ -1821,8 +2059,8 @@ export class RoomCanvasComponent implements AfterViewInit {
       );
     }
 
-    const toX = cursor ? (cursor.x + 0.5) * TILE_SIZE : fromX;
-    const toY = cursor ? (cursor.y + 0.5) * TILE_SIZE : fromY;
+    const toX = (cursor.x + 0.5) * TILE_SIZE;
+    const toY = (cursor.y + 0.5) * TILE_SIZE;
 
     // The line itself.
     ctx.save();
@@ -1835,8 +2073,9 @@ export class RoomCanvasComponent implements AfterViewInit {
     ctx.stroke();
     ctx.restore();
 
-    // Highlight a valid target door under the cursor (any layer).
-    const target = cursor ? this.findDoorAtAnyLayer(cursor) : null;
+    // Highlight a valid target door under the cursor on THIS layer (doors on
+    // other layers are highlighted by the host's overlay).
+    const target = this.doorAtTile(cursor);
     if (target && target !== source) {
       const targetDef = findSmartObjectDefinition(target.id);
       const tb = targetDef ? smartObjectBounds(targetDef, target.variantIndex ?? 0) : null;

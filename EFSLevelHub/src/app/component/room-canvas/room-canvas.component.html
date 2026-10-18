@@ -40,6 +40,13 @@
       [style.height.px]="canvasStyleSize.height"
     ></canvas>
 
+    <!--
+      Host-painted cross-layer overlay. The layer stack sizes this canvas to the
+      whole stack and draws the connect drag on it, so a line can run from a door
+      in this section to a door in another layer's section.
+    -->
+    <canvas #overlay class="pointer-events-none absolute left-0 top-0 z-10 block"></canvas>
+
     <!-- "Not allowed" indicator: this actor has no GBA sprite for this layer. -->
     @if (dragNotAllowed()) {
       <div

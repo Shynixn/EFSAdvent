@@ -43,6 +43,7 @@ import {
   SmartObjectDefinition,
   SmartObjectPlacement,
   actorToPlacement,
+  bakedActorId,
   findSmartObjectDefinition,
   flattenPlacements,
   placementToActor,
@@ -176,8 +177,14 @@ export class RoomPage implements OnInit, OnDestroy {
     // special-cased: it is a child actor that must ALWAYS be baked, even if the
     // actor catalog has not been registered yet (or omits it), otherwise door
     // warps would silently never reach the archive.
+    //
+    // NOTE: compare the BAKED actor id, not the placement id — a template is
+    // recorded as `template:…` and still bakes its `actorId` (`WARP`, …).
+    // Matching on the placement id let a recorded template fail the test and be
+    // duplicated after a reload.
     const isActorBaked = (placement: SmartObjectPlacement): boolean =>
-      placement.id === WARP_ACTOR_ID || findSmartObjectDefinition(placement.id)?.baking === 'actor';
+      bakedActorId(placement) === WARP_ACTOR_ID ||
+      findSmartObjectDefinition(placement.id)?.baking === 'actor';
     const smartActors = flattenPlacements(this.smartObjects())
       .filter(isActorBaked)
       .map(placementToActor);
@@ -460,9 +467,10 @@ export class RoomPage implements OnInit, OnDestroy {
       //  - actor-baked objects (enemies) from the ARCHIVE's enemy list.
       // Everything the editor recorded (both kinds) lives in the room's
       // `smartObjects` entry, so actors already in the archive that are NOT in
-      // that list are "legacy" actors: they predate the editor (or were added by
-      // another tool). They are surfaced separately AND injected into
-      // `smartObjects` below, so the room ends up with a single, truthful list.
+      // that list — roots and children alike — are "legacy" actors: they predate
+      // the editor (or were added by another tool). They are surfaced separately
+      // and are never injected into `smartObjects`, so a recorded placement can
+      // never appear twice.
       const recordedPlacements = record?.smartObjects ?? [];
       // Whether a recorded placement bakes an actor. The definition catalog may
       // NOT be registered yet at this point (actor-baked ids like `WARP` are
@@ -473,42 +481,32 @@ export class RoomPage implements OnInit, OnDestroy {
       // duplicate legacy actor.
       const isActorBaked = (placement: SmartObjectPlacement): boolean =>
         findSmartObjectDefinition(placement.id)?.baking === 'actor' ||
-        placement.id === WARP_ACTOR_ID ||
+        // The baked actor id, NOT the placement id: actor templates are recorded
+        // as `template:…`, which would never match the archive's actor.
+        bakedActorId(placement) === WARP_ACTOR_ID ||
         placement.actorVariable !== undefined;
       const tilePlacements = recordedPlacements.filter((placement) => !isActorBaked(placement));
       // Actor-baked roots stay in the list as-is (their children — e.g. a door's
       // connecting WARP actor — travel with them).
       const recordedActors = recordedPlacements.filter(isActorBaked);
-      // Every recorded actor, INCLUDING children, so an actor that is recorded as
-      // a child is not also surfaced (and duplicated) as a legacy actor.
-      const recordedActorsFlat = flattenPlacements(recordedPlacements).filter(isActorBaked);
 
       const archiveActors = (room.Actors ?? []).map((actor) => actorToPlacement(actor));
-      // An archive actor that is NOT already recorded is a **legacy** actor: one
-      // that predates the editor. Legacy actors:
-      //  - live ONLY in {@link legacyActors} — never in `smartObjects`, so they
-      //    never appear as normal editor placements,
-      //  - are baked into the archive on save (see the `actors` computed),
-      //  - are NEVER persisted: neither in the stage JSON nor as their own flag.
+      // An archive actor whose **actor id** is already present in `smartObjects`
+      // (as a root OR as any child) is NOT legacy — it is already recorded, so
+      // it must not be surfaced a second time.
       //
-      // Because legacy is not persisted it is re-derived on every load: a room
-      // that has been saved records its actors, so they are no longer "archive
-      // actors not recorded" and thus not legacy any more.
+      // This is intentionally keyed on the actor id ALONE: position, layer and
+      // variable are all things the editor rewrites (moving a door, rotating it,
+      // re-centring its `WARP`), while the archive still holds the pre-save
+      // values. Comparing more made recorded warps/actors miss their archive
+      // counterpart and reappear as legacy actors (and then get baked twice).
       //
-      // "Same actor" is decided by its BAKED identity — `id + layer + position`
-      // — exactly the bytes the archive stores. `placementToActor` folds in any
-      // `halfTileDx/Dy`, so a recorded child (e.g. a door's `WARP`) matches its
-      // archive counterpart. The Variable is deliberately NOT part of the key:
-      // the editor may rewrite it (rotating a warp changes its type byte) while
-      // the archive still holds the pre-save value.
-      const actorKey = (actor: ActorData): string =>
-        `${actor.Id}|${actor.Layer & 0x07}|${actor.X}|${actor.Y}`;
-      const recordedActorKeys = new Set(
-        recordedActorsFlat.map((recorded) => actorKey(placementToActor(recorded))),
+      // The id comes from `bakedActorId` (definition `actorId` ?? placement id),
+      // so a template recorded as `template:…` still matches the archive's actor.
+      const recordedActorIds = new Set(
+        flattenPlacements(recordedPlacements).map((placement) => bakedActorId(placement)),
       );
-      const isRecorded = (placement: SmartObjectPlacement): boolean =>
-        recordedActorKeys.has(actorKey(placementToActor(placement)));
-      const legacy = archiveActors.filter((placement) => !isRecorded(placement));
+      const legacy = archiveActors.filter((placement) => !recordedActorIds.has(bakedActorId(placement)));
 
       // Legacy actors stay in their OWN list — never mixed into `smartObjects`,
       // so they cannot appear as editor placements. The canvas draws them (red)
