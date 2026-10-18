@@ -506,7 +506,9 @@ export class RoomPage implements OnInit, OnDestroy {
       const recordedActorIds = new Set(
         flattenPlacements(recordedPlacements).map((placement) => bakedActorId(placement)),
       );
-      const legacy = archiveActors.filter((placement) => !recordedActorIds.has(bakedActorId(placement)));
+      const legacy = archiveActors.filter(
+        (placement) => !recordedActorIds.has(bakedActorId(placement)),
+      );
 
       // Legacy actors stay in their OWN list — never mixed into `smartObjects`,
       // so they cannot appear as editor placements. The canvas draws them (red)
