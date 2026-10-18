@@ -1,66 +1,109 @@
-<div class="mx-auto max-w-6xl space-y-8 p-6 lg:p-8">
-  <!-- Header -->
-  <header class="space-y-1">
-    <h1 class="text-3xl font-bold tracking-tight text-white">Level Explorer</h1>
-    <p class="text-slate-400">Discover, browse and play levels shared by the community.</p>
+<div class="mx-auto max-w-6xl space-y-6 p-6 lg:p-8">
+  <header class="flex flex-wrap items-end justify-between gap-4">
+    <div class="space-y-1">
+      <h1 class="text-3xl font-bold tracking-tight text-white">Level Explorer</h1>
+      <p class="text-slate-400">
+        Published stages and worlds shared by the community.
+        @if (total() > 0) {
+          <span class="text-slate-500">
+            · {{ stageCount() }} stage(s), {{ worldCount() }} world(s)
+          </span>
+        }
+      </p>
+    </div>
+    <div class="flex items-center gap-2">
+      <app-sort-dropdown [value]="sort()" (changed)="sort.set($event)" />
+    </div>
   </header>
 
-  <!-- Search -->
-  <div class="relative max-w-xl">
-    <span
-      class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-slate-500"
-    >
-      <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-        <path
-          fill-rule="evenodd"
-          d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z"
-          clip-rule="evenodd"
-        />
-      </svg>
-    </span>
-    <input
-      type="search"
-      [value]="search()"
-      (input)="onSearchInput($event)"
-      placeholder="Search levels, authors or tags…"
-      class="w-full rounded-xl border border-slate-700 bg-slate-800/70 py-3 pl-10 pr-4 text-slate-100 placeholder-slate-500 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/30"
-    />
+  <!-- Search + kind filter (same toolbar style as My Stages / My Worlds) -->
+  <div class="flex flex-wrap items-center gap-3">
+    <div class="relative min-w-64 flex-1">
+      <span class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+        <svg viewBox="0 0 18 18" fill="currentColor" class="h-4 w-4" aria-hidden="true">
+          <path
+            fill-rule="evenodd"
+            d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z"
+            clip-rule="evenodd"
+          />
+        </svg>
+      </span>
+      <input
+        type="search"
+        [value]="search()"
+        (input)="onSearchInput($event)"
+        placeholder="Search by stage or author name…"
+        class="w-full rounded-xl border border-slate-700 bg-slate-800/70 py-2.5 pl-9 pr-3 text-sm text-slate-100 placeholder-slate-500 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/30"
+      />
+    </div>
+
+    <!-- Kind filter: segmented buttons -->
+    <div class="flex overflow-hidden rounded-xl border border-slate-700">
+      @for (option of [
+        { kind: 'all', label: 'All' },
+        { kind: 'stage', label: 'Stages' },
+        { kind: 'world', label: 'Worlds' },
+      ]; track option.kind) {
+        <button
+          type="button"
+          (click)="setKind($any(option.kind))"
+          class="cursor-pointer px-3 py-2 text-sm transition"
+          [class.bg-indigo-500]="kindFilter() === option.kind"
+          [class.text-white]="kindFilter() === option.kind"
+          [class.text-slate-300]="kindFilter() !== option.kind"
+          [class.hover:bg-slate-700]="kindFilter() !== option.kind"
+        >
+          {{ option.label }}
+        </button>
+      }
+    </div>
   </div>
 
-  <!-- Results -->
-  @if (filteredLevels().length > 0) {
-    <div class="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
-      @for (level of filteredLevels(); track level.id) {
-        <article
-          class="group overflow-hidden rounded-2xl border border-slate-700/60 bg-slate-800/60 shadow-lg transition hover:-translate-y-0.5 hover:border-slate-500 hover:shadow-xl"
-        >
-          <!-- Hero banner -->
-          <div class="relative h-28 bg-gradient-to-br" [class]="level.accent">
-            <div class="absolute inset-0 bg-slate-900/20"></div>
-            <span
-              class="absolute bottom-2 right-3 rounded-full bg-slate-900/70 px-2.5 py-0.5 text-xs font-medium text-slate-100"
-            >
-              {{ level.stageCount }} stages
-            </span>
-          </div>
+  <!-- Content -->
+  @if (downloadError()) {
+    <p class="rounded-xl bg-red-500/10 p-3 text-sm text-red-400">{{ downloadError() }}</p>
+  }
 
-          <div class="space-y-2 p-4">
-            <h3 class="text-lg font-semibold text-white">{{ level.name }}</h3>
-            <p class="text-sm text-slate-400">
-              by <span class="text-slate-300">{{ level.author }}</span> · {{ level.world }}
-            </p>
-            <div class="flex flex-wrap gap-1.5 pt-1">
-              @for (tag of level.tags; track tag) {
-                <span
-                  class="rounded-full bg-slate-700/70 px-2.5 py-0.5 text-xs font-medium text-slate-300"
-                >
-                  {{ tag }}
-                </span>
-              }
-            </div>
-          </div>
-        </article>
+  @if (loading()) {
+    <p class="rounded-xl border border-dashed border-slate-700 bg-slate-800/40 p-8 text-center text-slate-400">
+      Loading published levels…
+    </p>
+  } @else if (error()) {
+    <p class="rounded-xl bg-red-500/10 p-4 text-sm text-red-400">{{ error() }}</p>
+  } @else if (hasResults()) {
+    <div class="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
+      @for (entry of results(); track entry.id) {
+        <app-level-card
+          [kind]="entry.kind"
+          [title]="entry.name"
+          [author]="entry.author"
+          [creationDate]="entry.creationDate ?? ''"
+          [uuid]="entry.id"
+          [imageUrl]="imageFor(entry)"
+          [stageCount]="entry.stageCount ?? 0"
+          [busy]="downloading() === entry.id"
+          (cardClick)="download(entry)"
+        />
       }
+    </div>
+  } @else if (total() === 0) {
+    <div
+      class="flex flex-col items-center gap-3 rounded-xl border border-dashed border-slate-700 bg-slate-800/40 p-10 text-center"
+    >
+      <p class="text-slate-300">No levels have been published yet.</p>
+      <p class="max-w-md text-sm text-slate-500">
+        Publish stages or worlds with the
+        <code class="text-slate-400">build-level-search-index</code> script, or work on your own
+        content locally.
+      </p>
+      <div class="flex gap-2 pt-1">
+        <app-button variant="primary" color="indigo" (clicked)="goToLocal('stages')">
+          My Stages
+        </app-button>
+        <app-button variant="outline" color="indigo" (clicked)="goToLocal('worlds')">
+          My Worlds
+        </app-button>
+      </div>
     </div>
   } @else {
     <p
@@ -70,3 +113,4 @@
     </p>
   }
 </div>
+

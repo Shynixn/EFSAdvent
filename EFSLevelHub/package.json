@@ -5,7 +5,8 @@
     "ng": "ng",
     "build:wasm": "pwsh -NoProfile -ExecutionPolicy Bypass -File build-wasm.ps1",
     "start": "npm run build:wasm && ng serve --host 0.0.0.0 --port 4200",
-    "build": "npm run build:wasm && ng build",
+    "build": "npm run build:wasm && npm run build:level-index && ng build",
+    "build:level-index": "node scripts/build-level-search-index.mjs",
     "watch": "ng build --watch --configuration development",
     "test": "ng test"
   },
@@ -18,6 +19,7 @@
     "@angular/forms": "^22.2.0",
     "@angular/platform-browser": "^22.2.0",
     "@angular/router": "^22.2.0",
+    "flexsearch": "^0.8.212",
     "rxjs": "~7.8.0",
     "tslib": "^2.3.0",
     "upng-js": "^2.1.0"

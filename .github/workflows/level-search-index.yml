@@ -1,0 +1,52 @@
+name: Build Level Search Index
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-level-index:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        working-directory: EFSLevelHub
+        run: npm ci
+
+      - name: Build the level search index
+        working-directory: EFSLevelHub
+        run: npm run build:level-index
+
+      - name: Validate the generated index
+        working-directory: EFSLevelHub
+        run: |
+          test -f public/level/searchindex.json
+          node -e "
+            const index = require('./public/level/searchindex.json');
+            if (!Array.isArray(index.entries)) throw new Error('entries must be an array');
+            if (index.count !== index.entries.length) throw new Error('count does not match entries');
+            for (const entry of index.entries) {
+              if (!entry.id || !entry.name) throw new Error('entry missing id/name');
+              if (entry.kind !== 'stage' && entry.kind !== 'world') throw new Error('bad kind: ' + entry.kind);
+            }
+            console.log('Level index OK:', index.count, 'entries');
+          "
+
+      - name: Upload the index
+        uses: actions/upload-artifact@v4
+        with:
+          name: level-search-index
+          path: EFSLevelHub/public/level/searchindex.json
