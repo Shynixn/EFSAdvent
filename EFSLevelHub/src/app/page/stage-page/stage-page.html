@@ -69,12 +69,8 @@
   </div>
 </div>
 
-<!-- Blocking modal while room previews + thumbnail are generated. -->
-<app-loading-modal
-  [open]="generatingPreviews()"
-  title="Generating previews"
-  [message]="previewMessage()"
-/>
+<!-- Blocking overlay while room previews + thumbnail are generated. -->
+<app-loading-overlay [open]="generatingPreviews()" [message]="previewMessage()" />
 
 <!-- Semi-transparent loading overlay -->
 <app-loading-overlay [open]="isLoading()" message="Loading..." />

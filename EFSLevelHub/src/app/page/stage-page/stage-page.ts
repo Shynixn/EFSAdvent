@@ -2,7 +2,6 @@ import { Component, OnDestroy, OnInit, computed, inject, signal } from '@angular
 import { ActivatedRoute, Router } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { ButtonComponent } from '../../component/button/button.component';
-import { LoadingModalComponent } from '../../component/loading-modal/loading-modal.component';
 import { LoadingOverlayComponent } from '../../component/loading-overlay/loading-overlay.component';
 import { MapGridComponent } from '../../component/map-grid/map-grid.component';
 import { StageService, StageFile } from '../../service/stage.service';
@@ -27,7 +26,7 @@ import { nextPaint } from '../../util/paint';
  */
 @Component({
   selector: 'app-stage-page',
-  imports: [ButtonComponent, LoadingModalComponent, LoadingOverlayComponent, MapGridComponent],
+  imports: [ButtonComponent, LoadingOverlayComponent, MapGridComponent],
   templateUrl: './stage-page.html',
   styleUrl: './stage-page.css',
 })
@@ -54,9 +53,9 @@ export class StagePage implements OnInit, OnDestroy {
   /** Load error message, if any. */
   readonly loadError = signal('');
 
-  /** Whether the (blocking) preview-generation modal is open. */
+  /** Whether the (blocking) preview generation is running (shows the overlay). */
   readonly generatingPreviews = signal(false);
-  /** Status message shown in the preview-generation modal. */
+  /** Status message shown in the preview-generation overlay. */
   readonly previewMessage = signal('Preparing previews…');
 
   /** Blob URL of the generated thumbnail (all rooms concatenated), if any. */
@@ -177,7 +176,7 @@ export class StagePage implements OnInit, OnDestroy {
           `(map ${loaded.data.Map.Index}, ${loaded.data.Map.XDimension}x${loaded.data.Map.YDimension}).`,
       );
 
-      // Generate the room previews + thumbnail (blocking modal) when missing.
+      // Generate the room previews + thumbnail (blocking overlay) when missing.
       void this.generatePreviews(loaded.data, loaded.arcBytes);
     } catch (error) {
       this.loadError.set(error instanceof Error ? error.message : 'Failed to load the stage.');
@@ -192,7 +191,7 @@ export class StagePage implements OnInit, OnDestroy {
     }
   }
 
-  /** Renders/caches the stage's preview images, showing the loading modal. */
+  /** Renders/caches the stage's preview images, showing the loading overlay. */
   private async generatePreviews(
     stage: StageData,
     bytes: Uint8Array,

@@ -128,8 +128,7 @@ export function createZip(entries: readonly ZipFileEntry[], date = new Date()): 
   endView.setUint32(16, offset, true);
   endView.setUint16(20, 0, true); // comment length
 
-  const total =
-    files.reduce((sum, part) => sum + part.length, 0) + centralSize + end.length;
+  const total = files.reduce((sum, part) => sum + part.length, 0) + centralSize + end.length;
   const out = new Uint8Array(total);
   let position = 0;
   // `Uint8Array<ArrayBufferLike>` vs `Uint8Array<ArrayBuffer>` typing mismatch on

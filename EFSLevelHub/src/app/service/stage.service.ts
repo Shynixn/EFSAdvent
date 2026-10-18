@@ -115,6 +115,21 @@ export function defaultStageUuid(index: number): string {
   return `00000000-0000-0000-0000-0000000000${index.toString().padStart(2, '0')}`;
 }
 
+/**
+ * Prefix shared by every built-in (game) stage id.
+ *
+ * Default stages are seeded with the sequential GUIDs built by
+ * {@link defaultStageUuid}, so their ids all start with
+ * `00000000-0000-0000-0000-`. They represent the original game stages and must
+ * never be deleted — only the user's own (imported/created) stages may be.
+ */
+export const DEFAULT_STAGE_ID_PREFIX = '00000000-0000-0000-0000-';
+
+/** Whether a stage id belongs to a built-in default stage (not deletable). */
+export function isDefaultStageId(id: string | null | undefined): boolean {
+  return !!id && id.startsWith(DEFAULT_STAGE_ID_PREFIX);
+}
+
 /** Builds the relative `/editor` path of a stage's definition file. */
 export function stageFilePath(uuid: string): string {
   return `stage/${uuid}.json`;
@@ -124,6 +139,19 @@ export function stageFilePath(uuid: string): string {
 export function stageArcFilePath(uuid: string): string {
   return `stage/${uuid}.arc`;
 }
+
+/**
+ * Outcome of {@link StageService.importStageZip}.
+ *
+ * - `imported`: the package became a stage (new, or replacing an existing one).
+ * - `exists`:   the package's id is already used locally; nothing was written.
+ *               The caller decides whether to replace it or cancel.
+ * - `invalid`:  the file is not a usable stage package.
+ */
+export type StageImportResult =
+  | { status: 'imported'; stage: StageFile; replaced: boolean }
+  | { status: 'exists'; existing: StageFile; package: Uint8Array }
+  | { status: 'invalid' };
 
 /** Author attributed to stages that don't declare one (i.e. the game's own). */
 export const DEFAULT_STAGE_AUTHOR = 'Nintendo';
@@ -224,8 +252,7 @@ export class StageService {
   readonly stages = this.stageList.asReadonly();
 
   /** Loads persisted stages from `/editor/userdata.json`. */
-  async load(): Promise<void> {
-    const refs = await this.editor.get<{ id: string }[]>(STAGES_KEY, []);
+  async load(): Promise<void> {    const refs = await this.editor.get<{ id: string }[]>(STAGES_KEY, []);
     const stages: StageFile[] = [];
     for (const ref of Array.isArray(refs) ? refs : []) {
       const file = await this.readStageFile(ref.id);
@@ -251,10 +278,17 @@ export class StageService {
    * left pointing at a missing id, which the world page already handles. Callers
    * that open the stage should close its tabs first.
    *
+   * Built-in default stages (ids starting with
+   * {@link DEFAULT_STAGE_ID_PREFIX}) cannot be deleted.
+   *
    * @param id Stage id to delete.
    * @returns `true` when the stage was removed.
    */
   async deleteStage(id: string): Promise<boolean> {
+    if (isDefaultStageId(id)) {
+      this.logger.warn(`StageService: refusing to delete default stage "${id}".`);
+      return false;
+    }
     if (!this.getById(id)) {
       this.logger.warn(`StageService: cannot delete unknown stage "${id}".`);
       return false;
@@ -489,9 +523,7 @@ export class StageService {
    * @returns The ZIP bytes and the suggested file name, or `null` when the
    *          stage or its archive is missing.
    */
-  async exportStagePackage(
-    id: string,
-  ): Promise<{ bytes: Uint8Array; fileName: string } | null> {
+  async exportStagePackage(id: string): Promise<{ bytes: Uint8Array; fileName: string } | null> {
     const file = await this.readStageFile(id);
     if (!file) {
       this.logger.warn(`StageService: cannot export unknown stage "${id}".`);
@@ -523,26 +555,31 @@ export class StageService {
    * the stage definition — and `stage.arc`.
    *
    * The stage keeps the **id recorded in the manifest**, so an exported stage
-   * keeps its identity. If that id already exists locally (re-importing a
-   * package into the same install), a fresh id is generated so the existing
-   * stage is never overwritten.
+   * keeps its identity. If that id already exists locally the import is
+   * REFUSED with `{ status: 'exists' }` (plus the parsed package), so the caller
+   * can ask the user whether to replace the existing stage. Nothing is written
+   * unless the caller then passes `replace: true` (or supplies a new id).
    *
    * @param zipBytes Raw bytes of the uploaded package.
-   * @returns The imported stage, or `null` when the package is invalid.
+   * @param options  `replace` overwrites the stage with the manifest's id;
+   *                 `newId` forces a fresh id instead ("import as copy").
    */
-  async importStageZip(zipBytes: Uint8Array): Promise<StageFile | null> {
+  async importStageZip(
+    zipBytes: Uint8Array,
+    options: { replace?: boolean; newId?: boolean } = {},
+  ): Promise<StageImportResult> {
     let entries;
     try {
       entries = await this.fsaLib.unzip(zipBytes);
     } catch (error) {
       this.logger.error('StageService: failed to read stage zip', error);
-      return null;
+      return { status: 'invalid' };
     }
 
     const manifestEntry = entries.find((entry) => /(^|\/)manifest\.json$/i.test(entry.path));
     if (!manifestEntry) {
       this.logger.warn('StageService: stage zip has no manifest.json.');
-      return null;
+      return { status: 'invalid' };
     }
 
     // Prefer the canonical `stage.arc`; fall back to the first .arc entry so
@@ -552,17 +589,23 @@ export class StageService {
       entries.find((entry) => /\.arc$/i.test(entry.path));
     if (!arcEntry) {
       this.logger.warn('StageService: stage zip has no .arc file.');
-      return null;
+      return { status: 'invalid' };
     }
 
     const manifest = this.parseManifest(manifestEntry.data);
     // Re-use the id recorded in the manifest, so an exported stage keeps its
-    // identity across machines and exports. A fresh id is only generated when
-    // the manifest has none or when that id ALREADY EXISTS here (re-importing
-    // the same package locally must not overwrite the existing stage).
-    const existing = new Set(this.stageList().map((entry) => entry.id));
+    // identity across machines and exports.
     const manifestId = manifest?.id?.trim();
-    const id = manifestId && !existing.has(manifestId) ? manifestId : crypto.randomUUID();
+    const existing = this.stageList().find((entry) => entry.id === manifestId);
+    // An existing id is a conflict the CALLER resolves (replace or cancel).
+    // `newId` explicitly asks for a copy under a fresh id.
+    if (manifestId && existing && !options.replace && !options.newId) {
+      this.logger.info(
+        `StageService: stage id "${manifestId}" already exists — asking whether to replace it.`,
+      );
+      return { status: 'exists', existing, package: zipBytes };
+    }
+    const id = manifestId && (!existing || options.replace) ? manifestId : crypto.randomUUID();
     if (manifestId && id !== manifestId) {
       this.logger.warn(
         `StageService: stage id "${manifestId}" already exists — importing as a new stage "${id}".`,
@@ -574,6 +617,7 @@ export class StageService {
       name: manifest?.name?.trim() || 'Imported Stage',
       author: manifest?.author?.trim() || DEFAULT_STAGE_CREATOR_AUTHOR,
       version: STAGE_FILE_VERSION,
+      // Replacing keeps the imported creation date; that is the package's data.
       creationDate: manifest?.creationDate || formatIsoDate(new Date()),
       originalIndex: manifest?.originalIndex,
       originalHash: await sha256Hex(arcEntry.data),
@@ -582,6 +626,13 @@ export class StageService {
 
     await this.editor.writeEditorFile(stageArcFilePath(id), arcEntry.data);
     await this.writeStageFile(file);
+    if (options.replace && existing) {
+      // Overwrite in place: keep the stage's position in the list and keep its
+      // registered archive name (it describes where the stage belongs).
+      this.stageList.set(this.stageList().map((entry) => (entry.id === id ? file : entry)));
+      this.logger.info(`StageService: replaced stage "${file.name}" (${id}).`);
+      return { status: 'imported', stage: file, replaced: true };
+    }
     // Register the archive's original file name (e.g. `boss010.arc`), so a stage
     // that arrived via import can be exported into an ISO like any other.
     await this.addStageRef(
@@ -590,7 +641,7 @@ export class StageService {
     );
     this.stageList.set([...this.stageList(), file]);
     this.logger.info(`StageService: imported stage "${file.name}" (${id}).`);
-    return file;
+    return { status: 'imported', stage: file, replaced: false };
   }
 
   /** Persists a stage definition file. */
@@ -599,6 +650,17 @@ export class StageService {
       stageFilePath(file.id),
       new TextEncoder().encode(JSON.stringify(file, null, 2)),
     );
+  }
+
+  /**
+   * Re-reads the stage list from disk.
+   *
+   * Used after something other than this service wrote stage files (e.g. the
+   * world package import, which carries each referenced stage's definition and
+   * archive and registers the new ids via {@link addStageRef}).
+   */
+  async reload(): Promise<void> {
+    await this.load();
   }
 
   /**
@@ -612,7 +674,7 @@ export class StageService {
   }
 
   /** Appends a newly created/imported stage id to `userdata.json`. */
-  private async addStageRef(id: string, arcFileName?: string): Promise<void> {
+  async addStageRef(id: string, arcFileName?: string): Promise<void> {
     const refs = await this.editor.get<{ id: string; arcFileName?: string }[]>(STAGES_KEY, []);
     const entry: { id: string; arcFileName?: string } = { id };
     if (arcFileName) {

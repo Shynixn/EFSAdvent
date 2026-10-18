@@ -158,6 +158,9 @@ export class WorldPage implements OnInit, OnDestroy {
   /** Whether a source ISO is available for export. */
   readonly canExport = signal(false);
 
+  /** Whether a `.fsaworld` export is in flight. */
+  readonly exportingWorld = signal(false);
+
   ngOnInit(): void {
     const id = this.route.snapshot.paramMap.get('worldId') ?? '';
     this.worldId.set(id);
@@ -318,6 +321,37 @@ export class WorldPage implements OnInit, OnDestroy {
     } catch (error) {
       this.exportError.set(error instanceof Error ? error.message : 'Export failed.');
       this.logger.error('WorldPage: ISO export failed', error);
+    }
+  }
+
+  /**
+   * Downloads the world as a `.fsaworld` package.
+   *
+   * The package bundles the world manifest plus, for every filled slot,
+   * `stages/<index>.json` and `stages/<index>.arc`. No save is needed first:
+   * stage definitions and archives are read from the persisted store, and a
+   * world's slots are written as soon as they are changed.
+   */
+  async exportWorldFile(): Promise<void> {
+    const worldId = this.worldId();
+    if (!worldId || this.exportingWorld()) {
+      return;
+    }
+    this.exportingWorld.set(true);
+    try {
+      const result = await this.worldService.exportWorldPackage(worldId);
+      if (!result) {
+        this.logger.warn(`WorldPage: nothing to export for world "${worldId}".`);
+        return;
+      }
+      this.downloadBlob(
+        new Blob([result.bytes as unknown as BlobPart], { type: 'application/zip' }),
+        result.fileName,
+      );
+    } catch (error) {
+      this.logger.error('WorldPage: world file export failed', error);
+    } finally {
+      this.exportingWorld.set(false);
     }
   }
 

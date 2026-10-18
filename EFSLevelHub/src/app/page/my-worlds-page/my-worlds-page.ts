@@ -7,7 +7,9 @@ import { ButtonComponent } from '../../component/button/button.component';
 import { SortDropdownComponent } from '../../component/sort-dropdown/sort-dropdown.component';
 import { DEFAULT_SORT, SortState, sortItems } from '../../component/sort-dropdown/sort.util';
 import { WorldData } from '../../entity/editor.entity';
-import { WorldService, MIN_WORLD_NAME_LENGTH, ZERO_GUID } from '../../service/world.service';
+import { WorldService, MIN_WORLD_NAME_LENGTH, ZERO_GUID, WorldPackageStages } from '../../service/world.service';
+import { FSALibService } from '../../service/fsalib.service';
+import { StageService } from '../../service/stage.service';
 import { WorldTabsService } from '../../service/world-tabs.service';
 import { EditorService, WORLDMAP_FILE } from '../../service/editor.service';
 import { LoggingService } from '../../service/logging.service';
@@ -26,6 +28,8 @@ import { LoggingService } from '../../service/logging.service';
 })
 export class MyWorldsPage implements OnInit {
   private readonly worldService = inject(WorldService);
+  private readonly stageService = inject(StageService);
+  private readonly fsaLib = inject(FSALibService);
   private readonly tabs = inject(WorldTabsService);
   private readonly editor = inject(EditorService);
   private readonly router = inject(Router);
@@ -45,6 +49,24 @@ export class MyWorldsPage implements OnInit {
 
   /** Whether the "create world" modal is open. */
   readonly createOpen = signal(false);
+  /** Whether the "choose create/import" modal is open. */
+  readonly choiceOpen = signal(false);
+  /** Whether the "import world package" modal is open. */
+  readonly importOpen = signal(false);
+  /** Import error message, if any. */
+  readonly importError = signal('');
+  /** Whether an import is in flight. */
+  readonly importing = signal(false);
+
+  /**
+   * A package whose world id already exists locally, waiting for the user to
+   * choose between replacing the existing world and cancelling. `null` when no
+   * such prompt is open.
+   */
+  readonly importConflict = signal<{
+    existing: WorldData;
+    package: WorldPackageStages;
+  } | null>(null);
   /** New world name entered by the user. */
   readonly newName = signal('');
   /** New world author entered by the user. */
@@ -73,8 +95,78 @@ export class MyWorldsPage implements OnInit {
     void this.loadWorldmap();
   }
 
+  /** Opens the initial choice modal (create or import). */
+  openChoice(): void {
+    this.choiceOpen.set(true);
+  }
+
+  /** Closes the choice modal. */
+  closeChoice(): void {
+    this.choiceOpen.set(false);
+  }
+
+  /** Opens the "import world package" modal. */
+  openImport(): void {
+    this.choiceOpen.set(false);
+    this.importError.set('');
+    this.importing.set(false);
+    this.importConflict.set(null);
+    this.importOpen.set(true);
+  }
+
+  /** Closes the "import world package" modal. */
+  closeImport(): void {
+    this.importOpen.set(false);
+    this.importConflict.set(null);
+  }
+
+  /** Cancels the "replace existing world?" prompt, discarding the package. */
+  cancelImportConflict(): void {
+    this.importConflict.set(null);
+    this.importing.set(false);
+  }
+
+  /**
+   * Confirms replacing the existing world with the pending package's world.
+   *
+   * Re-applies the parsed package with `replace: true`, which overwrites the
+   * world file under the same id (keeping its position in the list). Stages are
+   * still only imported when missing locally.
+   */
+  async confirmReplaceImport(): Promise<void> {
+    const conflict = this.importConflict();
+    if (!conflict || this.importing()) {
+      return;
+    }
+    this.importing.set(true);
+    this.importError.set('');
+    try {
+      await this.stageService.load();
+      const known = new Set(this.stageService.stages().map((stage) => stage.id));
+      const imported = await this.worldService.importWorldPackage(
+        conflict.package.manifest,
+        conflict.package.stages,
+        known,
+        { replace: true },
+      );
+      if (imported.status !== 'imported') {
+        this.importError.set('Could not replace the existing world.');
+        return;
+      }
+      this.importConflict.set(null);
+      this.closeImport();
+      this.openWorld(imported.world);
+    } catch (error) {
+      this.logger.error('MyWorlds: failed to replace world on import', error);
+      this.importError.set('Could not replace the existing world.');
+    } finally {
+      this.importing.set(false);
+    }
+  }
+
   /** Opens the "create world" modal with a clean form. */
   openCreate(): void {
+    this.choiceOpen.set(false);
     this.newName.set('');
     this.newAuthor.set('');
     this.createError.set('');
@@ -107,6 +199,7 @@ export class MyWorldsPage implements OnInit {
   /** Opens a world in a new tab and navigates to its page. */
   openWorld(world: WorldData): void {
     this.closeWorldMenu();
+    this.closeChoice();
     this.tabs.open(world.id);
     void this.router.navigate(['/my-worlds', world.id]);
   }
@@ -171,6 +264,83 @@ export class MyWorldsPage implements OnInit {
       this.deleteError.set('Could not delete the world.');
     } finally {
       this.deleting.set(false);
+    }
+  }
+
+  /**
+   * Handles a `.fsaworld` selection and imports the world plus any stages it
+   * carries that this install does not have yet.
+   */
+  async onWorldPackageSelected(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    // Allow re-selecting the same file later.
+    input.value = '';
+    if (!file) {
+      return;
+    }
+
+    this.importError.set('');
+    if (!/\.fsaworld$/i.test(file.name)) {
+      this.importError.set('Please choose a world package (.fsaworld file).');
+      return;
+    }
+
+    this.importing.set(true);
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const entries = await this.fsaLib.unzip(bytes);
+      const manifest = entries.find((entry) => /(^|\/)manifest\.json$/i.test(entry.path));
+      if (!manifest) {
+        this.importError.set('That file is not a valid .fsaworld package (no manifest.json).');
+        return;
+      }
+
+      // Pair each stage slot's definition with its archive from `stages/<n>.json`
+      // and `stages/<n>.arc`.
+      const bySlot = new Map<number, { definition?: Uint8Array; archive?: Uint8Array }>();
+      for (const entry of entries) {
+        const match = /(^|\/)stages\/(\d+)\.(json|arc)$/i.exec(entry.path);
+        if (!match) {
+          continue;
+        }
+        const index = Number(match[2]);
+        const slot = bySlot.get(index) ?? {};
+        if (match[3].toLowerCase() === 'json') {
+          slot.definition = entry.data;
+        } else {
+          slot.archive = entry.data;
+        }
+        bySlot.set(index, slot);
+      }
+
+      const stages: { index: number; definition: Uint8Array; archive: Uint8Array }[] = [];
+      for (const [index, slot] of bySlot) {
+        if (slot.definition && slot.archive) {
+          stages.push({ index, definition: slot.definition, archive: slot.archive });
+        }
+      }
+
+      // Stages already known locally are left untouched by the import.
+      await this.stageService.load();
+      const known = new Set(this.stageService.stages().map((stage) => stage.id));
+      const imported = await this.worldService.importWorldPackage(manifest.data, stages, known);
+      if (imported.status === 'invalid') {
+        this.importError.set('That file is not a valid world package.');
+        return;
+      }
+      if (imported.status === 'exists') {
+        // The world's id is already used here: ask before overwriting.
+        this.importConflict.set({ existing: imported.existing, package: imported.package });
+        return;
+      }
+      this.closeImport();
+      this.openWorld(imported.world);
+    } catch (error) {
+      this.logger.error('MyWorlds: failed to import world package', error);
+      this.importError.set('Could not read the selected world package.');
+    } finally {
+      this.importing.set(false);
     }
   }
 

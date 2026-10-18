@@ -7,7 +7,7 @@ import { ButtonComponent } from '../../component/button/button.component';
 import { StagePickerComponent } from '../../component/stage-picker/stage-picker.component';
 import { SortDropdownComponent } from '../../component/sort-dropdown/sort-dropdown.component';
 import { DEFAULT_SORT, SortState, sortItems } from '../../component/sort-dropdown/sort.util';
-import { MIN_STAGE_NAME_LENGTH, StageFile, StageService } from '../../service/stage.service';
+import { MIN_STAGE_NAME_LENGTH, StageFile, StageService, isDefaultStageId } from '../../service/stage.service';
 import { StageTabsService } from '../../service/stage-tabs.service';
 import { StagePreviewService } from '../../service/stage-preview.service';
 import { EditorService, WORLDMAP_FILE } from '../../service/editor.service';
@@ -65,6 +65,13 @@ export class MyStagesPage implements OnInit {
   readonly createOpen = signal(false);
   /** Whether the "import stage package" modal is open. */
   readonly importOpen = signal(false);
+
+  /**
+   * A package whose stage id already exists locally, waiting for the user to
+   * choose between replacing the existing stage and cancelling. `null` when no
+   * such prompt is open.
+   */
+  readonly importConflict = signal<{ existing: StageFile; package: Uint8Array } | null>(null);
 
   /**
    * Open card context menu: the stage it targets plus its position in viewport
@@ -163,6 +170,11 @@ export class MyStagesPage implements OnInit {
     this.stageMenu.set(null);
   }
 
+  /** Whether a stage is a built-in default stage (it cannot be deleted). */
+  isDefaultStage(stage: StageFile): boolean {
+    return isDefaultStageId(stage.id);
+  }
+
   /** Opens the delete-confirmation dialog for a stage (closing the menu first). */
   openDelete(stage: StageFile): void {
     this.closeStageMenu();
@@ -191,7 +203,11 @@ export class MyStagesPage implements OnInit {
     try {
       const removed = await this.stageService.deleteStage(stage.id);
       if (!removed) {
-        this.deleteError.set('This stage could not be deleted.');
+        this.deleteError.set(
+          this.isDefaultStage(stage)
+            ? 'Default stages cannot be deleted.'
+            : 'This stage could not be deleted.',
+        );
         return;
       }
       this.stageTabs.close(stage.id);
@@ -241,6 +257,42 @@ export class MyStagesPage implements OnInit {
   /** Closes the "import stage package" modal. */
   closeImport(): void {
     this.importOpen.set(false);
+    this.importConflict.set(null);
+  }
+
+  /** Cancels the "replace existing stage?" prompt, discarding the package. */
+  cancelImportConflict(): void {
+    this.importConflict.set(null);
+    this.busy.set(false);
+  }
+
+  /**
+   * Confirms replacing the existing stage with the pending package's stage.
+   *
+   * The package is re-imported with `replace: true`, which overwrites the stage
+   * definition and archive under the same id (keeping its list position).
+   */
+  async confirmReplaceImport(): Promise<void> {
+    const conflict = this.importConflict();
+    if (!conflict || this.busy()) {
+      return;
+    }
+    this.busy.set(true);
+    this.createError.set('');
+    try {
+      const result = await this.stageService.importStageZip(conflict.package, { replace: true });
+      if (result.status !== 'imported') {
+        this.createError.set('Could not replace the existing stage.');
+        return;
+      }
+      this.importConflict.set(null);
+      this.closeImport();
+    } catch (error) {
+      this.logger.error('MyStages: failed to replace stage on import', error);
+      this.createError.set('Could not replace the existing stage.');
+    } finally {
+      this.busy.set(false);
+    }
   }
 
   /** Selects (or clears) the template stage used as a base. */
@@ -306,11 +358,16 @@ export class MyStagesPage implements OnInit {
     this.busy.set(true);
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
-      const stage = await this.stageService.importStageZip(bytes);
-      if (!stage) {
+      const result = await this.stageService.importStageZip(bytes);
+      if (result.status === 'invalid') {
         this.createError.set(
           'That file is not a valid .fsastage package (needs manifest.json and stage.arc).',
         );
+        return;
+      }
+      if (result.status === 'exists') {
+        // The package's id is already used here: ask before overwriting.
+        this.importConflict.set({ existing: result.existing, package: result.package });
         return;
       }
       this.closeImport();

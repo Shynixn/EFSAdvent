@@ -20,6 +20,16 @@
     <div class="flex items-center gap-2">
       <app-button
         variant="primary"
+        color="slate"
+        [disabled]="exportingWorld()"
+        title="Download this world and its stages as a .fsaworld package"
+        [icon]="'M5 2a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7.414A2 2 0 0016.414 6L12 1.586A2 2 0 0010.586 1H5zm0 2h5v3.5a1 1 0 001 1h3.5V16H5V4zm4 6a1 1 0 10-2 0v2.586l-.793-.793a1 1 0 10-1.414 1.414l2.5 2.5a1 1 0 001.414 0l2.5-2.5a1 1 0 10-1.414-1.414L9 12.586V10z'"
+        (clicked)="exportWorldFile()"
+      >
+        {{ exportingWorld() ? 'Exporting…' : 'Export World File' }}
+      </app-button>
+      <app-button
+        variant="primary"
         color="indigo"
         [disabled]="!canExport()"
         [icon]="'M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z'"
