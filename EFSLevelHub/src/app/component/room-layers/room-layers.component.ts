@@ -14,6 +14,11 @@ import {
   RoomGroundChange,
   RoomTileChange,
 } from '../room-canvas/room-canvas.component';
+import {
+  DIMENSION,
+  isCroppedLayer,
+  roomCanvasTilesH,
+} from '../room-canvas/room-canvas.layout';
 import { RoomData } from '../../entity/fsalib.entity';
 import { StageRenderer } from '../../service/render/stage-renderer';
 import { GroundLayer } from '../../entity/ground.entity';
@@ -27,12 +32,6 @@ import {
 
 /** How many base layers a room has (0-7). */
 export const BASE_LAYER_COUNT = 8;
-
-/** Room grid dimension (32×32 tiles). */
-const DIMENSION = 32;
-
-/** Visible room height in tiles — the canvas crops the game's hidden bottom band. */
-const VISIBLE_TILES_H = 24;
 
 /** Colours used for warp link lines, cycled by warp type. */
 const WARP_COLORS = [
@@ -235,6 +234,16 @@ export class RoomLayersComponent implements AfterViewInit, OnDestroy {
   }
 
   /**
+   * Whether a base layer's canvas is cropped to the TV view (24 of 32 rows).
+   *
+   * Only the **Main Layer** (0) is cropped like the game; the **Dark World**
+   * (1) and the **Gameboy layers** (2-7) render the full 32×32 grid.
+   */
+  isCropped(base: number): boolean {
+    return isCroppedLayer(base);
+  }
+
+  /**
    * Human-readable name of a base layer: layer 0 is the **Main Layer**, layer 1
    * is the **Dark World**, and 2-7 are the **Gameboy Layer 1-6** (counted from 1).
    */
@@ -285,8 +294,10 @@ export class RoomLayersComponent implements AfterViewInit, OnDestroy {
       if (rect.width === 0 || rect.height === 0) {
         return null;
       }
+      // The canvas is cropped for the Main Layer (24 rows) and full for every
+      // other layer (32 rows), so the tile height must come from the layer.
       const tileW = rect.width / DIMENSION;
-      const tileH = rect.height / VISIBLE_TILES_H;
+      const tileH = rect.height / roomCanvasTilesH(isCroppedLayer(layer));
       const x = rect.left - containerRect.left + (col + 0.5) * tileW;
       const y = rect.top - containerRect.top + (row + 0.5) * tileH;
       return { x: x * scaleX, y: y * scaleY };

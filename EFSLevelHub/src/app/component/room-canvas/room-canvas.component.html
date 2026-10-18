@@ -11,15 +11,17 @@
   >
     <canvas
       #canvas
-      width="512"
-      height="384"
+      [width]="canvasSize.width"
+      [height]="canvasSize.height"
       class="block touch-none"
       [class.cursor-crosshair]="tool !== 'hand' && !dragNotAllowed()"
       [class.cursor-grab]="tool === 'hand' && hoveringObject() && !draggingObject()"
       [class.cursor-grabbing]="tool === 'hand' && draggingObject()"
       [class.cursor-not-allowed]="dragNotAllowed()"
       [class.cursor-crosshair]="connectingFrom() !== null"
-      style="image-rendering: pixelated; width: 800px; height: 600px"
+      [style.image-rendering]="'pixelated'"
+      [style.width.px]="canvasStyleSize.width"
+      [style.height.px]="canvasStyleSize.height"
       (pointerdown)="onPointerDown($event)"
       (pointermove)="onPointerMove($event)"
       (pointerup)="onPointerUp($event)"
@@ -30,10 +32,12 @@
     <!-- Transparent overlay: decoration drag preview + hovered-object outline. -->
     <canvas
       #preview
-      width="512"
-      height="384"
+      [width]="canvasSize.width"
+      [height]="canvasSize.height"
       class="pointer-events-none absolute left-1 top-1 block"
-      style="image-rendering: pixelated; width: 800px; height: 600px"
+      [style.image-rendering]="'pixelated'"
+      [style.width.px]="canvasStyleSize.width"
+      [style.height.px]="canvasStyleSize.height"
     ></canvas>
 
     <!-- "Not allowed" indicator: this actor has no GBA sprite for this layer. -->

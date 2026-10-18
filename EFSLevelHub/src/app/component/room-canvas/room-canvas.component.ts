@@ -37,6 +37,13 @@ import {
   withRotatedWarpType,
 } from '../../entity/door.entity';
 import { SmartObjectDragService } from '../../service/smart-object-drag.service';
+import {
+  DIMENSION,
+  ROOM_HEIGHT,
+  roomCanvasSize,
+  roomCanvasStyleSize,
+  roomCanvasTilesH,
+} from './room-canvas.layout';
 
 /** A tile edit produced by painting on the canvas. */
 export interface RoomTileChange {
@@ -59,9 +66,6 @@ export interface RoomGroundChange {
   /** New ground tile value (0 clears the tile). */
   tile: number;
 }
-
-/** Room layer grid dimension (32×32 tiles). */
-const DIMENSION = 32;
 
 /**
  * Actor ids that render nothing in-game and are placed at fixed spots (often
@@ -150,6 +154,29 @@ export class RoomCanvasComponent implements AfterViewInit {
   set gba(value: boolean) {
     this._gba = value;
     queueMicrotask(() => void this.redraw());
+  }
+
+  private _cropped = false;
+  /**
+   * When true the canvas is cropped to what the game's TV level shows (24 of
+   * 32 tile rows, 512×384). Only the **Main Layer** sets this; the **Dark
+   * World** and **Gameboy layers** render the full 32×32 grid so their bottom
+   * rows are neither hidden nor unreachable.
+   *
+   * The crop is a canvas-size crop, so the backing store (and the overlay) is
+   * 384px tall when enabled and 512px otherwise; pointer mapping follows the
+   * canvas size automatically.
+   */
+  @Input()
+  get cropped(): boolean {
+    return this._cropped;
+  }
+  set cropped(value: boolean) {
+    this._cropped = value;
+    queueMicrotask(() => {
+      this.applyCanvasSize();
+      void this.redraw();
+    });
   }
 
   private _topLayer = true;
@@ -427,12 +454,57 @@ export class RoomCanvasComponent implements AfterViewInit {
   readonly subMenuOpen = signal(false);
 
   ngAfterViewInit(): void {
+    this.applyCanvasSize();
     void this.redraw();
   }
 
   /** The canvas element (used by the stacked layer view to align its overlay). */
   canvasElement(): HTMLCanvasElement | null {
     return this.canvasRef()?.nativeElement ?? null;
+  }
+
+  /**
+   * Whether this canvas is cropped to the TV view. Exposed for the template,
+   * which sizes both canvases and the border from it.
+   */
+  get croppedCanvas(): boolean {
+    return this._cropped;
+  }
+
+  /** Backing-store size of the room canvas (also the overlay's size). */
+  get canvasSize(): { width: number; height: number } {
+    return roomCanvasSize(this._cropped);
+  }
+
+  /** CSS size of the room canvas (pixelated scale, shared by the overlay). */
+  get canvasStyleSize(): { width: number; height: number } {
+    return roomCanvasStyleSize(this._cropped);
+  }
+
+  /** Number of tile rows this canvas exposes (24 when cropped, else 32). */
+  get visibleTilesH(): number {
+    return roomCanvasTilesH(this._cropped);
+  }
+
+  /**
+   * Sizes the room canvas and its preview overlay to the layer's crop.
+   *
+   * Setting `canvas.width`/`height` also clears the canvas, which is why this
+   * runs before {@link redraw} (and why it must only assign when the size
+   * actually changed — otherwise every redraw would needlessly reset pixels).
+   */
+  private applyCanvasSize(): void {
+    const { width, height } = roomCanvasSize(this._cropped);
+    for (const ref of [this.canvasRef(), this.previewRef()]) {
+      const canvas = ref?.nativeElement;
+      if (!canvas) {
+        continue;
+      }
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+    }
   }
 
   /** Re-renders the current layer onto the canvas. */
@@ -449,9 +521,12 @@ export class RoomCanvasComponent implements AfterViewInit {
       return;
     }
 
-    const width = canvas.width;
-    const height = canvas.height;
-    const buffer = new ImageBuffer(width, height);
+    // Always rasterize the FULL room grid, even when the canvas is cropped: the
+    // crop is purely the backing-store size, so a cropped canvas simply drops
+    // rows 24-31 while uncropped layers (Dark World / Gameboy) keep them.
+    // Using the full height for the buffer keeps one code path and avoids
+    // half-drawn tiles at the crop edge.
+    const buffer = new ImageBuffer(canvas.width, ROOM_HEIGHT);
     buffer.fill(0, 0, 0, 255);
 
     // Ground acts as the base layer: it is drawn first, and the room's base
@@ -499,6 +574,9 @@ export class RoomCanvasComponent implements AfterViewInit {
     if (!ctx) {
       return;
     }
+    // Upload only the window the canvas shows: the buffer is full-height, while
+    // a cropped canvas is 384px tall and a `putImageData` call simply discards
+    // everything below its bottom edge.
     const image = new ImageData(new Uint8ClampedArray(buffer.pixels), buffer.width, buffer.height);
     ctx.putImageData(image, 0, 0);
 
