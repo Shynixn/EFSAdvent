@@ -252,7 +252,8 @@ export class StageService {
   readonly stages = this.stageList.asReadonly();
 
   /** Loads persisted stages from `/editor/userdata.json`. */
-  async load(): Promise<void> {    const refs = await this.editor.get<{ id: string }[]>(STAGES_KEY, []);
+  async load(): Promise<void> {
+    const refs = await this.editor.get<{ id: string }[]>(STAGES_KEY, []);
     const stages: StageFile[] = [];
     for (const ref of Array.isArray(refs) ? refs : []) {
       const file = await this.readStageFile(ref.id);

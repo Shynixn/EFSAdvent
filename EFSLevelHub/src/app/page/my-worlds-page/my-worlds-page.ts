@@ -7,7 +7,12 @@ import { ButtonComponent } from '../../component/button/button.component';
 import { SortDropdownComponent } from '../../component/sort-dropdown/sort-dropdown.component';
 import { DEFAULT_SORT, SortState, sortItems } from '../../component/sort-dropdown/sort.util';
 import { WorldData } from '../../entity/editor.entity';
-import { WorldService, MIN_WORLD_NAME_LENGTH, ZERO_GUID, WorldPackageStages } from '../../service/world.service';
+import {
+  WorldService,
+  MIN_WORLD_NAME_LENGTH,
+  ZERO_GUID,
+  WorldPackageStages,
+} from '../../service/world.service';
 import { FSALibService } from '../../service/fsalib.service';
 import { StageService } from '../../service/stage.service';
 import { WorldTabsService } from '../../service/world-tabs.service';

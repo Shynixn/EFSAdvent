@@ -7,7 +7,12 @@ import { ButtonComponent } from '../../component/button/button.component';
 import { StagePickerComponent } from '../../component/stage-picker/stage-picker.component';
 import { SortDropdownComponent } from '../../component/sort-dropdown/sort-dropdown.component';
 import { DEFAULT_SORT, SortState, sortItems } from '../../component/sort-dropdown/sort.util';
-import { MIN_STAGE_NAME_LENGTH, StageFile, StageService, isDefaultStageId } from '../../service/stage.service';
+import {
+  MIN_STAGE_NAME_LENGTH,
+  StageFile,
+  StageService,
+  isDefaultStageId,
+} from '../../service/stage.service';
 import { StageTabsService } from '../../service/stage-tabs.service';
 import { StagePreviewService } from '../../service/stage-preview.service';
 import { EditorService, WORLDMAP_FILE } from '../../service/editor.service';

@@ -436,6 +436,11 @@ export class WorldService {
       `WorldService: imported world "${world.name}" (${world.id}) with ` +
         `${importedStageIds.length} new stage(s).`,
     );
-    return { status: 'imported', world, importedStageIds, replaced: !!options.replace && !!existing };
+    return {
+      status: 'imported',
+      world,
+      importedStageIds,
+      replaced: !!options.replace && !!existing,
+    };
   }
 }
