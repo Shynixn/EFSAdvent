@@ -1,6 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import UPNG from 'upng-js';
 import { LoggingService } from './logging.service';
+import { EditorService } from './editor.service';
 import { OpfsCacheService } from './opfs-cache.service';
 import { ActorData, StageData } from '../entity/fsalib.entity';
 import { ActorDefinition } from '../entity/actor-definition.entity';
@@ -11,12 +12,29 @@ import { TilesetRenderer } from './render/gba-sprite-renderer';
 import { TilesetTheme } from '../entity/tileset.util';
 import { TileActorDefinition, buildTileActors } from '../entity/tile-actor.entity';
 
-/** One tile → actor entry as returned by the wasm `GetTileActors` export. */
+/** One tile → actor entry, as emitted by the wasm `GetStageAssets` export. */
 interface TileActorDto {
   Tile: number;
   Name: string;
   ActorId: string;
   ActorValue: number;
+}
+
+/**
+ * OpFS path (relative to `/editor`) of the persisted FSALib asset catalog.
+ *
+ * Written once at ISO-import time from the wasm `GetStageAssets` export, then
+ * read as plain JSON for every later stage open — no wasm asset deserialization
+ * on the hot path.
+ */
+export const STAGE_ASSETS_FILE = 'cache/stageassets.json';
+
+/** Shape of {@link STAGE_ASSETS_FILE} (mirrors the C# `StageAssets` payload). */
+export interface StageAssetsFile {
+  Tilesets: Record<string, TilesetInfo>;
+  Stages: Record<string, StageInfo>;
+  Actors: Record<string, ActorDefinition>;
+  TileActors: TileActorDto[];
 }
 import {
   ArchivePathResolver,
@@ -54,8 +72,11 @@ interface DotnetExports {
         ListArchiveFiles(arcData: Uint8Array): string;
         ListArchiveTextures(arcData: Uint8Array): string;
         ReadArchiveFile(arcData: Uint8Array, path: string): Uint8Array;
+        CacheArchive(key: string, arcData: Uint8Array): string;
+        ReadCachedArchiveFiles(archiveKey: string, pathsNewlineSeparated: string): Uint8Array;
         Unzip(zipData: Uint8Array): string;
         EnsureAssets(): string;
+        GetStageAssets(): string;
         GetTilesets(): string;
         GetStages(): string;
         GetActors(): string;
@@ -97,6 +118,35 @@ function base64ToBytes(base64: string): Uint8Array {
   return bytes;
 }
 
+/**
+ * Unpacks the buffer produced by the wasm `ReadCachedArchiveFiles` export.
+ *
+ * Layout: `int32 count`, then `int32 length[count]` (-1 = unreadable), then the
+ * payloads back-to-back. All integers are little-endian; slices are copies, so
+ * the result survives the wasm heap being reused.
+ *
+ * @param packed Raw buffer from wasm.
+ * @returns One entry per requested path, or `null` for unreadable files.
+ */
+function unpackArchiveFiles(packed: Uint8Array): (Uint8Array | null)[] {
+  const view = new DataView(packed.buffer, packed.byteOffset, packed.byteLength);
+  const count = view.getInt32(0, true);
+  const results: (Uint8Array | null)[] = new Array(count);
+  const headerSize = 4 + count * 4;
+  let offset = headerSize;
+
+  for (let i = 0; i < count; i++) {
+    const length = view.getInt32(4 + i * 4, true);
+    if (length < 0) {
+      results[i] = null;
+      continue;
+    }
+    results[i] = packed.slice(offset, offset + length);
+    offset += length;
+  }
+  return results;
+}
+
 /** A decoded image ready for display, encoded as a PNG data URL. */
 export interface ExtractedImage {
   /** Path within the archive, e.g. `TIMG/shikimono.bti`. */
@@ -128,6 +178,7 @@ export interface StageInfo {
 export class FSALibService {
   private readonly logger = inject(LoggingService);
   private readonly opfs = inject(OpfsCacheService);
+  private readonly editor = inject(EditorService);
 
   /** Base path (under the dev server) where the wasm runtime files are served. */
   private static readonly WASM_BASE = 'fsalib/';
@@ -135,8 +186,18 @@ export class FSALibService {
   private static readonly ASSEMBLY = 'EFSLevelHub.Wasm';
   /** Archive holding the game's shared tileset/sprite/palette resources. */
   private static readonly DATA_ARC_PATH = 'GC4swords/data.arc';
+  /** Key `data.arc` is cached under inside the wasm module. */
+  static readonly DATA_ARC_KEY = 'data.arc';
 
   private loadPromise: Promise<DotnetExports> | null = null;
+
+  /**
+   * The persisted FSALib asset catalog (`/editor/cache/stageassets.json`).
+   *
+   * Loaded once per session and shared by every tileset/stage/actor consumer,
+   * so opening a stage performs no wasm asset deserialization at all.
+   */
+  private assetsPromise: Promise<StageAssetsFile> | null = null;
 
   /** Cached tileset definitions promise. */
   private tilesetsPromise: Promise<Record<string, TilesetInfo>> | null = null;
@@ -352,6 +413,45 @@ export class FSALibService {
   }
 
   /**
+   * Registers an archive inside the wasm module so its bytes stop crossing the
+   * JS↔wasm boundary.
+   *
+   * Every exported call marshals its arguments into the wasm heap, so passing
+   * `data.arc` (~1.2 MB) to `ReadArchiveFile` costs ~1 s per call under the
+   * interpreter no matter how small the file being read is. Caching it makes
+   * that a one-time cost.
+   *
+   * @param key     Logical name used by {@link readCachedArchiveFiles}, e.g.
+   *                `data.arc`.
+   * @param arcData Raw archive bytes (optionally YAZ0-compressed).
+   */
+  async cacheArchive(key: string, arcData: Uint8Array): Promise<void> {
+    const fsa = await this.getFsa();
+    this.logger.info(`FSALib: caching archive "${key}" (${arcData.byteLength} bytes) in wasm…`);
+    await this.logger.time(`FSALib.CacheArchive(${key})`, async () => fsa.CacheArchive(key, arcData));
+  }
+
+  /**
+   * Reads many files out of an archive previously registered with
+   * {@link cacheArchive}, in a single wasm call.
+   *
+   * @param archiveKey Key the archive was cached under.
+   * @param paths      Paths to read (exact archive paths, e.g. `SCH /bg_m_sch.szs`).
+   * @returns One entry per requested path, in order; `null` for files that
+   *          could not be read.
+   */
+  async readCachedArchiveFiles(
+    archiveKey: string,
+    paths: readonly string[],
+  ): Promise<(Uint8Array | null)[]> {
+    if (paths.length === 0) {
+      return [];
+    }
+    const fsa = await this.getFsa();
+    return unpackArchiveFiles(fsa.ReadCachedArchiveFiles(archiveKey, paths.join('\n')));
+  }
+
+  /**
    * Creates, replaces or deletes the room bound to a map-grid cell.
    *
    * Creating allocates the next free room slot (optionally copying another
@@ -494,16 +594,70 @@ export class FSALibService {
     arcData: Uint8Array,
     tilesets?: Record<string, TilesetInfo>,
   ): Promise<StageRenderer> {
-    const stageFiles = await this.listArchiveFiles(arcData);
+    const stageFiles = await this.logger.time('FSALib.listStageArchiveFiles', () =>
+      this.listArchiveFiles(arcData),
+    );
     const stagePathSet = new Set(stageFiles.map((f) => f.Path));
     let resolver = new ArchivePathResolver(stageFiles.map((f) => f.Path));
 
     // Boss archives don't carry tileset/sprite resources; fall back to data.arc.
     // `data.arc` bytes + its file list are cached, so this is a one-time cost.
-    const dataArc = await this.readDataArc();
+    const dataArc = await this.logger.time('FSALib.readDataArc', () => this.readDataArc());
     if (dataArc) {
       resolver = new ArchivePathResolver([...stageFiles.map((f) => f.Path), ...this.dataArcPaths]);
     }
+
+    const [tilesetDefs, actorDefs] = await Promise.all([
+      tilesets ?? this.logger.time('FSALib.loadTilesets', () => this.loadTilesets()),
+      this.logger.time('FSALib.loadActors', () => this.loadActors()),
+    ]);
+
+    // Resource bytes fetched in batches, keyed by resolved archive path. The
+    // renderer asks for resources one at a time; each miss triggers a batch
+    // read of every path it is likely to need next, so the ~1 s per-call wasm
+    // marshalling happens once instead of once per file.
+    const prefetched = new Map<string, Uint8Array>();
+    const dataArcBytes = dataArc ?? new Uint8Array(0);
+    const buildPrefetchList = (): string[] => {
+      if (!dataArc) {
+        return [];
+      }
+      const wanted: string[] = [];
+      const add = (path: string): void => {
+        const real = resolver.resolve(path);
+        if (real && !stagePathSet.has(real) && !prefetched.has(real)) {
+          wanted.push(real);
+        }
+      };
+
+      // Everything init() needs, plus the current tileset and NPC sprite sheets.
+      add('SPL/bg_a_spl.szs');
+      add('SCH/bg_base_sch.szs');
+      const tileset = tilesetDefs[String(stage.Map.TileSheetId)];
+      if (tileset) {
+        add(`SCH/bg_${tileset.ID}_sch.szs`);
+        add(`SCH/bg_${tileset.GbaID ?? tileset.ID}_sch.szs`);
+        add(`SCL/bg_${tileset.ID}_scl.szs`);
+        add(`SCL/bg_${tileset.ID}_gb_scl.szs`);
+      }
+      // NPC sprite sheets/palettes (loadSprites).
+      const sheet = stage.Map.NpcSheetId.toString(16);
+      add('SCH/gb_ch_obj_base_sch.szs');
+      add(`SCH/gb_ch_obj_tr_sch${sheet}.szs`);
+      add('SCH/enemy_sch.szs');
+      add('SCH/gals2_sch.szs');
+      add('SCH/player_sch.szs');
+      add('SCH/gals_sch.szs');
+      add('SOB/enemy_both_sob.bin');
+      add('SOB/enemy_both2_sob.bin');
+      add('SOB/enemy_gc_sob.bin');
+      add('SOB/player_sob.bin');
+      add('SOB/kage_sob.bin');
+      add('SOB/player_kage_sob.bin');
+      add('SCL/cu_cl_obj_base_scl.szs');
+      add('SCL/gb_cl_obj_base_scl.szs');
+      return wanted;
+    };
 
     const renderer = new StageRenderer(
       stage,
@@ -514,13 +668,43 @@ export class FSALibService {
         if (!dataArc) {
           throw new Error(`Resource "${path}" not found in stage archive or data.arc`);
         }
-        return this.readArchiveFile(dataArc, path);
+
+        const cached = prefetched.get(path);
+        if (cached) {
+          return cached;
+        }
+
+        // Miss: fetch this path together with everything init/loadSprites is
+        // expected to request, in one wasm call.
+        const wanted = buildPrefetchList();
+        if (!wanted.includes(path)) {
+          wanted.push(path);
+        }
+        if (wanted.length === 0) {
+          return this.readArchiveFile(dataArcBytes, path);
+        }
+
+        const timer = this.logger.startTimer('FSALib.prefetchDataArc');
+        const payloads = await this.readCachedArchiveFiles(FSALibService.DATA_ARC_KEY, wanted);
+        timer.stop(`FSALib: prefetched ${wanted.length} path(s)`);
+        for (let i = 0; i < payloads.length; i++) {
+          const payload = payloads[i];
+          if (payload) {
+            prefetched.set(wanted[i], payload);
+          }
+        }
+
+        const result = prefetched.get(path);
+        if (!result) {
+          throw new Error(`Resource "${path}" not found in data.arc`);
+        }
+        return result;
       },
       resolver,
-      tilesets ?? (await this.loadTilesets()),
-      await this.loadActors(),
+      tilesetDefs,
+      actorDefs,
     );
-    await renderer.init();
+    await this.logger.time('FSALib.StageRenderer.init', () => renderer.init());
     return renderer;
   }
 
@@ -707,18 +891,30 @@ export class FSALibService {
     }
 
     this.dataArcPromise = (async () => {
+      const timer = this.logger.startTimer('FSALib.readDataArc');
       try {
         const bytes = await this.opfs.readExtractedFile(FSALibService.DATA_ARC_PATH);
         if (bytes.byteLength === 0) {
           return null;
         }
+        this.logger.info(
+          `FSALib: read data.arc (${(bytes.byteLength / 1024 / 1024).toFixed(1)} MB).`,
+        );
 
-        const files = await this.listArchiveFiles(bytes);
+        const files = await this.logger.time('FSALib.listDataArcFiles', () =>
+          this.listArchiveFiles(bytes),
+        );
         this.dataArcPaths = files.map((f) => f.Path);
         this.logger.info(`FSALib: cached data.arc (${files.length} file(s)).`);
+
+        // Keep the bytes inside wasm too, so later resource reads transfer only
+        // the requested payloads instead of re-marshalling the whole archive.
+        await this.cacheArchive(FSALibService.DATA_ARC_KEY, bytes);
         return bytes;
       } catch {
         return null;
+      } finally {
+        timer.stop('FSALib:');
       }
     })();
 
@@ -770,34 +966,126 @@ export class FSALibService {
     return decodeTexture(parseBti(raw));
   }
 
-  /** Loads and caches the tileset definitions FSALib has loaded from its assets. */
+  /**
+   * Returns the shared FSALib asset catalog, loading it from OPFS once.
+   *
+   * The catalog is generated at ISO-import time by {@link populateStageAssets}
+   * and contains the tilesets, stages, actors and tile→actor definitions. When
+   * it is missing (e.g. a cache created before this file existed) it is
+   * regenerated from wasm on demand, which is the slow path this design avoids.
+   */
+  async stageAssets(): Promise<StageAssetsFile> {
+    if (!this.assetsPromise) {
+      this.assetsPromise = this.readStageAssets().then(async (cached) => {
+        if (cached) {
+          return cached;
+        }
+        this.logger.warn(
+          `FSALib: /editor/${STAGE_ASSETS_FILE} is missing — regenerating from wasm (slow path).`,
+        );
+        return this.populateStageAssets();
+      });
+    }
+    return this.assetsPromise;
+  }
+
+  /**
+   * Extracts every static FSALib definition in a single wasm call and persists
+   * it to `/editor/cache/stageassets.json`.
+   *
+   * Called once at ISO-import time. Afterwards all asset reads are plain JSON
+   * reads from OPFS; only stage-archive parsing still uses wasm.
+   */
+  async populateStageAssets(): Promise<StageAssetsFile> {
+    const timer = this.logger.startTimer('FSALib.GetStageAssets');
+    const fsa = await this.getFsa();
+    const json = fsa.GetStageAssets();
+    timer.stop(`FSALib: catalog JSON is ${json.length} char(s)`);
+
+    const parsed = JSON.parse(json) as StageAssetsFile & { error?: string };
+    if (parsed.error) {
+      throw new Error(`FSALib failed to export stage assets: ${parsed.error}`);
+    }
+
+    const assets: StageAssetsFile = {
+      Tilesets: parsed.Tilesets ?? {},
+      Stages: parsed.Stages ?? {},
+      Actors: parsed.Actors ?? {},
+      TileActors: parsed.TileActors ?? [],
+    };
+
+    await this.editor.writeEditorFile(
+      STAGE_ASSETS_FILE,
+      new TextEncoder().encode(JSON.stringify(assets)),
+    );
+    this.logger.info(
+      `FSALib: cached ${Object.keys(assets.Tilesets).length} tileset(s), ` +
+        `${Object.keys(assets.Stages).length} stage(s), ` +
+        `${Object.keys(assets.Actors).length} actor(s) to /editor/${STAGE_ASSETS_FILE}.`,
+    );
+
+    // Warm the per-domain caches so callers that already asked for a slice get
+    // the freshly written data.
+    this.assetsPromise = Promise.resolve(assets);
+    this.tilesetsPromise = Promise.resolve(assets.Tilesets);
+    this.stagesPromise = Promise.resolve(assets.Stages);
+    this.actorsPromise = Promise.resolve(assets.Actors);
+    this.tileActorsPromise = Promise.resolve(this.buildTileActorList(assets.TileActors));
+    return assets;
+  }
+
+  /** Reads the persisted catalog from OPFS, or null when it is missing/invalid. */
+  private async readStageAssets(): Promise<StageAssetsFile | null> {
+    const bytes = await this.editor.readEditorFile(STAGE_ASSETS_FILE);
+    if (!bytes || bytes.byteLength === 0) {
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(new TextDecoder().decode(bytes)) as StageAssetsFile;
+      if (!parsed.Tilesets || !parsed.Actors) {
+        this.logger.warn(`FSALib: /editor/${STAGE_ASSETS_FILE} is malformed.`);
+        return null;
+      }
+      return {
+        Tilesets: parsed.Tilesets,
+        Stages: parsed.Stages ?? {},
+        Actors: parsed.Actors,
+        TileActors: parsed.TileActors ?? [],
+      };
+    } catch (error) {
+      this.logger.warn(`FSALib: failed to parse /editor/${STAGE_ASSETS_FILE}`, error);
+      return null;
+    }
+  }
+
+  /** Converts the raw tile→actor entries into the editor's lookup structure. */
+  private buildTileActorList(entries: TileActorDto[]): TileActorDefinition[] {
+    return buildTileActors(
+      Object.fromEntries(
+        entries.map((entry) => [
+          String(entry.Tile),
+          {
+            Name: entry.Name,
+            RequiredActorID: entry.ActorId,
+            ActorValue: entry.ActorValue || undefined,
+          },
+        ]),
+      ),
+    );
+  }
+
+  /** The tileset definitions from the persisted catalog. */
   async loadTilesets(): Promise<Record<string, TilesetInfo>> {
     if (!this.tilesetsPromise) {
-      this.tilesetsPromise = this.getFsa()
-        .then((fsa) => {
-          // FSALib reads its definitions from `assets/*.json`, which doesn't
-          // exist in the browser-wasm VFS until we materialize it.
-          fsa.EnsureAssets();
-          const parsed = JSON.parse(fsa.GetTilesets()) as Record<string, TilesetInfo> & {
-            error?: string;
-          };
-          if (typeof parsed.error === 'string') {
-            throw new Error(parsed.error);
-          }
-          return parsed as Record<string, TilesetInfo>;
-        })
-        .catch((err) => {
-          this.logger.error('FSALib: failed to read tilesets from wasm', err);
-          return {} as Record<string, TilesetInfo>;
-        });
+      this.tilesetsPromise = this.stageAssets().then((assets) => assets.Tilesets);
     }
     return this.tilesetsPromise;
   }
 
   /**
    * Builds the list of selectable tileset "themes" from the real tileset
-   * definitions in `tilesets.json` (loaded through the wasm), so the picker
-   * always stays in sync with the game data instead of a hard-coded list.
+   * definitions (originally `tilesets.json`), so the picker always stays in
+   * sync with the game data instead of a hard-coded list.
    *
    * @param includeDevelopment Include tilesets marked as "Development".
    * @returns Themes ordered by tileset index.
@@ -822,80 +1110,31 @@ export class FSALibService {
    */
   async loadTileActors(): Promise<TileActorDefinition[]> {
     if (!this.tileActorsPromise) {
-      this.tileActorsPromise = this.getFsa()
-        .then((fsa) => {
-          fsa.EnsureAssets();
-          const parsed = JSON.parse(fsa.GetTileActors()) as TileActorDto[] | { error?: string };
-          if (!Array.isArray(parsed)) {
-            throw new Error(parsed.error ?? 'unknown error');
-          }
-          return buildTileActors(
-            Object.fromEntries(
-              parsed.map((entry) => [
-                String(entry.Tile),
-                {
-                  Name: entry.Name,
-                  RequiredActorID: entry.ActorId,
-                  ActorValue: entry.ActorValue || undefined,
-                },
-              ]),
-            ),
-          );
-        })
-        .catch((error) => {
-          this.logger.warn('FSALib: failed to read tile actors from wasm', error);
-          return [] as TileActorDefinition[];
-        });
+      this.tileActorsPromise = this.stageAssets().then((assets) =>
+        this.buildTileActorList(assets.TileActors),
+      );
     }
     return this.tileActorsPromise;
   }
 
-  /** Loads and caches the stage definitions FSALib has loaded from its assets. */
+  /** The stage definitions from the persisted catalog (keyed by `bossNNN`). */
   async loadStages(): Promise<Record<string, StageInfo>> {
     if (!this.stagesPromise) {
-      this.stagesPromise = this.getFsa()
-        .then((fsa) => {
-          fsa.EnsureAssets();
-          const parsed = JSON.parse(fsa.GetStages()) as Record<string, StageInfo> & {
-            error?: string;
-          };
-          if (typeof parsed.error === 'string') {
-            throw new Error(parsed.error);
-          }
-          return parsed as Record<string, StageInfo>;
-        })
-        .catch((err) => {
-          this.logger.error('FSALib: failed to read stages from wasm', err);
-          return {} as Record<string, StageInfo>;
-        });
+      this.stagesPromise = this.stageAssets().then((assets) => assets.Stages);
     }
     return this.stagesPromise;
   }
 
   /**
-   * Loads and caches the actor definitions FSALib has loaded from its assets
-   * (`assets/actors/*.json`), keyed by the 4-character actor id.
+   * The actor definitions from the persisted catalog, keyed by the 4-character
+   * actor id.
    *
    * Drives the editor's Enemies toolbox section and the on-canvas actor
    * rendering.
    */
   async loadActors(): Promise<Record<string, ActorDefinition>> {
     if (!this.actorsPromise) {
-      this.actorsPromise = this.getFsa()
-        .then((fsa) => {
-          fsa.EnsureAssets();
-          const parsed = JSON.parse(fsa.GetActors()) as Record<string, ActorDefinition> & {
-            error?: string;
-          };
-          if (typeof parsed.error === 'string') {
-            throw new Error(parsed.error);
-          }
-          return parsed as Record<string, ActorDefinition>;
-        })
-        .catch((err) => {
-          this.logger.error('FSALib: failed to read actors from wasm', err);
-          return {} as Record<string, ActorDefinition>;
-        });
+      this.actorsPromise = this.stageAssets().then((assets) => assets.Actors);
     }
     return this.actorsPromise;
   }

@@ -84,6 +84,9 @@ namespace FSALib
         /// </summary>
         public static void Reload()
         {
+            var total = Stopwatch.StartNew();
+            long actorsMs = 0;
+
             // Reload song list
             string songsJson = Path.Combine(AssetsDirectory, "songs.json");
             if (!Deserialize(songsJson, out songs))
@@ -114,10 +117,13 @@ namespace FSALib
             if (!Deserialize(tilesetsJson, out tilesets))
                 tilesets = new Dictionary<int, TilesetDefinition>();
 
+            long singleFilesMs = total.ElapsedMilliseconds;
+
             // Reload actor schemas
             string actorsDirectory = Path.Combine(AssetsDirectory, "actors");
             if (Directory.Exists(actorsDirectory))
             {
+                var actorsTimer = Stopwatch.StartNew();
                 actors.Clear();
                 foreach (var filePath in Directory.GetFiles(actorsDirectory, "*.json"))
                 {
@@ -127,12 +133,15 @@ namespace FSALib
                         actors.Add(identifier, schema);
                     }
                 }
+                actorsMs = actorsTimer.ElapsedMilliseconds;
             }
             else
             {
                 Trace.WriteLine($"⚠️ The directory {actorsDirectory} does not exist.");
             }
 
+            long mirrorTimerMs = 0;
+            var mirrorTimer = Stopwatch.StartNew();
             for (ushort i = 1; i < mirrorLOT.Length; i++)
             {
                 if (TileProperties.TryGetValue(i, out TilePropertyDefinition tileInfo) && tileInfo.MirrorTile != 0)
@@ -144,6 +153,11 @@ namespace FSALib
                     mirrorLOT[i] = i;
                 }
             }
+            mirrorTimerMs = mirrorTimer.ElapsedMilliseconds;
+
+            Trace.WriteLine(
+                $"[Assets.Reload] singleFiles={singleFilesMs}ms actors={actorsMs}ms " +
+                $"({actors.Count} defs) mirrorLOT={mirrorTimerMs}ms total={total.ElapsedMilliseconds}ms");
         }
 
         private static bool Deserialize<TValue>(string path, out TValue value) where TValue : class

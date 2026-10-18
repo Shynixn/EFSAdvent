@@ -101,24 +101,40 @@ export class StageEditorService {
   async load(stageId: string): Promise<LoadedStage | null> {
     const cached = this.cache.get(stageId);
     if (cached) {
+      this.logger.info(`StageEditor: reusing cached stage "${stageId}".`);
       this.current.set(cached);
       return cached;
     }
 
+    const total = this.logger.startTimer(`StageEditor.load("${stageId}")`);
+
+    const readTimer = this.logger.startTimer('StageEditor.readArchive');
     const bytes = await this.editor.readEditorFile(stageArcFilePath(stageId));
+    readTimer.stop(`StageEditor: archive "${stageId}" read`);
     if (!bytes) {
       this.logger.warn(`StageEditor: no archive for stage "${stageId}".`);
+      total.stop('StageEditor: load failed —');
       return null;
     }
+    this.logger.info(`StageEditor: archive "${stageId}" is ${bytes.byteLength} byte(s).`);
 
+    const parseTimer = this.logger.startTimer('StageEditor.parseStage');
     const data = await this.fsaLib.parseStage(bytes);
+    parseTimer.stop(`StageEditor: parsed archive of "${stageId}"`);
+
+    const renderTimer = this.logger.startTimer('StageEditor.createStageRenderer');
     const renderer = await this.fsaLib.createStageRenderer(data, bytes);
+    renderTimer.stop(`StageEditor: created renderer for "${stageId}"`);
+
+    const tilesetTimer = this.logger.startTimer('StageEditor.prepareTileset');
     await renderer.prepareTileset();
+    tilesetTimer.stop(`StageEditor: prepared tileset for "${stageId}"`);
 
     const loaded: LoadedStage = { id: stageId, data, arcBytes: bytes, renderer };
     this.cache.set(stageId, loaded);
     this.current.set(loaded);
     this.logger.info(`StageEditor: loaded stage "${stageId}" (map ${data.Map.Index}).`);
+    total.stop(`StageEditor: "${stageId}" fully loaded`);
     return loaded;
   }
 

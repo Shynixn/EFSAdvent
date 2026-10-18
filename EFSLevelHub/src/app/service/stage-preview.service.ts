@@ -85,16 +85,20 @@ export class StagePreviewService {
     // Skip entirely when everything (rooms + thumbnail) already exists.
     if (
       !force &&
-      (await this.allPreviewsExist(
-        stageId,
-        cells.map((c) => c.roomIndex),
+      (await this.logger.time('StagePreview.allPreviewsExist', () =>
+        this.allPreviewsExist(
+          stageId,
+          cells.map((c) => c.roomIndex),
+        ),
       ))
     ) {
       this.logger.info(`StagePreview: previews for "${stageId}" already cached.`);
       return false;
     }
 
-    const renderer = await this.fsaLib.createStageRenderer(stage, arcBytes);
+    const renderer = await this.logger.time('StagePreview.createStageRenderer', () =>
+      this.fsaLib.createStageRenderer(stage, arcBytes),
+    );
 
     // Thumbnail canvas: one visible room per cell.
     const thumbnail = new ImageBuffer(cols * VISIBLE_ROOM_WIDTH, rows * VISIBLE_ROOM_HEIGHT);
@@ -102,6 +106,7 @@ export class StagePreviewService {
 
     const room = new ImageBuffer(VISIBLE_ROOM_WIDTH, VISIBLE_ROOM_HEIGHT);
 
+    const roomsTimer = this.logger.startTimer('StagePreview.renderRooms');
     for (let i = 0; i < cells.length; i++) {
       const cell = cells[i];
       onProgress?.({
@@ -123,6 +128,7 @@ export class StagePreviewService {
 
       thumbnail.blendFrom(room, cell.x * VISIBLE_ROOM_WIDTH, cell.y * VISIBLE_ROOM_HEIGHT);
     }
+    roomsTimer.stop(`StagePreview: rendered + wrote ${cells.length} room preview(s)`);
 
     onProgress?.({ done: cells.length, total: cells.length, message: 'Writing thumbnail…' });
 
@@ -148,7 +154,9 @@ export class StagePreviewService {
           )
         : thumbnail;
 
-    await this.editor.writeEditorFile(stageThumbnailPath(stageId), this.pngBytes(trimmed));
+    await this.logger.time('StagePreview.writeThumbnail', () =>
+      this.editor.writeEditorFile(stageThumbnailPath(stageId), this.pngBytes(trimmed)),
+    );
 
     this.logger.info(
       `StagePreview: generated ${cells.length} room preview(s) + thumbnail for "${stageId}".`,

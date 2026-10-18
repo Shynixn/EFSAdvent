@@ -169,16 +169,38 @@ export class IsoExtractorComponent implements OnInit {
   /**
    * Generates the editor's derived files after a successful extraction.
    *
-   * Produces `/editor/cache/image/worldmap.png` (the overworld texture) and the
-   * default stage previews under `/editor/cache/<zero-guid>/`. Failures here are
+   * Produces `/editor/cache/stageassets.json` (the FSALib tileset/stage/actor
+   * catalog, so later stage opens never deserialize assets in wasm),
+   * `/editor/cache/image/worldmap.png` (the overworld texture) and the default
+   * stage previews under `/editor/cache/<zero-guid>/`. Failures here are
    * non-fatal: extraction itself has already succeeded, so we only log a warning.
    */
   private async generateEditorFiles(): Promise<void> {
+    await this.cacheStageAssets();
     await this.generateWorldmap();
     await this.importDefaultStages();
     await this.generateTilesetPreviews();
     await this.generateActorSprites();
     await this.dumpEditorStore();
+  }
+
+  /**
+   * Exports every static FSALib definition to `/editor/cache/stageassets.json`.
+   *
+   * This is the only place the wasm asset catalog is deserialized: it costs
+   * several seconds, so it is paid once at import instead of on every stage
+   * open. Must run before anything that needs tilesets/stages/actors.
+   */
+  private async cacheStageAssets(): Promise<void> {
+    try {
+      this.statusMessage.set('Caching stage assets…');
+      const timer = this.logger.startTimer('UI.cacheStageAssets');
+      await this.fsaLib.populateStageAssets();
+      timer.stop('UI:');
+    } catch (error) {
+      // Non-fatal: FSALibService regenerates the catalog lazily on first use.
+      this.logger.warn('UI: failed to cache stage assets (will regenerate on demand)', error);
+    }
   }
 
   /**

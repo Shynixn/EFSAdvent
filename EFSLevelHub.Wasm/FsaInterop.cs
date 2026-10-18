@@ -26,12 +26,53 @@ public static partial class FsaInterop
     };
 
     /// <summary>
+    /// Logs a start/end trace for one JS-exported call, prefixed with a
+    /// wall-clock timestamp and <c>[FSAWASM]</c>.
+    /// </summary>
+    /// <remarks>
+    /// Calls into wasm are the slowest part of stage loading (the interpreter
+    /// runs at a fraction of native speed), so every export is traced: the
+    /// matching BEGIN/END pair with a duration makes the culprit obvious in the
+    /// browser console.
+    /// </remarks>
+    /// <param name="name">Exported method name.</param>
+    /// <param name="detail">Optional argument summary appended to BEGIN.</param>
+    private static TimedTrace Trace(string name, string detail = "")
+        => new(name, detail);
+
+    /// <summary>
+    /// A BEGIN/END trace scope: dispose (or <see cref="Done"/>) to log the end
+    /// line with the elapsed milliseconds.
+    /// </summary>
+    private readonly struct TimedTrace : IDisposable
+    {
+        private readonly string name;
+        private readonly System.Diagnostics.Stopwatch stopwatch;
+
+        public TimedTrace(string name, string detail)
+        {
+            this.name = name;
+            stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            Log($"BEGIN {name}{(detail.Length > 0 ? $" {detail}" : string.Empty)}");
+        }
+
+        /// <summary>Logs the END line (idempotent: a second call is ignored).</summary>
+        public void Dispose()
+            => Log($"END {name} ({stopwatch.Elapsed.TotalMilliseconds:F1}ms)");
+    }
+
+    /// <summary>Writes a timestamped <c>[FSAWASM]</c> line to the wasm console.</summary>
+    private static void Log(string message)
+        => Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [FSAWASM] {message}");
+
+    /// <summary>
     /// Parses a stage archive (<c>bossXXX.arc</c>, optionally YAZ0-compressed)
     /// and returns its <see cref="StageDto"/> as JSON.
     /// </summary>
     [JSExport]
     public static string ParseStage(byte[] arcData)
     {
+        using var trace = Trace("ParseStage", $"({arcData.Length} bytes)");
         try
         {
             using var stream = new MemoryStream(arcData, writable: false);
@@ -64,6 +105,7 @@ public static partial class FsaInterop
     [JSExport]
     public static byte[] RetargetStageIndex(byte[] arcData, int targetIndex)
     {
+        using var trace = Trace("RetargetStageIndex", $"(index {targetIndex}, {arcData.Length} bytes)");
         try
         {
             using var stream = new MemoryStream(arcData, writable: false);
@@ -154,6 +196,7 @@ public static partial class FsaInterop
     [JSExport]
     public static byte[] SetStageTileSheet(byte[] arcData, int tileSheetId)
     {
+        using var trace = Trace("SetStageTileSheet", $"(tileset {tileSheetId})");
         try
         {
             using var stream = new MemoryStream(arcData, writable: false);
@@ -198,6 +241,7 @@ public static partial class FsaInterop
     [JSExport]
     public static byte[] SetRoomLayer(byte[] arcData, int roomIndex, int layerIndex, string tilesJson)
     {
+        using var trace = Trace("SetRoomLayer", $"(room {roomIndex}, layer {layerIndex})");
         try
         {
             ushort[]? tiles;
@@ -271,6 +315,7 @@ public static partial class FsaInterop
     [JSExport]
     public static byte[] SetRoomSlot(byte[] arcData, int x, int y, int copyFromRoom, bool delete)
     {
+        using var trace = Trace("SetRoomSlot", $"({x},{y} copyFrom {copyFromRoom} delete {delete})");
         try
         {
             using var stream = new MemoryStream(arcData, writable: false);
@@ -296,7 +341,7 @@ public static partial class FsaInterop
             int roomIndex = stage.GetNextFreeRoom();
             if (roomIndex < 0)
             {
-                Console.Error.WriteLine("SetRoomSlot: no free room slot.");
+                Log("SetRoomSlot: no free room slot.");
                 return Array.Empty<byte>();
             }
 
@@ -323,7 +368,7 @@ public static partial class FsaInterop
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"SetRoomSlot failed: {ex}");
+            Log($"SetRoomSlot failed: {ex}");
             return Array.Empty<byte>();
         }
     }
@@ -372,6 +417,7 @@ public static partial class FsaInterop
     [JSExport]
     public static byte[] SetRoomActors(byte[] arcData, int roomIndex, string actorsJson)
     {
+        using var trace = Trace("SetRoomActors", $"(room {roomIndex})");
         try
         {
             List<ActorDto>? actors;
@@ -411,7 +457,7 @@ public static partial class FsaInterop
                     // A blank id means the payload did not map onto ActorDto
                     // (e.g. a JSON casing mismatch) — fail loudly instead of
                     // writing a corrupt actor.
-                    Console.Error.WriteLine("SetRoomActors: actor payload has an empty id.");
+                    Log("SetRoomActors: actor payload has an empty id.");
                     return Array.Empty<byte>();
                 }
                 room.Actors.Add(new Actor(
@@ -426,7 +472,7 @@ public static partial class FsaInterop
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"SetRoomActors failed: {ex}");
+            Log($"SetRoomActors failed: {ex}");
             return Array.Empty<byte>();
         }
     }
@@ -434,7 +480,10 @@ public static partial class FsaInterop
     /// <summary>Liveness probe returning the FSALib version.</summary>
     [JSExport]
     public static string GetVersion()
-        => typeof(Stage).Assembly.GetName().Version?.ToString() ?? "unknown";
+    {
+        using var trace = Trace("GetVersion");
+        return typeof(Stage).Assembly.GetName().Version?.ToString() ?? "unknown";
+    }
 
     /// <summary>
     /// Returns every tile that implies an actor, from FSALib's
@@ -448,6 +497,7 @@ public static partial class FsaInterop
     [JSExport]
     public static string GetTileActors()
     {
+        using var trace = Trace("GetTileActors");
         try
         {
             EnsureAssets();
@@ -494,6 +544,7 @@ public static partial class FsaInterop
     [JSExport]
     public static byte[] MergeStageContent(byte[] targetArcData, byte[] sourceArcData)
     {
+        using var trace = Trace("MergeStageContent", $"({sourceArcData.Length} → {targetArcData.Length} bytes)");
         try
         {
             using var targetStream = new MemoryStream(targetArcData, writable: false);
@@ -584,6 +635,7 @@ public static partial class FsaInterop
     [JSExport]
     public static string GetTilesets()
     {
+        using var trace = Trace("GetTilesets");
         try
         {
             var map = new Dictionary<string, TilesetDto>();
@@ -617,6 +669,7 @@ public static partial class FsaInterop
     [JSExport]
     public static string GetStages()
     {
+        using var trace = Trace("GetStages");
         try
         {
             var map = new Dictionary<string, StageDefinitionDto>();
@@ -647,6 +700,7 @@ public static partial class FsaInterop
     [JSExport]
     public static string GetActors()
     {
+        using var trace = Trace("GetActors");
         try
         {
             var map = new Dictionary<string, ActorDefinitionDto>();
@@ -701,15 +755,119 @@ public static partial class FsaInterop
     }
 
     /// <summary>
+    /// Materializes FSALib's embedded asset JSON files and returns every static
+    /// definition the editor needs, in a single call.
+    /// </summary>
+    /// <remarks>
+    /// FSALib reads its definitions from a real filesystem (<c>assets/*.json</c>),
+    /// which the browser-wasm VFS does not contain by default, and its
+    /// <see cref="Assets.Reload"/> re-deserializes all ~370 actor definitions
+    /// (several seconds under the wasm interpreter). The Angular app therefore
+    /// calls this ONCE at ISO-import time and persists the result to OPFS
+    /// (<c>/editor/cache/stageassets.json</c>); every later stage open reads that
+    /// file instead of touching the wasm module. Only stage-archive-specific data
+    /// (parsing <c>bossNNN.arc</c>) still goes through wasm.
+    ///
+    /// The returned object mirrors the former individual exports
+    /// (<see cref="GetTilesets"/>, <see cref="GetStages"/>,
+    /// <see cref="GetActors"/>, <see cref="GetTileActors"/>) so callers can keep
+    /// their existing DTO shapes.
+    /// </remarks>
+    /// <returns>JSON of <see cref="StageAssetsDto"/>, or <c>{ error }</c>.</returns>
+    [JSExport]
+    public static string GetStageAssets()
+    {
+        using var trace = Trace("GetStageAssets");
+        try
+        {
+            string error = EnsureAssetsCore();
+            if (error.Length > 0)
+            {
+                return JsonSerializer.Serialize(new { error }, JsonOptions);
+            }
+
+            // Each accessor below is a pure projection over the in-memory
+            // Assets caches, so the cost is only serialization.
+            long tilesetsMs, stagesMs, actorsMs, tileActorsMs;
+            var timer = System.Diagnostics.Stopwatch.StartNew();
+            string tilesetsJson = GetTilesets();
+            tilesetsMs = timer.ElapsedMilliseconds;
+
+            timer.Restart();
+            string stagesJson = GetStages();
+            stagesMs = timer.ElapsedMilliseconds;
+
+            timer.Restart();
+            string actorsJson = GetActors();
+            actorsMs = timer.ElapsedMilliseconds;
+
+            timer.Restart();
+            string tileActorsJson = GetTileActors();
+            tileActorsMs = timer.ElapsedMilliseconds;
+
+            if (tilesetsJson.Contains("\"error\"") ||
+                stagesJson.Contains("\"error\"") ||
+                actorsJson.Contains("\"error\"") ||
+                tileActorsJson.Contains("\"error\""))
+            {
+                return JsonSerializer.Serialize(
+                    new { error = "One or more FSALib accessors returned an error." },
+                    JsonOptions);
+            }
+
+            Log($"  tilesets={tilesetsMs}ms stages={stagesMs}ms " +
+                $"actors={actorsMs}ms tileActors={tileActorsMs}ms");
+
+            // Embed the already-serialized fragments instead of re-serializing
+            // the DTOs, so nothing is parsed twice.
+            return
+                "{\"Tilesets\":" + tilesetsJson +
+                ",\"Stages\":" + stagesJson +
+                ",\"Actors\":" + actorsJson +
+                ",\"TileActors\":" + tileActorsJson + "}";
+        }
+        catch (Exception ex)
+        {
+            return JsonSerializer.Serialize(new { error = ex.Message }, JsonOptions);
+        }
+    }
+
+    /// <summary>
     /// Extracts the FSALib asset JSON files embedded in this assembly into the
     /// current working directory, then reloads FSALib's <c>Assets</c> cache.
     ///
-    /// FSALib loads its definitions from a real filesystem (<c>assets/*.json</c>),
-    /// which the browser-wasm VFS does not contain by default. Idempotent.
+    /// Kept as an explicit export for debugging/tooling; production code goes
+    /// through <see cref="GetStageAssets"/>, which only needs the one-shot work.
     /// </summary>
     [JSExport]
     public static string EnsureAssets()
     {
+        using var trace = Trace("EnsureAssets");
+        string error = EnsureAssetsCore();
+        return error.Length == 0
+            ? JsonSerializer.Serialize(new { tilesets = FSALib.Assets.Tilesets.Count }, JsonOptions)
+            : JsonSerializer.Serialize(new { error }, JsonOptions);
+    }
+
+    /// <summary>
+    /// One-shot asset materialization + <see cref="FSALib.Assets.Reload"/>.
+    /// </summary>
+    /// <returns>An error message, or an empty string on success.</returns>
+    private static string EnsureAssetsCore()
+    {
+        string actorsDirectory = Path.Combine("assets", "actors");
+
+        // The extracted asset tree is the only state we keep: FSALib's Assets
+        // cache is populated by its static constructor, so once the files are on
+        // disk the definitions are already loaded and reloading them would only
+        // re-deserialize every actor JSON (several seconds in wasm).
+        if (File.Exists(Path.Combine("assets", "tilesets.json")) &&
+            Directory.Exists(actorsDirectory))
+        {
+            return string.Empty;
+        }
+
+        var total = System.Diagnostics.Stopwatch.StartNew();
         try
         {
             var assembly = typeof(FsaInterop).Assembly;
@@ -736,13 +894,175 @@ public static partial class FsaInterop
                 written++;
             }
 
+            long extractDone = total.ElapsedMilliseconds;
+            var reloadTimer = System.Diagnostics.Stopwatch.StartNew();
             FSALib.Assets.Reload();
-            return JsonSerializer.Serialize(new { files = written, tilesets = FSALib.Assets.Tilesets.Count }, JsonOptions);
+            long reloadMs = reloadTimer.ElapsedMilliseconds;
+
+            Log(
+                $"  written={written} extract(until)={extractDone}ms " +
+                $"reload={reloadMs}ms total={total.ElapsedMilliseconds}ms");
+            return string.Empty;
         }
         catch (Exception ex)
         {
-            return JsonSerializer.Serialize(new { error = ex.Message }, JsonOptions);
+            Log($"EnsureAssets failed after {total.ElapsedMilliseconds}ms: {ex.Message}");
+            return ex.Message;
         }
+    }
+
+    /// <summary>
+    /// Caches a shared archive (e.g. `data.arc`) inside the wasm module so its
+    /// bytes no longer cross the JS↔wasm boundary on every read.
+    /// </summary>
+    /// <remarks>
+    /// Every export call marshals its arguments into the wasm heap, so
+    /// <see cref="ReadArchiveFile(byte[], string)"/> copied the whole ~1.2 MB
+    /// `data.arc` per call — about a second under the interpreter, regardless of
+    /// how small the file being read was. Caching the archive makes that a
+    /// one-time cost per session; afterwards only the requested payloads move.
+    ///
+    /// The cache holds at most two archives (the stage's `.arc` can also be
+    /// registered), evicting the least recently used one.
+    /// </remarks>
+    /// <param name="key">Logical name for the archive, e.g. `data.arc`.</param>
+    /// <param name="arcData">Raw archive bytes (optionally YAZ0-compressed).</param>
+    /// <returns>JSON `{ cached: true, bytes }`.</returns>
+    [JSExport]
+    public static string CacheArchive(string key, byte[] arcData)
+    {
+        using var trace = Trace("CacheArchive", $"({key}, {arcData.Length} bytes)");
+        if (cachedArchives.TryGetValue(key, out var entry) &&
+            entry.Data.Length == arcData.Length)
+        {
+            // Same key and size: keep the parse, just refresh the usage order.
+            cachedArchives.Remove(key);
+            cachedArchives[key] = entry;
+            return JsonSerializer.Serialize(
+                new { cached = true, bytes = entry.Data.Length, reused = true },
+                JsonOptions);
+        }
+
+        // Bound the cache to two archives (LRU): a stage + the shared data.arc.
+        while (cachedArchives.Count >= 2)
+        {
+            cachedArchives.Remove(cachedArchives.First().Key);
+        }
+
+        cachedArchives[key] = new CachedArchive(arcData);
+        Log($"  cached '{key}' ({arcData.Length} bytes)");
+        return JsonSerializer.Serialize(new { cached = true, bytes = arcData.Length }, JsonOptions);
+    }
+
+    /// <summary>One parsed archive held in wasm memory.</summary>
+    private sealed class CachedArchive
+    {
+        public CachedArchive(byte[] data) => Data = data;
+
+        public byte[] Data { get; }
+    }
+
+    /// <summary>Archives cached in wasm memory, keyed by logical name (LRU order).</summary>
+    private static readonly Dictionary<string, CachedArchive> cachedArchives = new();
+
+    /// <summary>
+    /// Reads many files out of a cached archive in a single JS→wasm call.
+    /// </summary>
+    /// <remarks>
+    /// This is the fast path for rendering: the archive was registered once via
+    /// <see cref="CacheArchive(string, byte[])"/>, so each call transfers only the
+    /// requested payloads instead of the whole archive. Paths that do not exist
+    /// are simply absent from the returned array, matching the caller's
+    /// resolve-then-read flow.
+    ///
+    /// Returns `byte[][]` rather than JSON/base64 because the source-generated
+    /// interop can marshal nested byte arrays directly — no encoding overhead.
+    /// The requested paths are therefore passed as a single newline-separated
+    /// string (string arrays are not supported by the generator).
+    /// </remarks>
+    /// <param name="archiveKey">Key the archive was cached under, e.g. `data.arc`.</param>
+    /// <param name="pathsNewlineSeparated">File paths separated by `\n`.</param>
+    /// <returns>
+    /// One packed buffer: a 4-byte little-endian count, then a 4-byte
+    /// little-endian length per entry, then every payload back-to-back. A
+    /// single `byte[]` is used because source-generated interop cannot marshal
+    /// nested arrays, and packing avoids base64/JSON overhead entirely.
+    /// Entries that could not be read are reported with length -1.
+    /// </returns>
+    [JSExport]
+    public static byte[] ReadCachedArchiveFiles(string archiveKey, string pathsNewlineSeparated)
+    {
+        using var trace = Trace("ReadCachedArchiveFiles", $"({archiveKey})");
+        if (!cachedArchives.TryGetValue(archiveKey, out var cached))
+        {
+            throw new InvalidOperationException($"Archive '{archiveKey}' is not cached.");
+        }
+
+        string[] paths = pathsNewlineSeparated.Split(
+            '\n',
+            StringSplitOptions.RemoveEmptyEntries);
+
+        using var stream = new MemoryStream(cached.Data, writable: false);
+        using var rarc = new Rarc(stream);
+
+        // Read every payload first so the total size is known up front.
+        var payloads = new byte[]?[paths.Length];
+        long totalBytes = 0;
+        for (int i = 0; i < paths.Length; i++)
+        {
+            try
+            {
+                Rarc.DirectoryNode dir = rarc.Root;
+                string[] segments = paths[i]
+                    .Replace('\\', '/')
+                    .Split('/', StringSplitOptions.RemoveEmptyEntries);
+                for (int j = 0; j < segments.Length - 1; j++)
+                {
+                    dir = dir.Directorys[
+                        new AuroraLib.Core.Format.Identifier.Identifier32(segments[j].AsSpan())];
+                }
+
+                Rarc.FileNode file = dir.GetFile(segments[^1]);
+                using var ms = new MemoryStream();
+                file.Data.Position = 0;
+                file.Data.CopyTo(ms);
+                payloads[i] = ms.ToArray();
+                totalBytes += payloads[i]!.Length;
+            }
+            catch
+            {
+                // Unreadable/missing paths are marked -1; the caller tolerates
+                // absent resources.
+                payloads[i] = null;
+            }
+        }
+
+        int headerSize = 4 + paths.Length * 4;
+        var packed = new byte[headerSize + totalBytes];
+        WriteInt32LE(packed, 0, paths.Length);
+        int offset = headerSize;
+        for (int i = 0; i < paths.Length; i++)
+        {
+            var payload = payloads[i];
+            WriteInt32LE(packed, 4 + i * 4, payload?.Length ?? -1);
+            if (payload != null)
+            {
+                Buffer.BlockCopy(payload, 0, packed, offset, payload.Length);
+                offset += payload.Length;
+            }
+        }
+
+        Log($"  {paths.Length} requested, {totalBytes} byte(s) packed");
+        return packed;
+    }
+
+    /// <summary>Writes a 32-bit little-endian integer (JS uses DataView LE).</summary>
+    private static void WriteInt32LE(byte[] buffer, int offset, int value)
+    {
+        buffer[offset] = (byte)value;
+        buffer[offset + 1] = (byte)(value >> 8);
+        buffer[offset + 2] = (byte)(value >> 16);
+        buffer[offset + 3] = (byte)(value >> 24);
     }
 
     /// <summary>
@@ -751,7 +1071,9 @@ public static partial class FsaInterop
     /// </summary>
     [JSExport]
     public static string ListArchiveFiles(byte[] arcData)
-    {        try
+    {
+        using var trace = Trace("ListArchiveFiles", $"({arcData.Length} bytes)");
+        try
         {
             using var stream = new MemoryStream(arcData, writable: false);
             using var rarc = new Rarc(stream);
@@ -773,6 +1095,7 @@ public static partial class FsaInterop
     [JSExport]
     public static byte[] ReadArchiveFile(byte[] arcData, string path)
     {
+        using var trace = Trace("ReadArchiveFile", $"({path})");
         using var stream = new MemoryStream(arcData, writable: false);
         using var rarc = new Rarc(stream);
 
@@ -801,6 +1124,7 @@ public static partial class FsaInterop
     [JSExport]
     public static string ListArchiveTextures(byte[] arcData)
     {
+        using var trace = Trace("ListArchiveTextures", $"({arcData.Length} bytes)");
         try
         {
             using var stream = new MemoryStream(arcData, writable: false);
@@ -832,6 +1156,7 @@ public static partial class FsaInterop
     [JSExport]
     public static string Unzip(byte[] zipData)
     {
+        using var trace = Trace("Unzip", $"({zipData.Length} bytes)");
         try
         {
             using var stream = new MemoryStream(zipData, writable: false);

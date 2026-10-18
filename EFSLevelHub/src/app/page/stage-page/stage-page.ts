@@ -11,7 +11,7 @@ import { StageEditorService } from '../../service/stage-editor.service';
 import { StagePreviewService } from '../../service/stage-preview.service';
 import { StageRoomService } from '../../service/stage-room.service';
 import { UnsavedChangesService } from '../../service/unsaved-changes.service';
-import { LoggingService } from '../../service/logging.service';
+import { LoggingService, LogTimer } from '../../service/logging.service';
 import { MapLayoutData, StageData } from '../../entity/fsalib.entity';
 import { nextPaint } from '../../util/paint';
 
@@ -119,26 +119,34 @@ export class StagePage implements OnInit, OnDestroy {
 
   /** Sets the active stage, opens its tab and loads its archive. */
   private async loadStageById(id: string): Promise<void> {
+    const timer = this.logger.startTimer(`StagePage.open("${id}")`);
+    this.logger.info(`StagePage: opening stage "${id}"…`);
+
     this.stageId.set(id);
     // Tell the room service which stage's selection is now on screen.
     this.stageRoom.setActiveStage(id);
     this.thumbnailUrl.set(null);
     this.previewError.set('');
 
+    const serviceTimer = this.logger.startTimer('StageService.load');
     await this.stageService.load();
+    serviceTimer.stop('StagePage:'); // loads every stage definition file.
+    timer.lap('stage list loaded');
+
     const stage = this.stageService.getById(id);
     if (!stage) {
       this.logger.warn(`StagePage: unknown stage "${id}" — returning to My Stages.`);
       void this.router.navigate(['/my-stages']);
+      timer.stop('StagePage: open aborted —');
       return;
     }
     this.stage.set(stage);
     this.stageTabs.open(id);
-    await this.loadStage();
+    await this.loadStage(timer);
   }
 
   /** Reads the stage archive from the editor store and parses it with wasm. */
-  private async loadStage(): Promise<void> {
+  private async loadStage(parentTimer?: LogTimer): Promise<void> {
     const id = this.stageId();
     this.isLoading.set(true);
     this.loadError.set('');
@@ -147,10 +155,17 @@ export class StagePage implements OnInit, OnDestroy {
     this.previewError.set('');
 
     // Let the loading overlay paint before the (blocking) parse/render work.
+    this.logger.info(`StagePage: waiting for the loading overlay to paint…`);
     await nextPaint();
+    parentTimer?.lap('loading overlay painted');
 
     try {
+      this.logger.info(`StagePage: loading stage data for "${id}"…`);
+      const loadTimer = this.logger.startTimer('StageEditor.load');
       const loaded = await this.stageEditor.load(id);
+      loadTimer.stop('StagePage:');
+      parentTimer?.lap('stage data loaded');
+
       if (!loaded) {
         this.loadError.set('This stage has no archive yet.');
         return;
@@ -169,6 +184,11 @@ export class StagePage implements OnInit, OnDestroy {
       this.logger.error(`StagePage: failed to load stage "${id}"`, error);
     } finally {
       this.isLoading.set(false);
+      // Only report the page-open total when not aborted (`loadStageById` logs
+      // the aborted case itself).
+      if (!this.loadError()) {
+        parentTimer?.stop('StagePage: stage page ready —');
+      }
     }
   }
 
@@ -182,6 +202,8 @@ export class StagePage implements OnInit, OnDestroy {
     this.generatingPreviews.set(true);
     this.previewMessage.set('Generating stage previews…');
     this.previewError.set('');
+    this.logger.info(`StagePage: generating previews for "${id}"…`);
+    const timer = this.logger.startTimer(`StagePage.previews("${id}")`);
     try {
       await this.stagePreview.ensurePreviews(
         id,
@@ -197,6 +219,7 @@ export class StagePage implements OnInit, OnDestroy {
       this.previewError.set(error instanceof Error ? error.message : 'Preview generation failed.');
       this.logger.error(`StagePage: preview generation failed for "${id}"`, error);
     } finally {
+      timer.stop('StagePage:');
       this.generatingPreviews.set(false);
       await this.loadThumbnail();
     }
@@ -206,8 +229,10 @@ export class StagePage implements OnInit, OnDestroy {
   private async loadThumbnail(): Promise<void> {
     const id = this.stageId();
     try {
+      const timer = this.logger.startTimer('StagePage.loadThumbnail');
       const url = await this.stagePreview.readThumbnailUrl(id);
       this.thumbnailUrl.set(url);
+      timer.stop('StagePage:');
     } catch (error) {
       this.logger.error(`StagePage: failed to load thumbnail for "${id}"`, error);
     }

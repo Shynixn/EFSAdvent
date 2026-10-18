@@ -428,7 +428,9 @@ export class RoomPage implements OnInit, OnDestroy {
       this.stageName.set(stage.name);
       this.lastSaved.set(stage.lastSaved ?? null);
 
-      const loaded = await this.stageEditor.load(stageId);
+      const loaded = await this.logger.time(`RoomPage.loadStageEditor("${stageId}")`, () =>
+        this.stageEditor.load(stageId),
+      );
       if (!loaded) {
         this.loadError.set('This stage has no archive yet.');
         return;
@@ -437,7 +439,9 @@ export class RoomPage implements OnInit, OnDestroy {
       this.renderer.set(loaded.renderer);
       // Seed the shared theme service with the stage's current tileset.
       this.themeService.setSelected(stageId, loaded.data.Map.TileSheetId);
+      const themeTimer = this.logger.startTimer('RoomPage.themeService.ensureLoaded');
       await this.themeService.ensureLoaded();
+      themeTimer.stop('RoomPage:');
 
       const room = loaded.data.Rooms[roomIndex] ?? null;
       if (!room) {
@@ -517,8 +521,11 @@ export class RoomPage implements OnInit, OnDestroy {
       // (actor category `Enemy`), so the toolbox is fully populated — and can
       // hide enemies whose graphics this stage does not carry — before the
       // loading overlay is dismissed.
+      const toolboxTimer = this.logger.startTimer('RoomPage.toolboxSetup');
       await this.prepareEnemySprites();
+      toolboxTimer.lap('sprite sheets ready');
       await this.ensureEnemies();
+      toolboxTimer.stop('RoomPage:');
 
       // Register this room as an open tab and mark the stage active so the side
       // nav highlights it and the stage page's save picks up the edits.
