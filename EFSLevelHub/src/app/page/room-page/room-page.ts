@@ -331,6 +331,17 @@ export class RoomPage implements OnInit, OnDestroy {
   /** Whether an export is currently in flight (drives the loading overlay). */
   readonly exporting = signal(false);
 
+  /**
+   * Whether an `.fsastage` export is in flight. Tracked separately from
+   * {@link exporting} so the two export buttons report their own progress.
+   */
+  readonly exportingStage = signal(false);
+
+  /** Whether the "Export Stage File" button is actionable. */
+  readonly canExportPackage = computed(
+    () => !this.saving() && !this.exportingStage() && this.room() != null,
+  );
+
   /** Whether the "Export Test ISO" button is actionable. */
   readonly canSaveAndExport = computed(
     () => !this.saving() && !this.exporting() && this.canExport() && this.room() != null,
@@ -1286,6 +1297,43 @@ export class RoomPage implements OnInit, OnDestroy {
       this.logger.error('RoomPage: test ISO export failed', error);
     } finally {
       this.exporting.set(false);
+    }
+  }
+
+  /**
+   * Saves the current room, then downloads the stage as a `.fsastage` package
+   * (a ZIP holding `stage.arc` and `manifest.json`), so it can be shared and
+   * re-imported from the "Import stage" dialog.
+   */
+  async saveAndExportStageFile(): Promise<void> {
+    const stageId = this.stageId();
+    if (!this.canExportPackage()) {
+      return;
+    }
+
+    // Persist the current edits first so the exported archive and manifest
+    // include them.
+    await this.save();
+    if (this.stageEditor.isDirty(stageId)) {
+      // The save failed — do not export a stale stage.
+      return;
+    }
+
+    this.exportingStage.set(true);
+    try {
+      const result = await this.stageService.exportStagePackage(stageId);
+      if (!result) {
+        this.logger.warn(`RoomPage: nothing to export for stage "${stageId}".`);
+        return;
+      }
+      this.downloadBlob(
+        new Blob([result.bytes as BlobPart], { type: 'application/zip' }),
+        result.fileName,
+      );
+    } catch (error) {
+      this.logger.error('RoomPage: stage file export failed', error);
+    } finally {
+      this.exportingStage.set(false);
     }
   }
 

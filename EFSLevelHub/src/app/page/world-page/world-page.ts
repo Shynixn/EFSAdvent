@@ -12,7 +12,7 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { ButtonComponent } from '../../component/button/button.component';
 import { StagePickerComponent } from '../../component/stage-picker/stage-picker.component';
 import { ModalComponent } from '../../component/modal/modal.component';
-import { WorldService, ZERO_GUID } from '../../service/world.service';
+import { WorldService } from '../../service/world.service';
 import { StageService, StageFile, DEFAULT_STAGE_ARC_ORDER } from '../../service/stage.service';
 import { WorldTabsService } from '../../service/world-tabs.service';
 import { EditorService, WORLDMAP_FILE } from '../../service/editor.service';
@@ -157,14 +157,6 @@ export class WorldPage implements OnInit, OnDestroy {
   readonly exportError = signal('');
   /** Whether a source ISO is available for export. */
   readonly canExport = signal(false);
-
-  /** Whether the delete-confirmation modal is open. */
-  readonly deleteOpen = signal(false);
-  /** Delete error message, if any. */
-  readonly deleteError = signal('');
-
-  /** Whether the current world is the built-in default world (cannot be deleted). */
-  readonly isDefault = computed(() => this.worldId() === ZERO_GUID);
 
   ngOnInit(): void {
     const id = this.route.snapshot.paramMap.get('worldId') ?? '';
@@ -345,30 +337,6 @@ export class WorldPage implements OnInit, OnDestroy {
   /** Dismisses the export modal. */
   closeExport(): void {
     this.exportOpen.set(false);
-  }
-
-  /** Opens the delete-world confirmation modal. */
-  openDelete(): void {
-    this.deleteError.set('');
-    this.deleteOpen.set(true);
-  }
-
-  /** Closes the delete-world confirmation modal. */
-  closeDelete(): void {
-    this.deleteOpen.set(false);
-  }
-
-  /** Deletes the world and returns to the worlds list. */
-  async deleteWorld(): Promise<void> {
-    const id = this.worldId();
-    const removed = await this.worldService.deleteWorld(id);
-    if (!removed) {
-      this.deleteError.set('This world cannot be deleted.');
-      return;
-    }
-    this.closeDelete();
-    this.tabs.close(id);
-    void this.router.navigate(['/my-worlds']);
   }
 
   /** Formats a byte count for display. */

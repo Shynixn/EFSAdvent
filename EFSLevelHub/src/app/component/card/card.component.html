@@ -1,5 +1,6 @@
 <article
   (click)="cardClick.emit()"
+  (contextmenu)="onContextMenu($event)"
   class="group overflow-hidden rounded-2xl bg-slate-800/60 shadow-lg transition"
   [class.cursor-pointer]="!disabled"
   [class.hover:-translate-y-0.5]="!disabled"

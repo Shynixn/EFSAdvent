@@ -170,6 +170,18 @@ export class StagePreviewService {
   }
 
   /**
+   * Revokes a thumbnail blob URL previously returned by
+   * {@link readThumbnailUrl}, freeing the image when its stage is deleted.
+   *
+   * Safe to call with a URL that was never created (or already revoked).
+   */
+  revokeThumbnail(url: string | null | undefined): void {
+    if (url) {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  /**
    * Generates and caches a preview PNG for every tileset, once.
    *
    * Tileset graphics and palettes all live in `data.arc` (a stage archive never

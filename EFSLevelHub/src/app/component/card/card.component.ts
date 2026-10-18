@@ -46,4 +46,20 @@ export class CardComponent {
 
   /** Emits when the card is clicked (only when not disabled). */
   @Output() cardClick = new EventEmitter<void>();
+
+  /**
+   * Emits the pointer event on a right-click, so the host can open its own
+   * context menu. The browser menu is suppressed here (only when
+   * {@link disabled} is false) — hosts that want it keep their own handler.
+   */
+  @Output() cardContextMenu = new EventEmitter<MouseEvent>();
+
+  /** Handles a right-click: suppresses the browser menu and reports the event. */
+  onContextMenu(event: MouseEvent): void {
+    if (this.disabled) {
+      return;
+    }
+    event.preventDefault();
+    this.cardContextMenu.emit(event);
+  }
 }

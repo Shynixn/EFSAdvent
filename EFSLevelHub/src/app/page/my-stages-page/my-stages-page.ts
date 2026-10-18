@@ -17,10 +17,11 @@ import { LoggingService } from '../../service/logging.service';
  * MyStagesPage
  * ------------
  * Lists the stages registered in the editor. A leading "+" card opens a choice
- * modal that either imports a shared stage package (a zip with a `manifest.json`
- * and a `stage.arc`) or creates a new stage from an existing one used as a
- * template. Until a stage's own map preview is generated (which happens lazily
- * when a stage is opened), each card shows the shared world map image.
+ * modal that either imports a shared stage package (a `.fsastage` file — a ZIP
+ * with a `manifest.json` and a `stage.arc`) or creates a new stage from an
+ * existing one used as a template. Until a stage's own map preview is generated
+ * (which happens lazily when a stage is opened), each card shows the shared
+ * world map image.
  */
 @Component({
   selector: 'app-my-stages-page',
@@ -62,8 +63,21 @@ export class MyStagesPage implements OnInit {
   readonly choiceOpen = signal(false);
   /** Whether the "create stage" modal is open. */
   readonly createOpen = signal(false);
-  /** Whether the "import stage zip" modal is open. */
+  /** Whether the "import stage package" modal is open. */
   readonly importOpen = signal(false);
+
+  /**
+   * Open card context menu: the stage it targets plus its position in viewport
+   * (client) pixels. `null` when closed.
+   */
+  readonly stageMenu = signal<{ stage: StageFile; x: number; y: number } | null>(null);
+
+  /** Stage awaiting delete confirmation, or `null` when the dialog is closed. */
+  readonly deleteTarget = signal<StageFile | null>(null);
+  /** Delete error message, if any. */
+  readonly deleteError = signal('');
+  /** Whether a delete operation is in flight. */
+  readonly deleting = signal(false);
 
   /** Name entered in the "create stage" modal. */
   readonly newName = signal('');
@@ -127,8 +141,72 @@ export class MyStagesPage implements OnInit {
 
   /** Opens a stage in a new tab and navigates to its page. */
   openStage(stage: StageFile): void {
+    this.closeStageMenu();
     this.stageTabs.open(stage.id);
     void this.router.navigate(['/my-stages', stage.id]);
+  }
+
+  /**
+   * Opens the card context menu at the pointer position.
+   *
+   * The position is stored in CLIENT pixels and the menu is rendered `fixed`, so
+   * it appears under the cursor regardless of page scroll.
+   */
+  onStageContextMenu(event: MouseEvent, stage: StageFile): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.stageMenu.set({ stage, x: event.clientX, y: event.clientY });
+  }
+
+  /** Closes the card context menu. */
+  closeStageMenu(): void {
+    this.stageMenu.set(null);
+  }
+
+  /** Opens the delete-confirmation dialog for a stage (closing the menu first). */
+  openDelete(stage: StageFile): void {
+    this.closeStageMenu();
+    this.deleteError.set('');
+    this.deleteTarget.set(stage);
+  }
+
+  /** Closes the delete-confirmation dialog. */
+  closeDelete(): void {
+    this.deleteTarget.set(null);
+  }
+
+  /**
+   * Deletes the stage awaiting confirmation.
+   *
+   * Its open tabs are closed first so no page keeps editing a stage whose files
+   * no longer exist, then the cached thumbnail URL is revoked.
+   */
+  async confirmDelete(): Promise<void> {
+    const stage = this.deleteTarget();
+    if (!stage || this.deleting()) {
+      return;
+    }
+    this.deleting.set(true);
+    this.deleteError.set('');
+    try {
+      const removed = await this.stageService.deleteStage(stage.id);
+      if (!removed) {
+        this.deleteError.set('This stage could not be deleted.');
+        return;
+      }
+      this.stageTabs.close(stage.id);
+      this.stagePreview.revokeThumbnail(this.thumbnails()[stage.id]);
+      this.thumbnails.update((map) => {
+        const { [stage.id]: _removed, ...rest } = map;
+        return rest;
+      });
+      this.closeDelete();
+    } catch (error) {
+      this.logger.error('MyStages: failed to delete stage', error);
+      this.deleteError.set('Could not delete the stage.');
+    } finally {
+      this.deleting.set(false);
+    }
   }
 
   /** Closes the choice modal. */
@@ -152,7 +230,7 @@ export class MyStagesPage implements OnInit {
     this.createOpen.set(false);
   }
 
-  /** Opens the "import stage zip" modal. */
+  /** Opens the "import stage package" modal. */
   openImport(): void {
     this.choiceOpen.set(false);
     this.createError.set('');
@@ -160,7 +238,7 @@ export class MyStagesPage implements OnInit {
     this.importOpen.set(true);
   }
 
-  /** Closes the "import stage zip" modal. */
+  /** Closes the "import stage package" modal. */
   closeImport(): void {
     this.importOpen.set(false);
   }
@@ -207,7 +285,7 @@ export class MyStagesPage implements OnInit {
     }
   }
 
-  /** Handles a stage zip selection and imports it. */
+  /** Handles a `.fsastage` selection and imports it. */
   async onZipSelected(event: Event): Promise<void> {
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0];
@@ -217,20 +295,27 @@ export class MyStagesPage implements OnInit {
       return;
     }
 
-    this.busy.set(true);
     this.createError.set('');
+    // The file picker filters by extension, but a dropped/renamed file can still
+    // get through — accept the extension case-insensitively.
+    if (!/\.fsastage$/i.test(file.name)) {
+      this.createError.set('Please choose a stage package (.fsastage file).');
+      return;
+    }
+
+    this.busy.set(true);
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
       const stage = await this.stageService.importStageZip(bytes);
       if (!stage) {
         this.createError.set(
-          'That file is not a valid stage package (needs manifest.json and a .arc).',
+          'That file is not a valid .fsastage package (needs manifest.json and stage.arc).',
         );
         return;
       }
       this.closeImport();
     } catch (error) {
-      this.logger.error('MyStages: failed to import stage zip', error);
+      this.logger.error('MyStages: failed to import stage package', error);
       this.createError.set('Could not read the selected stage package.');
     } finally {
       this.busy.set(false);

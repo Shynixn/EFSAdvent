@@ -11,6 +11,7 @@
     <!-- Create-world card (always first) -->
     <article
       (click)="openCreate()"
+      (contextmenu)="$event.preventDefault()"
       class="group flex min-h-52 cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-slate-700 bg-slate-800/40 p-4 text-slate-400 transition hover:-translate-y-0.5 hover:border-indigo-400 hover:text-white"
     >
       <span
@@ -33,10 +34,78 @@
         [uuid]="world.id"
         [imageUrl]="worldmapUrl()"
         (cardClick)="openWorld(world)"
+        (cardContextMenu)="onWorldContextMenu($event, world)"
       />
     }
   </div>
 </div>
+
+<!-- World card context menu (right-click) -->
+@if (worldMenu(); as menu) {
+  <div
+    class="fixed z-40 min-w-36 overflow-hidden rounded-md border border-slate-700 bg-slate-800 py-1 text-sm shadow-xl"
+    [style.left.px]="menu.x"
+    [style.top.px]="menu.y"
+    role="menu"
+  >
+    @if (isDefaultWorld(menu.world)) {
+      <button
+        type="button"
+        role="menuitem"
+        disabled
+        title="The default world cannot be deleted"
+        class="block w-full cursor-not-allowed px-3 py-1.5 text-left text-xs text-slate-500"
+      >
+        Delete world
+      </button>
+    } @else {
+      <button
+        type="button"
+        role="menuitem"
+        (click)="openDelete(menu.world)"
+        class="block w-full cursor-pointer px-3 py-1.5 text-left text-xs text-red-300 transition hover:bg-red-500/20"
+      >
+        Delete world
+      </button>
+    }
+  </div>
+  <!-- Backdrop: closes the menu on any outside click/right-click -->
+  <div
+    class="fixed inset-0 z-30"
+    (click)="closeWorldMenu()"
+    (contextmenu)="$event.preventDefault(); closeWorldMenu()"
+  ></div>
+}
+
+<!-- Delete-world confirmation -->
+<app-modal
+  [open]="deleteTarget() !== null"
+  title="Delete world"
+  maxWidth="max-w-sm"
+  (closed)="closeDelete()"
+>
+  <div class="flex flex-col gap-4">
+    <p class="text-sm text-slate-300">
+      Delete <span class="font-semibold text-white">{{ deleteTarget()?.name }}</span
+      >? This permanently removes the world file and cannot be undone.
+    </p>
+    <p class="rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2 text-xs text-slate-400">
+      Your stages are kept — deleting a world only removes the world itself, not the stages it
+      references.
+    </p>
+    @if (deleteError()) {
+      <p class="text-sm text-red-400">{{ deleteError() }}</p>
+    }
+    <div class="flex justify-end gap-2">
+      <app-button variant="ghost" color="slate" [disabled]="deleting()" (clicked)="closeDelete()">
+        Cancel
+      </app-button>
+      <app-button variant="danger" color="red" [disabled]="deleting()" (clicked)="confirmDelete()">
+        {{ deleting() ? 'Deleting…' : 'Delete' }}
+      </app-button>
+    </div>
+  </div>
+</app-modal>
 
 <!-- Create world modal -->
 <app-modal [open]="createOpen()" title="New World" maxWidth="max-w-md" (closed)="closeCreate()">

@@ -34,6 +34,16 @@
       </app-button>
       <app-button
         variant="primary"
+        color="slate"
+        [disabled]="!canExportPackage()"
+        title="Save, then download this stage as a .fsastage package (stage.arc + manifest.json)"
+        [icon]="'M5 2a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7.414A2 2 0 0016.414 6L12 1.586A2 2 0 0010.586 1H5zm0 2h5v3.5a1 1 0 001 1h3.5V16H5V4zm4 6a1 1 0 10-2 0v2.586l-.793-.793a1 1 0 10-1.414 1.414l2.5 2.5a1 1 0 001.414 0l2.5-2.5a1 1 0 10-1.414-1.414L9 12.586V10z'"
+        (clicked)="saveAndExportStageFile()"
+      >
+        {{ exportingStage() ? 'Exporting…' : 'Export Stage File' }}
+      </app-button>
+      <app-button
+        variant="primary"
         color="emerald"
         [disabled]="!canSaveAndExport()"
         [title]="

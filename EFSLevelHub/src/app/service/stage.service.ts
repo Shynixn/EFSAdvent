@@ -4,10 +4,21 @@ import { FSALibService } from './fsalib.service';
 import { LoggingService } from './logging.service';
 import { OpfsCacheService } from './opfs-cache.service';
 import { sha256Hex } from './hash.util';
+import { createZip } from './zip.util';
+import { stageRoomPreviewPath, stageThumbnailPath } from './stage-preview.service';
 import { RoomSmartObjects } from '../entity/smartobject.entity';
 
 /** Key under which stage ids are stored in the editor's `userdata.json`. */
 const STAGES_KEY = 'stages';
+
+/**
+ * Upper bound of cached per-room preview files removed with a stage.
+ *
+ * A room index is a byte in the map layout (0-127 at most; see
+ * `MapLayout.MAX_Rooms`), so this covers every cacheable room. Deleting a
+ * missing file is a no-op, so the exact count does not matter.
+ */
+const MAX_PREVIEW_ROOMS = 128;
 
 /**
  * Ordered list of default stage archive names, exactly as they appear in the
@@ -231,6 +242,44 @@ export class StageService {
     return this.stageList().find((stage) => stage.id === id);
   }
 
+  /**
+   * Deletes a stage: removes its definition file and archive, drops it from
+   * `userdata.json`, drops its cached previews and refreshes the in-memory
+   * list.
+   *
+   * Worlds are NOT modified here — a world slot that referenced this stage is
+   * left pointing at a missing id, which the world page already handles. Callers
+   * that open the stage should close its tabs first.
+   *
+   * @param id Stage id to delete.
+   * @returns `true` when the stage was removed.
+   */
+  async deleteStage(id: string): Promise<boolean> {
+    if (!this.getById(id)) {
+      this.logger.warn(`StageService: cannot delete unknown stage "${id}".`);
+      return false;
+    }
+
+    await this.editor.deleteEditorFile(stageFilePath(id));
+    await this.editor.deleteEditorFile(stageArcFilePath(id));
+    // Drop the cached previews for this stage: the thumbnail plus every room
+    // PNG (one per room; removing a missing index is a no-op).
+    await this.editor.deleteEditorFile(stageThumbnailPath(id));
+    for (let room = 0; room < MAX_PREVIEW_ROOMS; room++) {
+      await this.editor.deleteEditorFile(stageRoomPreviewPath(id, room));
+    }
+
+    const refs = await this.editor.get<{ id: string; arcFileName?: string }[]>(STAGES_KEY, []);
+    await this.editor.set(
+      STAGES_KEY,
+      (Array.isArray(refs) ? refs : []).filter((ref) => ref?.id !== id),
+    );
+
+    this.stageList.set(this.stageList().filter((stage) => stage.id !== id));
+    this.logger.info(`StageService: deleted stage "${id}".`);
+    return true;
+  }
+
   /** Human-readable author of a stage, applying the default fallback. */
   authorOf(stage: StageFile | undefined): string {
     return stage?.author?.trim() || DEFAULT_STAGE_AUTHOR;
@@ -426,14 +475,59 @@ export class StageService {
   }
 
   /**
-   * Imports a shared stage package (a ZIP containing `manifest.json` — the
-   * stage definition renamed — and a `stage.arc`).
+   * Builds a shareable stage package (`.fsastage`).
    *
-   * The manifest provides the display name and author (falling back when
-   * absent); a fresh id is always assigned so imports never clash with existing
-   * stages. The archive is stored verbatim as the stage's own `.arc`.
+   * The package is a ZIP containing exactly two entries:
+   *  - `stage.arc` — the stage's archive, byte-for-byte as stored by the editor,
+   *  - `manifest.json` — the stage's definition file (name, author, original
+   *    index, …), i.e. the JSON persisted at `/editor/stage/<uuid>.json`.
    *
-   * @param zipBytes Raw bytes of the uploaded ZIP.
+   * It is deliberately the same shape {@link importStageZip} accepts, so an
+   * exported stage can be re-imported (as a new stage) without any conversion.
+   *
+   * @param id Stage to export.
+   * @returns The ZIP bytes and the suggested file name, or `null` when the
+   *          stage or its archive is missing.
+   */
+  async exportStagePackage(
+    id: string,
+  ): Promise<{ bytes: Uint8Array; fileName: string } | null> {
+    const file = await this.readStageFile(id);
+    if (!file) {
+      this.logger.warn(`StageService: cannot export unknown stage "${id}".`);
+      return null;
+    }
+    const arc = await this.editor.readEditorFile(stageArcFilePath(id));
+    if (!arc) {
+      this.logger.warn(`StageService: stage "${id}" has no archive to export.`);
+      return null;
+    }
+
+    const manifest = new TextEncoder().encode(
+      JSON.stringify({ ...file, arcFile: await this.arcFileNameOf(id) }, null, 2),
+    );
+    const bytes = createZip([
+      { path: 'stage.arc', data: arc },
+      { path: 'manifest.json', data: manifest },
+    ]);
+    const base = (file.name || 'stage').trim().replace(/[^\w.-]+/g, '_') || 'stage';
+    this.logger.info(
+      `StageService: exported stage "${file.name}" (${id}) as ${base}.fsastage ` +
+        `(${bytes.byteLength} byte(s)).`,
+    );
+    return { bytes, fileName: `${base}.fsastage` };
+  }
+
+  /**
+   * Imports a stage package (`.fsastage`): a ZIP containing `manifest.json` —
+   * the stage definition — and `stage.arc`.
+   *
+   * The stage keeps the **id recorded in the manifest**, so an exported stage
+   * keeps its identity. If that id already exists locally (re-importing a
+   * package into the same install), a fresh id is generated so the existing
+   * stage is never overwritten.
+   *
+   * @param zipBytes Raw bytes of the uploaded package.
    * @returns The imported stage, or `null` when the package is invalid.
    */
   async importStageZip(zipBytes: Uint8Array): Promise<StageFile | null> {
@@ -451,28 +545,49 @@ export class StageService {
       return null;
     }
 
-    const arcEntry = entries.find((entry) => /\.arc$/i.test(entry.path));
+    // Prefer the canonical `stage.arc`; fall back to the first .arc entry so
+    // packages produced by other tools still import.
+    const arcEntry =
+      entries.find((entry) => /(^|\/)stage\.arc$/i.test(entry.path)) ??
+      entries.find((entry) => /\.arc$/i.test(entry.path));
     if (!arcEntry) {
       this.logger.warn('StageService: stage zip has no .arc file.');
       return null;
     }
 
     const manifest = this.parseManifest(manifestEntry.data);
-    const id = crypto.randomUUID();
+    // Re-use the id recorded in the manifest, so an exported stage keeps its
+    // identity across machines and exports. A fresh id is only generated when
+    // the manifest has none or when that id ALREADY EXISTS here (re-importing
+    // the same package locally must not overwrite the existing stage).
+    const existing = new Set(this.stageList().map((entry) => entry.id));
+    const manifestId = manifest?.id?.trim();
+    const id = manifestId && !existing.has(manifestId) ? manifestId : crypto.randomUUID();
+    if (manifestId && id !== manifestId) {
+      this.logger.warn(
+        `StageService: stage id "${manifestId}" already exists — importing as a new stage "${id}".`,
+      );
+    }
 
     const file: StageFile = {
       id,
       name: manifest?.name?.trim() || 'Imported Stage',
       author: manifest?.author?.trim() || DEFAULT_STAGE_CREATOR_AUTHOR,
       version: STAGE_FILE_VERSION,
-      creationDate: formatIsoDate(new Date()),
+      creationDate: manifest?.creationDate || formatIsoDate(new Date()),
       originalIndex: manifest?.originalIndex,
       originalHash: await sha256Hex(arcEntry.data),
+      rooms: manifest?.rooms,
     };
 
     await this.editor.writeEditorFile(stageArcFilePath(id), arcEntry.data);
     await this.writeStageFile(file);
-    await this.addStageRef(id);
+    // Register the archive's original file name (e.g. `boss010.arc`), so a stage
+    // that arrived via import can be exported into an ISO like any other.
+    await this.addStageRef(
+      id,
+      manifest?.arcFile || (arcEntry.path.split('/').pop() ?? `${id}.arc`),
+    );
     this.stageList.set([...this.stageList(), file]);
     this.logger.info(`StageService: imported stage "${file.name}" (${id}).`);
     return file;
@@ -486,26 +601,56 @@ export class StageService {
     );
   }
 
+  /**
+   * The archive's original file name (e.g. `boss010.arc`) recorded in
+   * `userdata.json` for a stage, or undefined when it is unknown (e.g. a stage
+   * created locally, whose archive is named after its uuid).
+   */
+  private async arcFileNameOf(id: string): Promise<string | undefined> {
+    const refs = await this.editor.get<{ id: string; arcFileName?: string }[]>(STAGES_KEY, []);
+    return (Array.isArray(refs) ? refs : []).find((ref) => ref?.id === id)?.arcFileName;
+  }
+
   /** Appends a newly created/imported stage id to `userdata.json`. */
-  private async addStageRef(id: string): Promise<void> {
-    const refs = await this.editor.get<{ id: string }[]>(STAGES_KEY, []);
-    const nextRefs = [...(Array.isArray(refs) ? refs : []), { id }];
+  private async addStageRef(id: string, arcFileName?: string): Promise<void> {
+    const refs = await this.editor.get<{ id: string; arcFileName?: string }[]>(STAGES_KEY, []);
+    const entry: { id: string; arcFileName?: string } = { id };
+    if (arcFileName) {
+      entry.arcFileName = arcFileName;
+    }
+    const nextRefs = [...(Array.isArray(refs) ? refs : []), entry];
     await this.editor.set(STAGES_KEY, nextRefs);
   }
 
   /** Parses a package's `manifest.json`, tolerating partial/renamed shapes. */
   private parseManifest(bytes: Uint8Array): {
+    id?: string;
     name?: string;
     author?: string;
+    creationDate?: string;
     originalIndex?: number;
+    originalHash?: string;
+    arcFile?: string;
+    rooms?: RoomSmartObjects[];
   } | null {
     try {
       const raw = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
+      const text = (key: string): string | undefined =>
+        typeof raw[key] === 'string' ? (raw[key] as string) : undefined;
       return {
-        name: typeof raw['name'] === 'string' ? (raw['name'] as string) : undefined,
-        author: typeof raw['author'] === 'string' ? (raw['author'] as string) : undefined,
+        id: text('id'),
+        name: text('name'),
+        author: text('author'),
+        creationDate: text('creationDate'),
         originalIndex:
           typeof raw['originalIndex'] === 'number' ? (raw['originalIndex'] as number) : undefined,
+        // A re-imported export carries the stage's smart-object records and the
+        // hash of the archive it was exported from. The hash is dropped (the
+        // imported archive is re-hashed), but the room records are preserved so
+        // the imported stage keeps its placements.
+        originalHash: text('originalHash'),
+        arcFile: text('arcFile'),
+        rooms: Array.isArray(raw['rooms']) ? (raw['rooms'] as RoomSmartObjects[]) : undefined,
       };
     } catch {
       this.logger.warn('StageService: manifest.json is not valid JSON.');

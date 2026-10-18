@@ -11,6 +11,7 @@
     <!-- Add-stage card (always first) -->
     <article
       (click)="openChoice()"
+      (contextmenu)="$event.preventDefault()"
       class="group flex min-h-52 cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-slate-700 bg-slate-800/40 p-4 text-slate-400 transition hover:-translate-y-0.5 hover:border-indigo-400 hover:text-white"
     >
       <span
@@ -34,10 +35,62 @@
         [imageUrl]="previewFor(stage)"
         [imageFit]="previewFit(stage)"
         (cardClick)="openStage(stage)"
+        (cardContextMenu)="onStageContextMenu($event, stage)"
       />
     }
   </div>
 </div>
+
+<!-- Stage card context menu (right-click) -->
+@if (stageMenu(); as menu) {
+  <div
+    class="fixed z-40 min-w-36 overflow-hidden rounded-md border border-slate-700 bg-slate-800 py-1 text-sm shadow-xl"
+    [style.left.px]="menu.x"
+    [style.top.px]="menu.y"
+    role="menu"
+  >
+    <button
+      type="button"
+      role="menuitem"
+      (click)="openDelete(menu.stage)"
+      class="block w-full cursor-pointer px-3 py-1.5 text-left text-xs text-red-300 transition hover:bg-red-500/20"
+    >
+      Delete stage
+    </button>
+  </div>
+  <!-- Backdrop: closes the menu on any outside click/right-click -->
+  <div
+    class="fixed inset-0 z-30"
+    (click)="closeStageMenu()"
+    (contextmenu)="$event.preventDefault(); closeStageMenu()"
+  ></div>
+}
+
+<!-- Delete-stage confirmation -->
+<app-modal
+  [open]="deleteTarget() !== null"
+  title="Delete stage"
+  maxWidth="max-w-sm"
+  (closed)="closeDelete()"
+>
+  <div class="flex flex-col gap-4">
+    <p class="text-sm text-slate-300">
+      Delete <span class="font-semibold text-white">{{ deleteTarget()?.name }}</span
+      >? This permanently removes the stage file and its archive, and cannot be undone.
+    </p>
+    @if (deleteError()) {
+      <p class="text-sm text-red-400">{{ deleteError() }}</p>
+    }
+    <div class="flex justify-end gap-2">
+      <app-button variant="ghost" color="slate" [disabled]="deleting()" (clicked)="closeDelete()">
+        Cancel
+      </app-button>
+      <app-button variant="danger" color="red" [disabled]="deleting()" (clicked)="confirmDelete()">
+        {{ deleting() ? 'Deleting…' : 'Delete' }}
+      </app-button>
+    </div>
+  </div>
+</app-modal>
 
 <!-- Modal 1: choose create or import -->
 <app-modal [open]="choiceOpen()" title="New Stage" maxWidth="max-w-md" (closed)="closeChoice()">
@@ -118,7 +171,7 @@
   </div>
 </app-modal>
 
-<!-- Modal 2b: import stage zip -->
+<!-- Modal 2b: import stage package -->
 <app-modal [open]="importOpen()" title="Import Stage" maxWidth="max-w-lg" (closed)="closeImport()">
   <div class="flex flex-col gap-4">
     <div class="space-y-2">
@@ -126,8 +179,10 @@
         Stage package
       </span>
       <p class="text-sm text-slate-400">
-        A zip containing a <code class="text-slate-300">manifest.json</code> and a
-        <code class="text-slate-300">stage.arc</code>.
+        A <code class="text-slate-300">.fsastage</code> file — a stage package containing a
+        <code class="text-slate-300">manifest.json</code> and a
+        <code class="text-slate-300">stage.arc</code>. Re-importing an exported stage always
+        creates a new copy.
       </p>
       <label
         class="flex cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-700 bg-slate-800/40 px-4 py-6 text-sm text-slate-400 transition hover:border-indigo-400 hover:text-white"
@@ -140,10 +195,10 @@
             d="M3 15a1 1 0 011 1v1h12v-1a1 1 0 112 0v1a2 2 0 01-2 2H5a2 2 0 01-2-2v-1a1 1 0 011-1z"
           />
         </svg>
-        <span>Choose a .zip file</span>
+        <span>Choose a .fsastage file</span>
         <input
           type="file"
-          accept=".zip,application/zip"
+          accept=".fsastage"
           class="hidden"
           (change)="onZipSelected($event)"
         />
