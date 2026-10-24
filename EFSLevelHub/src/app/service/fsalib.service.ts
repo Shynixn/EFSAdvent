@@ -35,6 +35,8 @@ export interface StageAssetsFile {
   Stages: Record<string, StageInfo>;
   Actors: Record<string, ActorDefinition>;
   TileActors: TileActorDto[];
+  /** Background music names keyed by song id (`Map.BackgroundMusicId`). */
+  Songs?: Record<string, string>;
 }
 import {
   ArchivePathResolver,
@@ -55,6 +57,7 @@ interface DotnetExports {
         RetargetStageIndex(arcData: Uint8Array, targetIndex: number): Uint8Array;
         MergeStageContent(targetArcData: Uint8Array, sourceArcData: Uint8Array): Uint8Array;
         SetStageTileSheet(arcData: Uint8Array, tileSheetId: number): Uint8Array;
+        SetStageBackgroundMusic(arcData: Uint8Array, musicId: number): Uint8Array;
         SetRoomLayer(
           arcData: Uint8Array,
           roomIndex: number,
@@ -78,6 +81,7 @@ interface DotnetExports {
         EnsureAssets(): string;
         GetStageAssets(): string;
         GetTilesets(): string;
+        GetSongs(): string;
         GetStages(): string;
         GetActors(): string;
         GetTileActors(): string;
@@ -211,6 +215,9 @@ export class FSALibService {
   /** Cached tile → actor mapping promise (`tileproperties.json`). */
   private tileActorsPromise: Promise<TileActorDefinition[]> | null = null;
 
+  /** Cached background-music list promise (`songs.json`). */
+  private songsPromise: Promise<Record<string, string>> | null = null;
+
   /**
    * Cached `data.arc` bytes. The archive is tens of MB and is needed by every
    * stage render, so it is read from OPFS once and reused.
@@ -307,6 +314,26 @@ export class FSALibService {
   async setStageTileSheet(arcData: Uint8Array, tileSheetId: number): Promise<Uint8Array | null> {
     const fsa = await this.getFsa();
     const result = fsa.SetStageTileSheet(arcData, tileSheetId);
+    return result && result.byteLength > 0 ? result : null;
+  }
+
+  /**
+   * Sets a stage's background music (`Map.BackgroundMusicId`) and re-serializes
+   * the archive.
+   *
+   * The music id lives in the map's CSV header, and the game plays the
+   * single-player map's value, so both maps are updated wasm-side.
+   *
+   * @param arcData Raw bytes of the stage archive.
+   * @param musicId New background music id.
+   * @returns The re-serialized archive bytes, or null on failure.
+   */
+  async setStageBackgroundMusic(
+    arcData: Uint8Array,
+    musicId: number,
+  ): Promise<Uint8Array | null> {
+    const fsa = await this.getFsa();
+    const result = fsa.SetStageBackgroundMusic(arcData, musicId);
     return result && result.byteLength > 0 ? result : null;
   }
 
@@ -1012,6 +1039,7 @@ export class FSALibService {
       Stages: parsed.Stages ?? {},
       Actors: parsed.Actors ?? {},
       TileActors: parsed.TileActors ?? [],
+      Songs: parsed.Songs ?? {},
     };
 
     await this.editor.writeEditorFile(
@@ -1031,6 +1059,7 @@ export class FSALibService {
     this.stagesPromise = Promise.resolve(assets.Stages);
     this.actorsPromise = Promise.resolve(assets.Actors);
     this.tileActorsPromise = Promise.resolve(this.buildTileActorList(assets.TileActors));
+    this.songsPromise = Promise.resolve(assets.Songs ?? {});
     return assets;
   }
 
@@ -1051,6 +1080,7 @@ export class FSALibService {
         Stages: parsed.Stages ?? {},
         Actors: parsed.Actors,
         TileActors: parsed.TileActors ?? [],
+        Songs: parsed.Songs ?? {},
       };
     } catch (error) {
       this.logger.warn(`FSALib: failed to parse /editor/${STAGE_ASSETS_FILE}`, error);
@@ -1102,6 +1132,33 @@ export class FSALibService {
       }))
       .filter((theme) => includeDevelopment || !theme.development)
       .sort((a, b) => a.index - b.index);
+  }
+
+  /**
+   * The background music names from FSALib's `songs.json`, keyed by song id.
+   *
+   * A stage's `Map.BackgroundMusicId` is an index into this list; the room
+   * editor's music dropdown is built from it.
+   */
+  async loadSongs(): Promise<Record<string, string>> {
+    if (!this.songsPromise) {
+      this.songsPromise = this.stageAssets().then(async (assets) => {
+        const cached = assets.Songs ?? {};
+        if (Object.keys(cached).length > 0) {
+          return cached;
+        }
+        // Catalogs written before songs were included have no `Songs` key, so
+        // ask wasm directly rather than showing an empty dropdown.
+        try {
+          const fsa = await this.getFsa();
+          const songs = JSON.parse(fsa.GetSongs()) as Record<string, string> & { error?: string };
+          return songs.error ? {} : songs;
+        } catch {
+          return {};
+        }
+      });
+    }
+    return this.songsPromise;
   }
 
   /**

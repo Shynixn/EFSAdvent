@@ -219,9 +219,42 @@ public static partial class FsaInterop
     }
 
     /// <summary>
-    /// Replaces one room layer's tiles in a stage archive and re-serializes it.
+    /// Sets a stage's background music and re-serializes the archive.
     /// </summary>
     /// <remarks>
+    /// Like the tileset, the music id lives in the map's CSV header. Both
+    /// <c>Map</c> (<c>mapNNN.csv</c>) and <c>MapSingleplayer</c>
+    /// (<c>mapNNN_1.csv</c>, the one the game uses in single-player) are
+    /// updated, otherwise the change has no effect in-game.
+    /// </remarks>
+    /// <param name="arcData">Raw bytes of the stage archive.</param>
+    /// <param name="musicId">New background music id (<c>Map.BackgroundMusicId</c>).</param>
+    /// <returns>The re-serialized archive bytes, or an empty array on failure.</returns>
+    [JSExport]
+    public static byte[] SetStageBackgroundMusic(byte[] arcData, int musicId)
+    {
+        using var trace = Trace("SetStageBackgroundMusic", $"(music {musicId})");
+        try
+        {
+            using var stream = new MemoryStream(arcData, writable: false);
+            using var rarc = new Rarc(stream);
+            using var stage = new Stage(rarc);
+            stage.Map.BackgroundMusicId = musicId;
+            if (stage.MapSingleplayer != null)
+            {
+                stage.MapSingleplayer.BackgroundMusicId = musicId;
+            }
+            return SerializeStage(stage);
+        }
+        catch
+        {
+            return Array.Empty<byte>();
+        }
+    }
+
+    /// <summary>
+    /// Replaces one room layer's tiles in a stage archive and re-serializes it.
+    /// </summary>
     /// The editable room canvas paints individual tiles, so writing back just the
     /// affected layer (rather than the whole stage graph) keeps the round-trip
     /// small and avoids clobbering any data the browser does not model. The
@@ -660,6 +693,32 @@ public static partial class FsaInterop
     }
 
     /// <summary>
+    /// Returns the song list loaded by FSALib (<c>Assets.Songs</c>) as JSON,
+    /// keyed by song id.
+    ///
+    /// Drives the room editor's background-music dropdown: a stage's
+    /// <c>Map.BackgroundMusicId</c> is one of these ids.
+    /// </summary>
+    [JSExport]
+    public static string GetSongs()
+    {
+        using var trace = Trace("GetSongs");
+        try
+        {
+            var map = new Dictionary<string, string>();
+            foreach (var pair in FSALib.Assets.Songs)
+            {
+                map[pair.Key.ToString()] = pair.Value;
+            }
+            return JsonSerializer.Serialize(map, JsonOptions);
+        }
+        catch (Exception ex)
+        {
+            return JsonSerializer.Serialize(new { error = ex.Message }, JsonOptions);
+        }
+    }
+
+    /// <summary>
     /// Returns the stage definitions loaded by FSALib (<c>Assets.Stages</c>) as
     /// JSON, keyed by stage id (e.g. <c>boss010</c>).
     ///
@@ -788,7 +847,7 @@ public static partial class FsaInterop
 
             // Each accessor below is a pure projection over the in-memory
             // Assets caches, so the cost is only serialization.
-            long tilesetsMs, stagesMs, actorsMs, tileActorsMs;
+            long tilesetsMs, stagesMs, actorsMs, tileActorsMs, songsMs;
             var timer = System.Diagnostics.Stopwatch.StartNew();
             string tilesetsJson = GetTilesets();
             tilesetsMs = timer.ElapsedMilliseconds;
@@ -805,10 +864,15 @@ public static partial class FsaInterop
             string tileActorsJson = GetTileActors();
             tileActorsMs = timer.ElapsedMilliseconds;
 
+            timer.Restart();
+            string songsJson = GetSongs();
+            songsMs = timer.ElapsedMilliseconds;
+
             if (tilesetsJson.Contains("\"error\"") ||
                 stagesJson.Contains("\"error\"") ||
                 actorsJson.Contains("\"error\"") ||
-                tileActorsJson.Contains("\"error\""))
+                tileActorsJson.Contains("\"error\"") ||
+                songsJson.Contains("\"error\""))
             {
                 return JsonSerializer.Serialize(
                     new { error = "One or more FSALib accessors returned an error." },
@@ -816,7 +880,7 @@ public static partial class FsaInterop
             }
 
             Log($"  tilesets={tilesetsMs}ms stages={stagesMs}ms " +
-                $"actors={actorsMs}ms tileActors={tileActorsMs}ms");
+                $"actors={actorsMs}ms tileActors={tileActorsMs}ms songs={songsMs}ms");
 
             // Embed the already-serialized fragments instead of re-serializing
             // the DTOs, so nothing is parsed twice.
@@ -824,7 +888,8 @@ public static partial class FsaInterop
                 "{\"Tilesets\":" + tilesetsJson +
                 ",\"Stages\":" + stagesJson +
                 ",\"Actors\":" + actorsJson +
-                ",\"TileActors\":" + tileActorsJson + "}";
+                ",\"TileActors\":" + tileActorsJson +
+                ",\"Songs\":" + songsJson + "}";
         }
         catch (Exception ex)
         {

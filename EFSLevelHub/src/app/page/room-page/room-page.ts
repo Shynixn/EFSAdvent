@@ -28,6 +28,7 @@ import { StageEditorService } from '../../service/stage-editor.service';
 import { StagePreviewService } from '../../service/stage-preview.service';
 import { StageRoomService } from '../../service/stage-room.service';
 import { TilesetThemeService } from '../../service/tileset-theme.service';
+import { BackgroundMusicService } from '../../service/background-music.service';
 import { UnsavedChangesService } from '../../service/unsaved-changes.service';
 import {
   IsoBuilderService,
@@ -102,6 +103,7 @@ export class RoomPage implements OnInit, OnDestroy {
   private readonly stagePreview = inject(StagePreviewService);
   private readonly stageRoom = inject(StageRoomService);
   private readonly themeService = inject(TilesetThemeService);
+  private readonly musicService = inject(BackgroundMusicService);
   private readonly unsaved = inject(UnsavedChangesService);
   private readonly isoBuilder = inject(IsoBuilderService);
   private readonly isoSource = inject(IsoSourceService);
@@ -315,6 +317,15 @@ export class RoomPage implements OnInit, OnDestroy {
     return match?.name ?? `Tileset ${index}`;
   });
 
+  /** Available background music tracks (stage-level setting). */
+  readonly musicTracks = this.musicService.tracks;
+  /** Whether the track list is still loading. */
+  readonly musicTracksLoading = this.musicService.tracksLoading;
+  /** Active background music id of the stage (shared across open rooms). */
+  readonly musicId = computed(() => this.musicService.selectedId(this.stageId()));
+  /** Human-readable name of the stage's current background music. */
+  readonly musicName = computed(() => this.musicService.musicName(this.stageId()));
+
   /** Header title for the room. */
   readonly headerTitle = computed(() => `${this.stageName()} · Room ${this.roomIndex()}`);
 
@@ -466,6 +477,10 @@ export class RoomPage implements OnInit, OnDestroy {
       await this.themeService.ensureLoaded();
       themeTimer.stop('RoomPage:');
 
+      // Seed the shared background-music service with the stage's current track.
+      this.musicService.setSelected(stageId, loaded.data.Map.BackgroundMusicId);
+      void this.musicService.ensureLoaded();
+
       const room = loaded.data.Rooms[roomIndex] ?? null;
       if (!room) {
         this.loadError.set(`Room ${roomIndex} does not exist in this stage.`);
@@ -581,6 +596,11 @@ export class RoomPage implements OnInit, OnDestroy {
     this.stageData.set(stage.data);
     this.renderer.set(stage.renderer);
     this.room.set(stage.data.Rooms[roomIndex] ?? null);
+    // The archive was re-parsed, so re-seed the stage-level settings from it.
+    // Without this the per-stage selected values keep shadowing the reloaded
+    // `Map` fields (see `BackgroundMusicService.selectedId`).
+    this.themeService.setSelected(stageId, stage.data.Map.TileSheetId);
+    this.musicService.setSelected(stageId, stage.data.Map.BackgroundMusicId);
   }
 
   /** Records a tile edit so the layer is written back on save. */
@@ -1055,6 +1075,16 @@ export class RoomPage implements OnInit, OnDestroy {
       this.roomCanvas()?.redrawAll();
     }
     this.closeTheme();
+  }
+
+  /**
+   * Applies a background music track to the stage. Written to the shared stage
+   * graph (`Map` + `MapSingleplayer`), so it is serialized on the next save.
+   */
+  selectMusic(id: number): void {
+    if (this.musicService.applyMusic(this.stageId(), id)) {
+      this.stageEditor.setDirty(this.stageId(), true);
+    }
   }
 
   /**

@@ -175,6 +175,18 @@ export class StageEditorService {
       return null;
     }
 
+    // The background music lives in the same map CSV headers, so it needs its
+    // own re-serialization pass (`Map` + `MapSingleplayer`).
+    const musicBytes = await this.fsaLib.setStageBackgroundMusic(
+      bytes,
+      loaded.data.Map.BackgroundMusicId,
+    );
+    if (!musicBytes) {
+      this.logger.error(`StageEditor: failed to serialize stage "${stageId}" (background music).`);
+      return null;
+    }
+    bytes = musicBytes;
+
     // Write back each edited room layer, chaining the re-serialized archive.
     for (const { roomIndex, layerIndex } of dirtyLayers) {
       const room = loaded.data.Rooms[roomIndex];

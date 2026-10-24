@@ -1,6 +1,8 @@
 import { Component, EventEmitter, Input, Output, signal } from '@angular/core';
 import { MapGridComponent, RoomGridAction } from '../map-grid/map-grid.component';
+import { DropdownComponent, DropdownOption } from '../dropdown/dropdown.component';
 import { StageData } from '../../entity/fsalib.entity';
+import { BackgroundMusic } from '../../service/background-music.service';
 
 /**
  * SystemColumnComponent
@@ -35,7 +37,7 @@ import { StageData } from '../../entity/fsalib.entity';
  */
 @Component({
   selector: 'app-system-column',
-  imports: [MapGridComponent],
+  imports: [MapGridComponent, DropdownComponent],
   templateUrl: './system-column.component.html',
   host: { class: 'block h-full w-full' },
 })
@@ -46,6 +48,15 @@ export class SystemColumnComponent {
   @Input() selectedRoom: number | null = null;
   /** Display name of the stage's current tileset theme. */
   @Input() themeName = '';
+
+  /** Selectable background music tracks (stage-level setting). */
+  @Input() tracks: BackgroundMusic[] = [];
+  /** Song id currently selected for the stage. */
+  @Input() musicId = 0;
+  /** Display name of the stage's current background music. */
+  @Input() musicName = '';
+  /** Whether the track list is still loading. */
+  @Input() tracksLoading = false;
   /** Pretty-printed JSON of the room's current in-memory data (null while loading). */
   @Input() roomJson: string | null = null;
   /**
@@ -69,6 +80,11 @@ export class SystemColumnComponent {
   /** Whether the Debug section is expanded. */
   readonly debugOpen = signal(false);
 
+  /** Background music tracks projected into the dropdown's option shape. */
+  get musicOptions(): DropdownOption[] {
+    return this.tracks.map((track) => ({ value: track.id, label: track.name }));
+  }
+
   /** Room index currently copied (grid context menu), or null. */
   @Input() copiedRoom: number | null = null;
 
@@ -79,6 +95,8 @@ export class SystemColumnComponent {
   @Output() roomAction = new EventEmitter<RoomGridAction>();
   /** Emits when the user opens the theme picker. */
   @Output() themeClicked = new EventEmitter<void>();
+  /** Emits the newly selected background music id. */
+  @Output() musicChange = new EventEmitter<number>();
   /** Emits the new GBA-layer toggle state. */
   @Output() gbaChange = new EventEmitter<boolean>();
   /** Emits the new top-layer toggle state. */

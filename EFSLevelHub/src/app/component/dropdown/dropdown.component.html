@@ -1,0 +1,71 @@
+@if (open() && !externalPicker) {
+  <!-- Backdrop: closes the inline panel on any outside interaction. -->
+  <div class="fixed inset-0 z-10" (click)="close()" (contextmenu)="close()"></div>
+}
+
+<div class="relative">
+  <button
+    type="button"
+    (click)="activate()"
+    [disabled]="disabled"
+    class="flex w-full cursor-pointer items-center justify-between gap-2 rounded-lg border border-slate-700 bg-slate-800/70 px-3 py-2 text-left transition hover:border-indigo-400 hover:bg-slate-700/60 disabled:cursor-not-allowed disabled:opacity-60"
+    [title]="displayText"
+    [attr.aria-haspopup]="externalPicker ? 'dialog' : 'listbox'"
+    [attr.aria-expanded]="open()"
+  >
+    <span class="flex min-w-0 flex-col">
+      <span class="text-xs text-slate-400">{{ label }}</span>
+      <span class="truncate text-sm text-slate-100">{{ displayText }}</span>
+    </span>
+    <svg
+      class="h-4 w-4 shrink-0 text-slate-400 transition-transform"
+      [class.rotate-180]="open()"
+      viewBox="0 0 20 20"
+      fill="currentColor"
+      aria-hidden="true"
+    >
+      <path
+        fill-rule="evenodd"
+        d="M5.23 7.21a.75.75 0 011.06.02L10 11.17l3.71-3.94a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z"
+        clip-rule="evenodd"
+      />
+    </svg>
+  </button>
+
+  @if (open() && !externalPicker) {
+    <ul
+      role="listbox"
+      class="absolute left-0 right-0 z-20 mt-1 max-h-64 overflow-y-auto rounded-lg border border-slate-700 bg-slate-800 py-1 shadow-xl"
+    >
+      @for (option of options; track option.value) {
+        <li role="option" [attr.aria-selected]="option.value === value">
+          <button
+            type="button"
+            (click)="pick(option)"
+            class="flex w-full cursor-pointer items-center justify-between gap-2 px-3 py-1.5 text-left text-sm transition"
+            [class.bg-indigo-500/20]="option.value === value"
+            [class.text-white]="option.value === value"
+            [class.text-slate-300]="option.value !== value"
+            [class.hover:bg-slate-700]="option.value !== value"
+          >
+            <span class="truncate">{{ option.label }}</span>
+            @if (option.value === value) {
+              <svg
+                class="h-4 w-4 shrink-0 text-indigo-300"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+                aria-hidden="true"
+              >
+                <path
+                  fill-rule="evenodd"
+                  d="M16.7 5.3a1 1 0 010 1.4l-7.5 7.5a1 1 0 01-1.4 0L3.3 9.7a1 1 0 111.4-1.4l3.8 3.8 6.8-6.8a1 1 0 011.4 0z"
+                  clip-rule="evenodd"
+                />
+              </svg>
+            }
+          </button>
+        </li>
+      }
+    </ul>
+  }
+</div>
