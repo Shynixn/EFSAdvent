@@ -87,6 +87,8 @@ export class SystemColumnComponent {
 
   /** Room index currently copied (grid context menu), or null. */
   @Input() copiedRoom: number | null = null;
+  /** Whether the clipboard holds a room from any stage (drives the Paste item). */
+  @Input() hasClipboard = false;
 
   /** Emits the clicked room index. */
   @Output() roomSelected = new EventEmitter<number>();

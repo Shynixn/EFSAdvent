@@ -1,6 +1,7 @@
 import { Routes } from '@angular/router';
 import { LevelExplorerPage } from './page/level-explorer-page/level-explorer-page';
 import { requiresGameFilesGuard } from './guard/requires-game-files.guard';
+import { pendingChangesGuard } from './guard/pending-changes.guard';
 
 export const routes: Routes = [
   {
@@ -26,12 +27,14 @@ export const routes: Routes = [
     loadComponent: () => import('./page/stage-page/stage-page').then((m) => m.StagePage),
     title: 'Stage',
     canActivate: [requiresGameFilesGuard],
+    canDeactivate: [pendingChangesGuard],
   },
   {
     path: 'my-stages/:stageId/rooms/:roomIndex',
     loadComponent: () => import('./page/room-page/room-page').then((m) => m.RoomPage),
     title: 'Room',
     canActivate: [requiresGameFilesGuard],
+    canDeactivate: [pendingChangesGuard],
   },
   {
     path: 'my-worlds',

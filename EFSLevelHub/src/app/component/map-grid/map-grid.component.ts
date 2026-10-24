@@ -90,6 +90,14 @@ export class MapGridComponent {
   /** Room index currently copied, or null when nothing was copied. */
   @Input() copiedRoom: number | null = null;
 
+  /**
+   * Whether the clipboard holds ANY room, including one copied from a different
+   * stage. {@link copiedRoom} can only identify rooms of the current stage (it is
+   * used for highlighting), so this flag drives the Paste menu item when a
+   * cross-stage room is on the clipboard.
+   */
+  @Input() hasClipboard = false;
+
   /** Emits the room index when a non-empty cell is clicked. */
   @Output() roomSelected = new EventEmitter<number>();
 
@@ -214,15 +222,16 @@ export class MapGridComponent {
     if (!menu) {
       return [];
     }
+    const canPaste = this.hasClipboard;
     if (menu.room == null) {
-      const canPaste = this.copiedRoom != null;
       return canPaste ? ['create', 'paste'] : ['create'];
     }
     // Only existing rooms can become the start room, and offering it for the
     // current start room would be a no-op.
     const canBeStart = !this.isStart(menu.cell.x, menu.cell.y);
-    const actions: RoomMenuAction[] =
-      this.copiedRoom != null ? ['paste', 'copy', 'delete'] : ['copy', 'delete'];
+    const actions: RoomMenuAction[] = canPaste
+      ? ['paste', 'copy', 'delete']
+      : ['copy', 'delete'];
     if (canBeStart) {
       actions.push('start');
     }

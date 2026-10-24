@@ -69,6 +69,13 @@ export class StageEditorService {
   /** Whether any stage has unsaved edits. */
   readonly hasAnyDirty = computed(() => Object.values(this.dirtyStages()).some(Boolean));
 
+  /** Ids of every stage with unsaved edits (empty when everything is saved). */
+  readonly dirtyStageIds = computed(() =>
+    Object.entries(this.dirtyStages())
+      .filter(([, dirty]) => dirty)
+      .map(([id]) => id),
+  );
+
   /** Marks (or clears) a stage's unsaved-edit flag. */
   setDirty(stageId: string, dirty: boolean): void {
     if (!stageId) {
@@ -323,6 +330,66 @@ export class StageEditorService {
     await this.editor.writeEditorFile(stageArcFilePath(stageId), bytes);
     this.invalidate(stageId);
     this.logger.info(`StageEditor: start room moved to ${x},${y} in "${stageId}".`);
+    return bytes;
+  }
+
+  /**
+   * Copies a room from another stage into a cell of the given stage.
+   *
+   * Pasting across stages cannot reference a room index (indices and file names
+   * are per archive), so the source archive is read and its room deep-copied into
+   * a fresh slot of the destination — the same path a same-stage paste takes.
+   *
+   * @param stageId           Destination stage.
+   * @param x                 Grid column in the destination.
+   * @param y                 Grid row in the destination.
+   * @param sourceStageId     Stage the room is copied from.
+   * @param sourceRoomIndex   Room index inside the source stage.
+   * @returns The new destination archive bytes, or null on failure.
+   */
+  async pasteRoomFromStage(
+    stageId: string,
+    x: number,
+    y: number,
+    sourceStageId: string,
+    sourceRoomIndex: number,
+  ): Promise<Uint8Array | null> {
+    const loaded = this.cache.get(stageId);
+    if (!loaded) {
+      this.logger.warn(`StageEditor: nothing loaded for stage "${stageId}".`);
+      return null;
+    }
+
+    // Reuse the cached source bytes when the source stage is already loaded;
+    // otherwise read its archive from the editor store.
+    const sourceBytes =
+      this.cache.get(sourceStageId)?.arcBytes ??
+      (await this.editor.readEditorFile(stageArcFilePath(sourceStageId)));
+    if (!sourceBytes) {
+      this.logger.warn(`StageEditor: source archive for "${sourceStageId}" is missing.`);
+      return null;
+    }
+
+    const bytes = await this.fsaLib.pasteRoomFromStage(
+      loaded.arcBytes,
+      sourceBytes,
+      x,
+      y,
+      sourceRoomIndex,
+    );
+    if (!bytes) {
+      this.logger.error(
+        `StageEditor: pasting room ${sourceRoomIndex} of "${sourceStageId}" into ` +
+          `${x},${y} of "${stageId}" failed.`,
+      );
+      return null;
+    }
+
+    await this.editor.writeEditorFile(stageArcFilePath(stageId), bytes);
+    this.invalidate(stageId);
+    this.logger.info(
+      `StageEditor: pasted room ${sourceRoomIndex} of "${sourceStageId}" into ${x},${y} of "${stageId}".`,
+    );
     return bytes;
   }
 }

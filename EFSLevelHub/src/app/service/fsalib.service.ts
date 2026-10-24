@@ -73,6 +73,13 @@ interface DotnetExports {
           deleteRoom: boolean,
         ): Uint8Array;
         SetStartRoom(arcData: Uint8Array, x: number, y: number): Uint8Array;
+        PasteRoomFromStage(
+          destArcData: Uint8Array,
+          sourceArcData: Uint8Array,
+          x: number,
+          y: number,
+          sourceRoomIndex: number,
+        ): Uint8Array;
         ListArchiveFiles(arcData: Uint8Array): string;
         ListArchiveTextures(arcData: Uint8Array): string;
         ReadArchiveFile(arcData: Uint8Array, path: string): Uint8Array;
@@ -522,6 +529,33 @@ export class FSALibService {
   async setStartRoom(arcData: Uint8Array, x: number, y: number): Promise<Uint8Array | null> {
     const fsa = await this.getFsa();
     const result = fsa.SetStartRoom(arcData, x, y);
+    return result && result.byteLength > 0 ? result : null;
+  }
+
+  /**
+   * Pastes a room taken from another stage archive into a destination cell and
+   * re-serializes the destination.
+   *
+   * Room indices are per archive, so the source room's layers and actors are
+   * deep-copied into a fresh slot of the destination (the same path a
+   * same-stage paste takes).
+   *
+   * @param destArcData       Destination stage archive bytes.
+   * @param sourceArcData     Source stage archive bytes.
+   * @param x                 Grid column in the destination.
+   * @param y                 Grid row in the destination.
+   * @param sourceRoomIndex   Room index inside the source stage.
+   * @returns The re-serialized destination archive, or null on failure.
+   */
+  async pasteRoomFromStage(
+    destArcData: Uint8Array,
+    sourceArcData: Uint8Array,
+    x: number,
+    y: number,
+    sourceRoomIndex: number,
+  ): Promise<Uint8Array | null> {
+    const fsa = await this.getFsa();
+    const result = fsa.PasteRoomFromStage(destArcData, sourceArcData, x, y, sourceRoomIndex);
     return result && result.byteLength > 0 ? result : null;
   }
 

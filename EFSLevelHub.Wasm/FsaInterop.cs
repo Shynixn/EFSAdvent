@@ -406,6 +406,88 @@ public static partial class FsaInterop
         }
     }
 
+    /// <summary>
+    /// Pastes a room taken from ANOTHER stage archive into a grid cell of the
+    /// destination stage, then re-serializes the destination.
+    /// </summary>
+    /// <remarks>
+    /// Cross-stage pasting cannot just reference a room index (room indices and
+    /// file names are per archive), so the source room's layers and actors are
+    /// deep-copied into a fresh slot of the destination stage — exactly what
+    /// <see cref="SetRoomSlot"/> does for a same-stage paste.
+    ///
+    /// Both map layouts of the destination are rebound, because the game plays
+    /// the single-player map (<c>mapNNN_1.csv</c>).
+    /// </remarks>
+    /// <param name="destArcData">Raw bytes of the DESTINATION stage archive.</param>
+    /// <param name="sourceArcData">Raw bytes of the SOURCE stage archive.</param>
+    /// <param name="x">Grid column in the destination stage.</param>
+    /// <param name="y">Grid row in the destination stage.</param>
+    /// <param name="sourceRoomIndex">Room index to copy inside the source stage.</param>
+    /// <returns>The re-serialized destination archive, or an empty array on failure.</returns>
+    [JSExport]
+    public static byte[] PasteRoomFromStage(
+        byte[] destArcData,
+        byte[] sourceArcData,
+        int x,
+        int y,
+        int sourceRoomIndex)
+    {
+        using var trace = Trace(
+            "PasteRoomFromStage",
+            $"({x},{y} from room {sourceRoomIndex})");
+        try
+        {
+            Room? sourceRoom;
+            using (var sourceStream = new MemoryStream(sourceArcData, writable: false))
+            using (var sourceRarc = new Rarc(sourceStream))
+            using (var sourceStage = new Stage(sourceRarc))
+            {
+                if (sourceRoomIndex < 0 || sourceRoomIndex >= sourceStage.Rooms.Length)
+                {
+                    Log("PasteRoomFromStage: source room out of range.");
+                    return Array.Empty<byte>();
+                }
+                sourceRoom = sourceStage.Rooms[sourceRoomIndex];
+            }
+            if (sourceRoom == null)
+            {
+                Log("PasteRoomFromStage: source room is empty.");
+                return Array.Empty<byte>();
+            }
+
+            using var destStream = new MemoryStream(destArcData, writable: false);
+            using var destRarc = new Rarc(destStream);
+            using var destStage = new Stage(destRarc);
+
+            if (!IsCellInBounds(destStage.Map, x, y))
+            {
+                return Array.Empty<byte>();
+            }
+
+            int roomIndex = destStage.GetNextFreeRoom();
+            if (roomIndex < 0)
+            {
+                Log("PasteRoomFromStage: no free room slot.");
+                return Array.Empty<byte>();
+            }
+
+            destStage.Rooms[roomIndex] = CloneRoom(sourceRoom);
+            destStage.Map[x, y] = roomIndex;
+            if (destStage.MapSingleplayer != null && IsCellInBounds(destStage.MapSingleplayer, x, y))
+            {
+                destStage.MapSingleplayer[x, y] = roomIndex;
+            }
+
+            return SerializeStage(destStage);
+        }
+        catch (Exception ex)
+        {
+            Log($"PasteRoomFromStage failed: {ex}");
+            return Array.Empty<byte>();
+        }
+    }
+
     private static bool IsCellInBounds(MapLayout layout, int x, int y)
         => x >= 0 && y >= 0 && x < layout.XDimension && y < layout.YDimension;
 

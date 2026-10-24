@@ -84,10 +84,16 @@ export class SideNavComponent {
    * active so the nav highlights it).
    */
   async openRoom(stageId: string, roomIndex: number): Promise<void> {
+    // Navigate FIRST: `pendingChangesGuard` may cancel the navigation when the
+    // current room has unsaved edits, and registering the tab beforehand would
+    // leave a tab pointing at a room the user never opened.
+    const opened = await this.router.navigate(['/my-stages', stageId, 'rooms', roomIndex]);
+    if (!opened) {
+      return;
+    }
     this.stageTabs.openRoom(stageId, roomIndex);
     this.stageRoom.setActiveStage(stageId);
     this.stageRoom.open(stageId, roomIndex);
-    await this.router.navigate(['/my-stages', stageId, 'rooms', roomIndex]);
   }
 
   /** Whether the given room is the one currently open in the editor. */

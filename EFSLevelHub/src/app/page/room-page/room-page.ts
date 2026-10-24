@@ -40,6 +40,8 @@ import { IsoSourceService } from '../../service/iso-source.service';
 import { LoggingService } from '../../service/logging.service';
 import { AppSettingsService } from '../../service/app-settings.service';
 import { ActorData, RoomData, StageData } from '../../entity/fsalib.entity';
+import { PendingChangesHost } from '../../guard/pending-changes.guard';
+import { RoomClipboardService } from '../../service/room-clipboard.service';
 import { GroundDefinition, GroundLayer, createGroundLayer } from '../../entity/ground.entity';
 import {
   SmartObjectDefinition,
@@ -95,7 +97,12 @@ import { nextPaint } from '../../util/paint';
   templateUrl: './room-page.html',
   styleUrl: './room-page.css',
 })
-export class RoomPage implements OnInit, OnDestroy {
+export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
+  /**
+   * Set while this page performs a navigation it has already confirmed, so
+   * `pendingChangesGuard` does not show the dialog a second time.
+   */
+  private leaveConfirmed = false;
   private readonly stageService = inject(StageService);
   private readonly fsaLib = inject(FSALibService);
   private readonly stageTabs = inject(StageTabsService);
@@ -105,6 +112,7 @@ export class RoomPage implements OnInit, OnDestroy {
   private readonly themeService = inject(TilesetThemeService);
   private readonly musicService = inject(BackgroundMusicService);
   private readonly unsaved = inject(UnsavedChangesService);
+  private readonly roomClipboard = inject(RoomClipboardService);
   private readonly isoBuilder = inject(IsoBuilderService);
   private readonly isoSource = inject(IsoSourceService);
   private readonly route = inject(ActivatedRoute);
@@ -336,10 +344,18 @@ export class RoomPage implements OnInit, OnDestroy {
   readonly canExport = signal(false);
 
   /**
-   * Room index held on the grid's clipboard (Copy), or null.
-   * Copying is in-memory only: Paste re-reads the room from the current archive.
+   * Room currently copied to the shared clipboard, or null.
+   * Copying is in-memory only; Paste re-reads the room from its source archive,
+   * which may belong to a DIFFERENT stage.
    */
-  readonly copiedRoom = signal<number | null>(null);
+  readonly copiedRoom = computed(() => {
+    const entry = this.roomClipboard.copiedRoom();
+    // The grid highlights a copied room in the CURRENT stage only.
+    return entry && entry.stageId === this.stageId() ? entry.roomIndex : null;
+  });
+
+  /** Whether the clipboard holds a room (from this stage or any other). */
+  readonly hasClipboard = computed(() => this.roomClipboard.copiedRoom() !== null);
 
   /** Whether a grid room operation (create/paste/delete) is in flight. */
   readonly roomOperation = signal(false);
@@ -973,8 +989,10 @@ export class RoomPage implements OnInit, OnDestroy {
     const { action, cell, room } = event;
     if (action === 'copy') {
       if (room != null) {
-        this.copiedRoom.set(room);
-        this.logger.info(`RoomPage: copied room ${room}.`);
+        // The clipboard records the SOURCE stage, so the room can be pasted into
+        // a different stage later.
+        this.roomClipboard.copy(this.stageId(), room);
+        this.logger.info(`RoomPage: copied room ${room} of "${this.stageId()}".`);
       }
       return;
     }
@@ -1007,20 +1025,31 @@ export class RoomPage implements OnInit, OnDestroy {
       }
     }
 
-    const copyFrom = action === 'paste' ? (this.copiedRoom() ?? -1) : -1;
-    if (action === 'paste' && copyFrom < 0) {
+    const copied = action === 'paste' ? this.roomClipboard.copiedRoom() : null;
+    if (action === 'paste' && !copied) {
       return;
     }
 
     this.roomOperation.set(true);
     try {
-      const bytes = await this.stageEditor.setRoomSlot(
-        id,
-        cell.x,
-        cell.y,
-        copyFrom,
-        action === 'delete',
-      );
+      // A same-stage paste copies by room index; a cross-stage paste deep-copies
+      // out of the source archive instead (indices are per archive).
+      const bytes =
+        action === 'paste' && copied && copied.stageId !== id
+          ? await this.stageEditor.pasteRoomFromStage(
+              id,
+              cell.x,
+              cell.y,
+              copied.stageId,
+              copied.roomIndex,
+            )
+          : await this.stageEditor.setRoomSlot(
+              id,
+              cell.x,
+              cell.y,
+              action === 'paste' ? (copied?.roomIndex ?? -1) : -1,
+              action === 'delete',
+            );
       if (!bytes) {
         this.loadError.set(`Failed to ${action} the room at ${cell.x},${cell.y}.`);
         return;
@@ -1035,9 +1064,10 @@ export class RoomPage implements OnInit, OnDestroy {
       this.stageData.set(reloaded.data);
 
       // Deleting the room being edited leaves nothing to show: go back to the
-      // stage page. Otherwise stay put and reload this room from the new archive.
+      // stage page. The change was already written, so nothing is pending.
       if (action === 'delete' && room === this.roomIndex()) {
-        this.close();
+        this.leaveConfirmed = true;
+        void this.close().finally(() => (this.leaveConfirmed = false));
         return;
       }
       if (action !== 'delete') {
@@ -1321,11 +1351,39 @@ export class RoomPage implements OnInit, OnDestroy {
   }
 
   /** Closes the room, returning to its stage page. */
-  close(): void {
+  async close(): Promise<void> {
+    if (!(await this.confirmLeave())) {
+      return;
+    }
+    // Already confirmed above — keep `pendingChangesGuard` from asking twice.
+    this.leaveConfirmed = true;
     const stageId = this.stageId();
     this.stageTabs.closeRoom(stageId, this.roomIndex());
     this.stageRoom.close(stageId);
-    void this.router.navigate(['/my-stages', stageId]);
+    try {
+      await this.router.navigate(['/my-stages', stageId]);
+    } finally {
+      this.leaveConfirmed = false;
+    }
+  }
+
+  /**
+   * Navigation guard hook (`pendingChangesGuard`).
+   *
+   * Fires for EVERY way out of the room editor — switching rooms from the map
+   * grid, opening another stage/room from the side nav, going to My Stages/My
+   * Worlds, or browser back — so unsaved edits are never silently discarded.
+   */
+  async confirmLeave(): Promise<boolean> {
+    if (this.leaveConfirmed) {
+      return true;
+    }
+    const stageId = this.stageId();
+    if (!stageId || !this.stageEditor.isDirty(stageId)) {
+      return true;
+    }
+    // Only ever prompted when there is something to lose: offer to save first.
+    return this.unsaved.confirmDiscard(stageId, 'leave this room', () => this.save());
   }
 
   /**

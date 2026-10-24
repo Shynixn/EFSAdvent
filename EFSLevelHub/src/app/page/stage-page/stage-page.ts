@@ -12,6 +12,7 @@ import { StageRoomService } from '../../service/stage-room.service';
 import { UnsavedChangesService } from '../../service/unsaved-changes.service';
 import { LoggingService, LogTimer } from '../../service/logging.service';
 import { MapLayoutData, StageData } from '../../entity/fsalib.entity';
+import { PendingChangesHost } from '../../guard/pending-changes.guard';
 import { nextPaint } from '../../util/paint';
 
 /**
@@ -30,7 +31,12 @@ import { nextPaint } from '../../util/paint';
   templateUrl: './stage-page.html',
   styleUrl: './stage-page.css',
 })
-export class StagePage implements OnInit, OnDestroy {
+export class StagePage implements OnInit, OnDestroy, PendingChangesHost {
+  /**
+   * Set while this page performs a navigation it has already confirmed, so
+   * `pendingChangesGuard` does not show the dialog a second time.
+   */
+  private leaveConfirmed = false;
   private readonly stageService = inject(StageService);
   private readonly stageTabs = inject(StageTabsService);
   private readonly stageEditor = inject(StageEditorService);
@@ -243,16 +249,40 @@ export class StagePage implements OnInit, OnDestroy {
   }
 
   /** Opens a room on its dedicated room page (registers a nested tab). */
-  openRoom(roomIndex: number): void {
+  async openRoom(roomIndex: number): Promise<void> {
     const emptyValue = this.stageData()?.Map.EmptyRoomValue ?? -1;
     if (roomIndex < 0 || roomIndex === emptyValue) {
       return;
     }
     const stageId = this.stageId();
+    // Navigate first: the guard may cancel when this stage has unsaved edits, and
+    // pre-registering the tab would leave a stale entry behind.
+    const opened = await this.router.navigate(['/my-stages', stageId, 'rooms', roomIndex]);
+    if (!opened) {
+      return;
+    }
     this.stageTabs.openRoom(stageId, roomIndex);
     this.stageRoom.setActiveStage(stageId);
     this.stageRoom.open(stageId, roomIndex);
-    void this.router.navigate(['/my-stages', stageId, 'rooms', roomIndex]);
+  }
+
+  /**
+   * Navigation guard hook (`pendingChangesGuard`).
+   *
+   * The stage page has no Save button, so leaving it can only discard pending
+   * room edits. This covers navigating straight from here to another stage, a
+   * room or the tab lists — the explicit close button already asks itself and
+   * clears the flag by closing the tab.
+   */
+  async confirmLeave(): Promise<boolean> {
+    if (this.leaveConfirmed) {
+      return true;
+    }
+    const id = this.stageId();
+    if (!id || !this.stageEditor.isDirty(id)) {
+      return true;
+    }
+    return this.unsaved.confirmDiscard(id, 'leave this stage');
   }
 
   /**
@@ -266,15 +296,21 @@ export class StagePage implements OnInit, OnDestroy {
   /** Closes the stage tab and returns to the stages list. */
   async close(): Promise<void> {
     const id = this.stageId();
-    // There is no Save button on this page any more (rooms are saved from the
-    // room page), so closing can only DISCARD pending room edits.
-    const proceed = await this.unsaved.confirmDiscard(id, 'close this stage');
-    if (!proceed) {
+    // Deletions and room edits are persisted from the room page; this page has
+    // no Save button, so closing can only DISCARD pending room edits.
+    if (!(await this.confirmLeave())) {
       return;
     }
+    // The confirmation is done — prevent `pendingChangesGuard` from asking again
+    // while this navigation runs.
+    this.leaveConfirmed = true;
     this.stageTabs.close(id);
     // Drop the stage's room selection so reopening it starts on the map grid.
     this.stageRoom.close(id);
-    void this.router.navigate(['/my-stages']);
+    try {
+      await this.router.navigate(['/my-stages']);
+    } finally {
+      this.leaveConfirmed = false;
+    }
   }
 }
