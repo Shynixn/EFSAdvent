@@ -1,47 +1,84 @@
 /**
- * Goal (`GOAL`) smart object.
+ * Goal (`GOL2`) smart object.
  * ---------------------------
- * Wraps the legacy "Goal" actor template from EFSAdvent's Specials list. It is
- * actor-baked (it places a `GOAL` actor, no tiles) and renders the goal sprite
- * through the shared actor pipeline.
- *
- * `GOAL` has NO shape field. Bits 0-7 are its `Type` FLAGS (bit 0 =
- * `Uses Variable`), and it declares `bitMask: 0` — the game draws ONE sprite for
- * it regardless of the variable. It is therefore purely an activation TARGET:
+ * Wraps the legacy "Evil Imprisoning Field" actor template. It is actor-baked
+ * (it places a `GOL2` actor, no tiles) and exposes the actor's **Goal Shape**
+ * field as a `Shape` submenu:
  *
  * ```
- * bit  0     Type: Uses Variable
- * bit 22-26  Set Variable        (must be non-zero to start HIDDEN)
- * bit 27-31  Activation Variable (the room-local variable it waits on)
+ * bit 0-3  Goal Shape   0 Square · 1 Diamond · 2 Horizontal Row
+ *                       3 Vertical Row · 4 Semicircle · 5 Maid
  * ```
+ *
+ * The remaining fields of `GOL2` (activation state / variables) are preserved
+ * when the shape changes.
+ *
+ * NOTE: this object is deliberately NOT activatable. The activation-link system
+ * (`contract/activatable.entity.ts` + `smartobject/activation.entity.ts`) is
+ * kept in place for a future source/target pair, but the Goal no longer opts
+ * into it — so no "Activates" link action is offered for it.
  */
 
 import { SmartObjectPlacement } from '../smartobject.entity';
-import { ActivatableSmartObjectDefinition } from '../contract/activatable.entity';
+import {
+  ShapeChoice,
+  ShapeableSmartObjectDefinition,
+  decodeShape,
+  encodeShape,
+} from '../contract/shapeable.entity';
 
 /** The actor id of the goal. */
-export const GOAL_ACTOR_ID = 'GOAL';
+export const GOAL_ACTOR_ID = 'GOL2';
 
 /** Stable smart-object id for the goal. */
 export const GOAL_ID = 'goal';
 
-/** The goal smart-object definition. */
-export const GOAL_DEFINITION: ActivatableSmartObjectDefinition = {
+/** The selectable goal shapes (`GOL2` `Goal Shape`, bits 0-3). */
+export const GOAL_SHAPES: ShapeChoice[] = [
+  { value: 0, name: 'Square' },
+  { value: 1, name: 'Diamond' },
+  { value: 2, name: 'Horizontal Row' },
+  { value: 3, name: 'Vertical Row' },
+  { value: 4, name: 'Semicircle' },
+  { value: 5, name: 'Maid' },
+];
+
+/**
+ * The goal smart-object definition.
+ *
+ * `actorVariable` mirrors the legacy template (`V:0,0,0,2.`) — byte 4 = 2 puts
+ * the object on the "Active Variable" activation state, matching EFSAdvent.
+ */
+export const GOAL_DEFINITION: ShapeableSmartObjectDefinition = {
   id: GOAL_ID,
   baking: 'actor',
   name: 'Goal',
   section: 'Decorations',
   actorId: GOAL_ACTOR_ID,
-  // Matches the legacy template value (`V:0,0,0,0.`).
-  actorVariable: 0,
-  // NO shape descriptor: `GOAL` has no `Goal Shape` field — bits 0-7 are its
-  // `Type` FLAGS, so offering a shape menu silently wrote flag bits and
-  // corrupted the actor. The Goal is purely an activation TARGET.
-  activatable: { isTarget: true },
+  actorVariable: 2 << 24,
+  shape: { defaultShape: 0, shapes: GOAL_SHAPES },
+  // Actors bake no tiles — one empty variant keeps the shared geometry.
   set: [{ bottomLayerTiles: [], topLayerTiles: [] }],
 };
+
+/** Applies a new shape to a goal placement. */
+export function withGoalShape(
+  placement: SmartObjectPlacement,
+  shape: number,
+): SmartObjectPlacement {
+  return {
+    ...placement,
+    variantIndex: 0,
+    actorVariable: encodeShape(placement.actorVariable ?? 0, shape),
+  };
+}
 
 /** Whether a smart-object id refers to the goal. */
 export function isGoal(id: string): boolean {
   return id === GOAL_ID;
+}
+
+/** The shape index a goal placement currently uses. */
+export function goalShape(placement: SmartObjectPlacement): number {
+  return decodeShape(placement.actorVariable ?? 0);
 }

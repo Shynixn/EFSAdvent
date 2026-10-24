@@ -20,8 +20,8 @@ import { ActorData } from './fsalib.entity';
 import { GroundLayer, ROOM_DIMENSION } from './ground.entity';
 import { PLAYER_START_DEFINITION } from './smartobject/player-start.entity';
 import type { ActivationLink } from './smartobject/activation.entity';
-import { IMPRISONING_FIELD_DEFINITION } from './smartobject/imprisoning-field.entity';
 import { GOAL_DEFINITION } from './smartobject/goal.entity';
+import { FORCE_GEM_DEFINITION } from './smartobject/force-gem.entity';
 import {
   SmartObjectDefinition,
   SmartObjectTileOffset,
@@ -102,8 +102,8 @@ export const ACTOR_TEMPLATE_SMART_OBJECTS: readonly SmartObjectDefinition[] =
 registerActorSmartObjects([
   ...ACTOR_TEMPLATE_SMART_OBJECTS,
   PLAYER_START_DEFINITION,
-  IMPRISONING_FIELD_DEFINITION,
   GOAL_DEFINITION,
+  FORCE_GEM_DEFINITION,
 ]);
 
 /**

@@ -6,7 +6,7 @@
     Toolbox
   </h2>
 
-  <!-- Tabs: Common · Enemies & NPC · Misc -->
+  <!-- Tabs: Common · Items & NPC · Misc -->
   <div class="flex shrink-0 gap-1 border-b border-slate-800 px-2 py-2" role="tablist">
     @for (tab of tabs; track tab) {
       <button
@@ -221,9 +221,52 @@
       </div>
     }
 
-    @if (activeTab() === 'Enemies & NPC') {
-      <!-- Enemies: place actor enemies from the game's actor catalog -->
+    @if (activeTab() === 'Items & NPC') {
+      <!-- Items: collectibles with their own variable-backed fields -->
       <div class="rounded-lg border border-slate-800">
+        <button
+          type="button"
+          (click)="toggleItems()"
+          class="flex w-full cursor-pointer items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400"
+        >
+          <span>Items</span>
+          <span class="text-slate-500">{{ itemsOpen() ? '▾' : '▸' }}</span>
+        </button>
+        @if (itemsOpen()) {
+          <div class="space-y-2 border-t border-slate-800 px-3 py-3">
+            <p class="text-[11px] text-slate-500">
+              Drag an item onto the room canvas. Right-click a placed Force Gem to pick its
+              gem type.
+            </p>
+            <div class="flex flex-wrap gap-2">
+              @for (item of itemObjects; track item.id) {
+                <button
+                  type="button"
+                  draggable="true"
+                  (dragstart)="onItemDragStart($event, item)"
+                  (dragend)="onDecorationDragEnd()"
+                  class="flex cursor-grab flex-col items-center gap-2 rounded-lg border border-slate-700 bg-slate-800/70 px-3 py-2 text-xs text-slate-200 transition hover:border-indigo-400 hover:bg-slate-700/60 active:cursor-grabbing"
+                  [title]="'Drag ' + item.name + ' onto the canvas'"
+                >
+                  <span
+                    class="flex h-16 w-16 items-center justify-center overflow-hidden rounded border border-slate-700 bg-slate-950/60"
+                  >
+                    <canvas
+                      #itemPreview
+                      [attr.data-item-id]="item.id"
+                      style="image-rendering: pixelated"
+                    ></canvas>
+                  </span>
+                  <span class="max-w-16 truncate text-center">{{ item.name }}</span>
+                </button>
+              }
+            </div>
+          </div>
+        }
+      </div>
+
+      <!-- Enemies: place actor enemies from the game's actor catalog -->
+      <div class="mt-3 rounded-lg border border-slate-800">
         <button
           type="button"
           (click)="toggleEnemies()"

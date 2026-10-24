@@ -5,8 +5,8 @@
  * **target** (something that reacts) in a room-local variable chain:
  *
  * ```
- *   GOL2 (imprisoning field, source)  --destroys-->  sets local variable N
- *   GOAL (end-of-level goal, target)  --waits on-->  local variable N
+ *   GOL2 (goal, source)   --destroys-->  sets local variable N
+ *   GOAL (target)         --waits on-->  local variable N
  * ```
  *
  * The link itself is NOT stored in the actors: both sides simply reference the
@@ -35,6 +35,21 @@ export interface IActivatable {
    * `false` when it SETS a variable and can therefore start links.
    */
   readonly isTarget: boolean;
+  /**
+   * `true` when becoming a target must ALSO switch the object into
+   * "uses a variable" mode — turn on `Type` bit 0 and give it its own non-zero
+   * `Set Variable` (bits 22-26).
+   *
+   * That combination is what makes an object start HIDDEN and appear only once
+   * the source sets the shared variable: every gated `GOAL` in the shipped
+   * levels is exactly `0x81C00001` (Uses Variable + Set Variable 7 + Activation
+   * Variable 16), against an ungated `0x00000000`.
+   *
+   * Only a definition whose `Type` field really does carry a "Uses Variable"
+   * flag should set this — writing bit 0 on an actor that uses bits 0-7 for
+   * something else (e.g. `GOL2`'s `Goal Shape`) corrupts that field.
+   */
+  readonly usesVariable?: boolean;
 }
 
 /** A definition that participates in activation links. */

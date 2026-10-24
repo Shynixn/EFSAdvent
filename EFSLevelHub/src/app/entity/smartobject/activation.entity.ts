@@ -36,13 +36,14 @@ import { SmartObjectPlacement } from '../smartobject.entity';
 import {
   LOCAL_VARIABLE_MAX,
   LOCAL_VARIABLE_MIN,
+  activatableOf,
   decodeActivationVariable,
   decodeSetVariable,
   encodeActivationVariable,
   encodeSetVariable,
   findFreeLocalVariable,
 } from '../contract/activatable.entity';
-import { isGoal } from './goal.entity';
+import { findSmartObjectDefinition } from '../smartobject.definition';
 
 /**
  * One persisted activation link.
@@ -115,16 +116,12 @@ export function withSetVariable(
  * Writes `variable` into a TARGET placement's `Activation Variable`
  * (bits 27-31).
  *
- * For the GOAL it also turns on `Type` bit 0 (`Uses Variable`) and sets its own
- * `Set Variable` (bits 22-26) to a DIFFERENT free number.
+ * When the target's definition opts into `activatable.usesVariable` it also
+ * turns on `Type` bit 0 (`Uses Variable`) and gives it its own non-zero
+ * `Set Variable` (bits 22-26), which is what makes it start HIDDEN until the
+ * source fires.
  *
- * That last part is what actually hides the goal until it is triggered: every
- * gated GOAL in the shipped levels is exactly `0x81C00001`
- * (= Uses Variable + Set Variable 7 + Activation Variable 16), while every
- * ungated GOAL is `0x00000000`. With `Set Variable` left at 0 the goal is
- * already active and appears immediately.
- *
- * @param reserved Additional variable numbers to avoid for the goal's own
+ * @param reserved Additional variable numbers to avoid for the target's own
  *   `Set Variable` (the link's variable is always avoided).
  */
 export function withActivationVariable(
@@ -133,11 +130,12 @@ export function withActivationVariable(
   reserved: readonly number[] = [],
 ): SmartObjectPlacement {
   let next = encodeActivationVariable(placement.actorVariable ?? 0, variable);
-  if (isGoal(placement.id)) {
-    // GOAL's `Type` field is bits 0-7 with bit 0 = `Uses Variable`.
+  const usesVariable = activatableOf(findSmartObjectDefinition(placement.id))?.usesVariable;
+  if (usesVariable) {
+    // The `Type` field is bits 0-7 with bit 0 = `Uses Variable`.
     next = (next | 0x01) >>> 0;
-    // The goal also WRITES a variable of its own; the engine needs it non-zero
-    // for the goal to start hidden.
+    // The target also WRITES a variable of its own; the engine needs it
+    // non-zero for it to start hidden.
     const own = findFreeLocalVariable([variable, ...reserved]);
     if (own !== null) {
       next = encodeSetVariable(next, own);

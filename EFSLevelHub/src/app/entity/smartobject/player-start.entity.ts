@@ -132,7 +132,7 @@ export function nextPlayerDirection(variable: number): number {
 export const PLAYER_START_DEFINITION: RotateableSmartObjectDefinition = {
   id: PLAYER_START_ID,
   baking: 'actor',
-  name: 'Player Start Position',
+  name: 'Start',
   section: 'Decorations',
   actorId: PLAYER_START_ACTOR_ID,
   actorVariable: encodePlayerStart({ color: 0, direction: 0, state: 0 }),

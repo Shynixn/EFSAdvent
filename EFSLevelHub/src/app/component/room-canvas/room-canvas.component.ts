@@ -47,6 +47,11 @@ import { canRotate, nextRotation } from '../../entity/contract/rotateable.entity
 import { shapeOf, decodeShape, encodeShape } from '../../entity/contract/shapeable.entity';
 import { isActivationSource, isActivationTarget } from '../../entity/contract/activatable.entity';
 import {
+  decodeGemType,
+  encodeGemType,
+  gemTypeOf,
+} from '../../entity/smartobject/force-gem.entity';
+import {
   ActivationLink,
   isLinkedTarget,
   placementKey,
@@ -1666,7 +1671,7 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
       });
     }
 
-    // Shaped actor objects (imprisoning field, goal) list their `Shape` values.
+    // Shaped actor objects (the goal) list their `Shape` values.
     const shape = shapeOf(findSmartObjectDefinition(this.contextMenu()?.placement?.id ?? ''));
     if (shape) {
       groups.push({
@@ -1674,6 +1679,17 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
         label: 'Shape',
         choices: shape.shapes.map((entry) => ({ value: entry.value, label: entry.name })),
         selected: decodeShape(this.contextMenu()?.placement?.actorVariable ?? 0),
+      });
+    }
+
+    // Force gems list their `Gem Type` (an 8-bit field, so NOT a `Shape`).
+    const gemType = gemTypeOf(this.contextMenu()?.placement);
+    if (gemType) {
+      groups.push({
+        id: 'gem-type',
+        label: gemType.label,
+        choices: gemType.types.map((entry) => ({ value: entry.value, label: entry.name })),
+        selected: decodeGemType(this.contextMenu()?.placement?.actorVariable ?? 0),
       });
     }
 
@@ -1761,6 +1777,9 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
       case 'shape':
         this.selectContextShape(event.value);
         break;
+      case 'gem-type':
+        this.selectContextGemType(event.value);
+        break;
     }
   }
 
@@ -1773,6 +1792,16 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
    */
   selectContextShape(shape: number): void {
     this.updateContextPlayerVariable((variable) => encodeShape(variable, shape));
+  }
+
+  /**
+   * Applies a new `Gem Type` to the context-menu target.
+   *
+   * The gem type is an EIGHT-bit field (bits 0-7), so it uses its own encoder
+   * rather than {@link encodeShape}, which would mask it to 0-15.
+   */
+  selectContextGemType(gemType: number): void {
+    this.updateContextPlayerVariable((variable) => encodeGemType(variable, gemType));
   }
 
   /** Applies a new player state to the context-menu target. */

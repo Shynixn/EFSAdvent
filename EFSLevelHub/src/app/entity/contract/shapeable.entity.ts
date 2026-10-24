@@ -9,7 +9,7 @@
  * - `shapes` — the selectable shapes, in menu order.
  *
  * The descriptor does not apply the change itself; the owning domain module
- * repacks the actor `Variable` (see e.g. `withImprisoningFieldShape`).
+ * repacks the actor `Variable` (see e.g. `withGoalShape`).
  */
 
 import { SmartObjectDefinition } from '../smartobject.definition';
