@@ -1,11 +1,15 @@
 <section class="mx-auto max-w-xl space-y-6 rounded-2xl bg-slate-800 p-8 shadow-xl">
   <header class="space-y-1">
-    <h2 class="text-2xl font-semibold text-white">GameCube ISO Extractor</h2>
+    <h2 class="text-2xl font-semibold text-white">GameCube ISO Import</h2>
     <p class="text-sm text-slate-400">
       Streams disc assets directly into browser OPFS storage — no full-file buffering.
     </p>
-    <p class="text-xs font-medium text-amber-400">
-      Note: only tested with the PAL version of the game.
+    <p class="text-sm text-slate-400">
+      This app only extracts images and resources from a game file you provide. It does not ship
+      or include any game content of its own — you must supply your own copy.
+    </p>
+    <p class="text-sm text-slate-400">
+      No files are uploaded anywhere. Everything is processed and kept locally in your web browser.
     </p>
   </header>
 
@@ -16,8 +20,7 @@
       class="block cursor-pointer rounded-xl border-2 border-dashed border-slate-600 bg-slate-900/50 px-6 py-8 text-center transition hover:border-indigo-400"
     >
       <span class="block text-sm font-medium text-slate-200">
-        Choose a <code class="text-indigo-300">.iso</code> or
-        <code class="text-indigo-300">.gcm</code> file
+        Choose a <code class="text-indigo-300">.iso</code> file
       </span>
       <span class="mt-1 block text-xs text-slate-500">
         {{ selectedFileName() || 'No file selected' }}
@@ -66,29 +69,60 @@
         {{ storage().usedMB }} MB used / {{ storage().totalMB }} MB available
       </span>
     </div>
-    <div class="flex items-center justify-between">
-      <span class="text-slate-400">Cached files</span>
-      <span class="font-mono text-slate-200">{{ cachedFileCount() }}</span>
-    </div>
     <div class="flex items-center gap-2 pt-1">
-      <app-button
-        variant="outline"
-        color="slate"
-        size="sm"
-        [disabled]="isExtracting() || isClearing()"
-        (clicked)="refreshCachedFileCount()"
-      >
-        Refresh
-      </app-button>
       <app-button
         variant="outline"
         color="red"
         size="sm"
-        [disabled]="isExtracting() || isClearing() || cachedFileCount() === 0"
-        (clicked)="clearCache()"
+        [disabled]="isExtracting() || isClearing()"
+        (clicked)="requestClearCache()"
       >
         {{ isClearing() ? 'Clearing…' : 'Clear cache' }}
       </app-button>
     </div>
   </div>
 </section>
+
+<!-- Clear-cache confirmation -->
+<app-modal
+  [open]="confirmClearOpen()"
+  title="Clear cache"
+  maxWidth="max-w-md"
+  (closed)="closeConfirmClear()"
+>
+  <div class="flex flex-col gap-4">
+    <p class="text-sm text-slate-300">
+      Do you really want to delete the cache? This removes the extracted game files from your
+      browser.
+    </p>
+    <div class="space-y-2 rounded-lg border border-red-500/50 bg-red-500/10 px-3 py-3">
+      <p class="text-sm font-bold uppercase tracking-wide text-red-300">
+        Warning: ALL levels and ALL worlds will be permanently deleted.
+      </p>
+      <p class="text-sm text-red-200/90">
+        This cannot be undone. Save the levels and worlds you want to keep as
+        <code class="rounded bg-red-500/20 px-1.5 py-0.5 font-mono text-xs">.fsastage</code> and
+        <code class="rounded bg-red-500/20 px-1.5 py-0.5 font-mono text-xs">.fsaworld</code>
+        files <strong>before</strong> clearing the cache.
+      </p>
+    </div>
+    <div class="flex justify-end gap-2">
+      <app-button
+        variant="ghost"
+        color="slate"
+        [disabled]="isClearing()"
+        (clicked)="closeConfirmClear()"
+      >
+        Cancel
+      </app-button>
+      <app-button
+        variant="danger"
+        color="red"
+        [disabled]="isClearing()"
+        (clicked)="confirmClearCache()"
+      >
+        {{ isClearing() ? 'Clearing…' : 'Delete everything' }}
+      </app-button>
+    </div>
+  </div>
+</app-modal>

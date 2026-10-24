@@ -11,6 +11,7 @@ import { ActorSpriteService } from '../../service/actor-sprite.service';
 import { FSALibService } from '../../service/fsalib.service';
 import { LoggingService } from '../../service/logging.service';
 import { ButtonComponent } from '../button/button.component';
+import { ModalComponent } from '../modal/modal.component';
 import { ExtractionProgress, StorageEstimate } from '../../entity/iso.entity';
 
 /**
@@ -25,7 +26,7 @@ import { ExtractionProgress, StorageEstimate } from '../../entity/iso.entity';
  */
 @Component({
   selector: 'app-iso-extractor',
-  imports: [ButtonComponent],
+  imports: [ButtonComponent, ModalComponent],
   templateUrl: './iso-extractor.component.html',
   styleUrl: './iso-extractor.component.css',
 })
@@ -55,6 +56,8 @@ export class IsoExtractorComponent implements OnInit {
   /** Number of files already cached in OPFS from a previous session. */
   readonly cachedFileCount = signal(0);
   readonly isClearing = signal(false);
+  /** Whether the destructive "clear cache" confirmation dialog is open. */
+  readonly confirmClearOpen = signal(false);
 
   ngOnInit(): void {
     void this.refreshStorage();
@@ -130,6 +133,25 @@ export class IsoExtractorComponent implements OnInit {
   /** Re-counts the files currently cached under `/extracted_game`. */
   async refreshCachedFileCount(): Promise<void> {
     this.cachedFileCount.set(await this.opfs.countExtractedFiles());
+  }
+
+  /** Opens the confirmation dialog before wiping the cache. */
+  requestClearCache(): void {
+    this.confirmClearOpen.set(true);
+  }
+
+  /** Dismisses the confirmation dialog without clearing anything. */
+  closeConfirmClear(): void {
+    if (this.isClearing()) {
+      return;
+    }
+    this.confirmClearOpen.set(false);
+  }
+
+  /** Confirms the dialog and wipes the cache. */
+  async confirmClearCache(): Promise<void> {
+    this.confirmClearOpen.set(false);
+    await this.clearCache();
   }
 
   /** Wipes the extracted game cache from OPFS. */
