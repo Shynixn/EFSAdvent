@@ -9,6 +9,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
+import { Subscription } from 'rxjs';
 import { ButtonComponent } from '../../component/button/button.component';
 import { StagePickerComponent } from '../../component/stage-picker/stage-picker.component';
 import { ModalComponent } from '../../component/modal/modal.component';
@@ -72,6 +73,8 @@ export class WorldPage implements OnInit, OnDestroy {
   /** The flex area the map is fitted into; observed for resizing. */
   private readonly mapArea = viewChild<ElementRef<HTMLDivElement>>('mapArea');
   private resizeObserver: ResizeObserver | null = null;
+  /** Tracks the `worldId` route param so world-tab switches reload the content. */
+  private routeSub: Subscription | null = null;
 
   /** Id of the world being viewed. */
   readonly worldId = signal('');
@@ -162,24 +165,37 @@ export class WorldPage implements OnInit, OnDestroy {
   readonly exportingWorld = signal(false);
 
   ngOnInit(): void {
-    const id = this.route.snapshot.paramMap.get('worldId') ?? '';
-    this.worldId.set(id);
-
-    void this.worldService.load().then(() => {
-      const world = this.worldService.getById(id);
-      if (!world) {
-        this.logger.warn(`WorldPage: unknown world "${id}" — returning to My Worlds.`);
-        void this.router.navigate(['/my-worlds']);
-        return;
-      }
-      this.worldName.set(world.name);
-      this.tabs.open(id);
-      void this.buildPoints(world.stages.map((s) => s.id));
-    });
-
     void this.loadWorldmap();
     void this.isoSource.exists().then((has) => this.canExport.set(has));
     this.observeArea();
+
+    // The route is reused when switching between open world tabs (same route
+    // with a different `worldId`), so listen for param changes instead of only
+    // reading the initial snapshot — otherwise the content of the previously
+    // viewed world stays on screen.
+    this.routeSub = this.route.paramMap.subscribe((params) => {
+      const id = params.get('worldId') ?? '';
+      if (id) {
+        void this.loadWorld(id);
+      }
+    });
+  }
+
+  /** Loads the given world into the page (header, markers, open tab). */
+  private async loadWorld(id: string): Promise<void> {
+    this.worldId.set(id);
+    await this.worldService.load();
+
+    const world = this.worldService.getById(id);
+    if (!world) {
+      this.logger.warn(`WorldPage: unknown world "${id}" — returning to My Worlds.`);
+      void this.router.navigate(['/my-worlds']);
+      return;
+    }
+
+    this.worldName.set(world.name);
+    this.tabs.open(id);
+    await this.buildPoints(world.stages.map((s) => s.id));
   }
 
   /**
@@ -209,6 +225,8 @@ export class WorldPage implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.routeSub?.unsubscribe();
+    this.routeSub = null;
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
   }
