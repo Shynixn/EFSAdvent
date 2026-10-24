@@ -53,8 +53,9 @@
       </svg>
     </button>
 
-    <!-- Debug (collapsible): layer options + the live room JSON -->
-    <div class="rounded-lg border border-slate-800">
+    <!-- Debug (collapsible): layer options + the live room JSON. Hidden unless enabled in Settings. -->
+    @if (showDebug) {
+      <div class="rounded-lg border border-slate-800">
       <button
         type="button"
         (click)="debugOpen.set(!debugOpen())"
@@ -141,6 +142,7 @@
           </div>
         </div>
       }
-    </div>
+      </div>
+    }
   </div>
 </aside>

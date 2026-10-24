@@ -61,7 +61,11 @@ export class SystemColumnComponent {
   @Input() topLayer = true;
   /** Whether painting targets the top layer instead of the base layer. */
   @Input() paintTop = false;
-
+  /**
+   * Whether the Debug section (layer options + room JSON) is rendered at all.
+   * Driven by the "Show debug information" preference on the settings page.
+   */
+  @Input() showDebug = false;
   /** Whether the Debug section is expanded. */
   readonly debugOpen = signal(false);
 

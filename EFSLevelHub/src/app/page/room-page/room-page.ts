@@ -37,6 +37,7 @@ import {
 } from '../../service/iso-builder.service';
 import { IsoSourceService } from '../../service/iso-source.service';
 import { LoggingService } from '../../service/logging.service';
+import { AppSettingsService } from '../../service/app-settings.service';
 import { ActorData, RoomData, StageData } from '../../entity/fsalib.entity';
 import { GroundDefinition, GroundLayer, createGroundLayer } from '../../entity/ground.entity';
 import {
@@ -107,6 +108,10 @@ export class RoomPage implements OnInit, OnDestroy {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly logger = inject(LoggingService);
+  private readonly appSettings = inject(AppSettingsService);
+
+  /** Whether debug information (the System column's Debug section) is enabled in Settings. */
+  readonly showDebug = this.appSettings.debug;
 
   /** Id of the stage this room belongs to. */
   readonly stageId = signal('');

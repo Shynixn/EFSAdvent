@@ -60,7 +60,7 @@ export const routes: Routes = [
   },
   {
     path: 'debug',
-    loadComponent: () => import('./page/debug-page/debug-page').then((m) => m.DebugPage),
+    redirectTo: 'settings',
     title: 'Debug',
   },
   { path: '**', redirectTo: '' },
