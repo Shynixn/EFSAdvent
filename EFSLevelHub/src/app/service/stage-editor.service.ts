@@ -293,4 +293,36 @@ export class StageEditorService {
     );
     return bytes;
   }
+
+  /**
+   * Moves a stage's start room to an existing room cell.
+   *
+   * The start room is a grid position (`MapLayout.StartX`/`StartY`), not a room
+   * index, so this only relocates the entry point and never creates a room. The
+   * change is written straight to the archive (see `FsaInterop.SetStartRoom`) and
+   * the cache is invalidated — callers reload with {@link load}.
+   *
+   * @param stageId Stage being edited.
+   * @param x       Grid column of the new start cell.
+   * @param y       Grid row of the new start cell.
+   * @returns The new archive bytes, or null when the operation failed.
+   */
+  async setStartRoom(stageId: string, x: number, y: number): Promise<Uint8Array | null> {
+    const loaded = this.cache.get(stageId);
+    if (!loaded) {
+      this.logger.warn(`StageEditor: nothing loaded for stage "${stageId}".`);
+      return null;
+    }
+
+    const bytes = await this.fsaLib.setStartRoom(loaded.arcBytes, x, y);
+    if (!bytes) {
+      this.logger.error(`StageEditor: setting start room at ${x},${y} failed in "${stageId}".`);
+      return null;
+    }
+
+    await this.editor.writeEditorFile(stageArcFilePath(stageId), bytes);
+    this.invalidate(stageId);
+    this.logger.info(`StageEditor: start room moved to ${x},${y} in "${stageId}".`);
+    return bytes;
+  }
 }

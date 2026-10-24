@@ -8,7 +8,7 @@ export interface RoomCell {
 }
 
 /** An action chosen from the grid's context menu. */
-export type RoomMenuAction = 'create' | 'copy' | 'paste' | 'delete';
+export type RoomMenuAction = 'create' | 'copy' | 'paste' | 'delete' | 'start';
 
 /** Payload of the grid's {@link MapGridComponent.roomAction} output. */
 export interface RoomGridAction {
@@ -32,8 +32,8 @@ export interface RoomGridAction {
  *
  * | Cell              | Menu items             |
  * | ----------------- | ---------------------- |
- * | existing room     | Copy, Delete           |
- * | existing + copied | Paste, Copy, Delete    |
+ * | existing room     | Copy, Delete, Set Start Room |
+ * | existing + copied | Paste, Copy, Delete, Set Start Room |
  * | empty             | Create                 |
  * | empty + copied    | Create, Paste          |
  *
@@ -214,11 +214,20 @@ export class MapGridComponent {
     if (!menu) {
       return [];
     }
-    const canPaste = this.copiedRoom != null;
     if (menu.room == null) {
+      const canPaste = this.copiedRoom != null;
       return canPaste ? ['create', 'paste'] : ['create'];
     }
-    return canPaste ? ['paste', 'copy', 'delete'] : ['copy', 'delete'];
+    // Only existing rooms can become the start room, and offering it for the
+    // current start room would be a no-op.
+    const canBeStart = !this.isStart(menu.cell.x, menu.cell.y);
+    const actions: RoomMenuAction[] = this.copiedRoom != null
+      ? ['paste', 'copy', 'delete']
+      : ['copy', 'delete'];
+    if (canBeStart) {
+      actions.push('start');
+    }
+    return actions;
   }
 
   /** Human-readable label for a menu action. */
@@ -232,6 +241,8 @@ export class MapGridComponent {
         return 'Paste';
       case 'delete':
         return 'Delete';
+      case 'start':
+        return 'Set Start Room';
     }
   }
 

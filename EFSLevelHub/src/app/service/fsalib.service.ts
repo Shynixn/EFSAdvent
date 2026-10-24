@@ -72,6 +72,7 @@ interface DotnetExports {
           copyFromRoom: number,
           deleteRoom: boolean,
         ): Uint8Array;
+        SetStartRoom(arcData: Uint8Array, x: number, y: number): Uint8Array;
         ListArchiveFiles(arcData: Uint8Array): string;
         ListArchiveTextures(arcData: Uint8Array): string;
         ReadArchiveFile(arcData: Uint8Array, path: string): Uint8Array;
@@ -328,10 +329,7 @@ export class FSALibService {
    * @param musicId New background music id.
    * @returns The re-serialized archive bytes, or null on failure.
    */
-  async setStageBackgroundMusic(
-    arcData: Uint8Array,
-    musicId: number,
-  ): Promise<Uint8Array | null> {
+  async setStageBackgroundMusic(arcData: Uint8Array, musicId: number): Promise<Uint8Array | null> {
     const fsa = await this.getFsa();
     const result = fsa.SetStageBackgroundMusic(arcData, musicId);
     return result && result.byteLength > 0 ? result : null;
@@ -455,7 +453,9 @@ export class FSALibService {
   async cacheArchive(key: string, arcData: Uint8Array): Promise<void> {
     const fsa = await this.getFsa();
     this.logger.info(`FSALib: caching archive "${key}" (${arcData.byteLength} bytes) in wasm…`);
-    await this.logger.time(`FSALib.CacheArchive(${key})`, async () => fsa.CacheArchive(key, arcData));
+    await this.logger.time(`FSALib.CacheArchive(${key})`, async () =>
+      fsa.CacheArchive(key, arcData),
+    );
   }
 
   /**
@@ -502,6 +502,26 @@ export class FSALibService {
   ): Promise<Uint8Array | null> {
     const fsa = await this.getFsa();
     const result = fsa.SetRoomSlot(arcData, x, y, copyFromRoom, deleteRoom);
+    return result && result.byteLength > 0 ? result : null;
+  }
+
+  /**
+   * Moves a stage's start room to an existing room cell and re-serializes the
+   * archive.
+   *
+   * The start room is stored as a grid position (`MapLayout.StartX`/`StartY` in
+   * the map CSV header, not a room index), so this only relocates the entry
+   * point — the cell must already contain a room. Both the shared and the
+   * single-player map are updated.
+   *
+   * @param arcData Stage archive bytes.
+   * @param x       Grid column of the new start cell.
+   * @param y       Grid row of the new start cell.
+   * @returns The re-serialized archive, or null on failure (e.g. empty cell).
+   */
+  async setStartRoom(arcData: Uint8Array, x: number, y: number): Promise<Uint8Array | null> {
+    const fsa = await this.getFsa();
+    const result = fsa.SetStartRoom(arcData, x, y);
     return result && result.byteLength > 0 ? result : null;
   }
 

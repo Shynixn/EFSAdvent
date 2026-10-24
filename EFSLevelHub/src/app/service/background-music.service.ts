@@ -61,9 +61,7 @@ export class BackgroundMusicService {
    */
   selectedId(stageId: string): number {
     return (
-      this.selectedMap()[stageId] ??
-      this.stageEditor.get(stageId)?.data.Map.BackgroundMusicId ??
-      0
+      this.selectedMap()[stageId] ?? this.stageEditor.get(stageId)?.data.Map.BackgroundMusicId ?? 0
     );
   }
 

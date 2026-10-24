@@ -410,6 +410,56 @@ public static partial class FsaInterop
         => x >= 0 && y >= 0 && x < layout.XDimension && y < layout.YDimension;
 
     /// <summary>
+    /// Moves a stage's start room to an existing room cell and re-serializes the
+    /// archive.
+    /// </summary>
+    /// <remarks>
+    /// The start room is stored as a grid position, not a room index:
+    /// <c>MapLayout.StartX</c> / <c>MapLayout.StartY</c> in the map CSV header
+    /// (<c>mapNNN,x,y,...</c>). Both layouts are updated because the game reads
+    /// the single-player map (<c>mapNNN_1.csv</c>) in normal play.
+    ///
+    /// The cell must already contain a room — this only relocates the entry
+    /// point, it never creates a room.
+    /// </remarks>
+    /// <param name="arcData">Raw bytes of the stage archive.</param>
+    /// <param name="x">Grid column of the new start cell.</param>
+    /// <param name="y">Grid row of the new start cell.</param>
+    /// <returns>The re-serialized archive bytes, or an empty array on failure.</returns>
+    [JSExport]
+    public static byte[] SetStartRoom(byte[] arcData, int x, int y)
+    {
+        using var trace = Trace("SetStartRoom", $"({x},{y})");
+        try
+        {
+            using var stream = new MemoryStream(arcData, writable: false);
+            using var rarc = new Rarc(stream);
+            using var stage = new Stage(rarc);
+
+            if (!IsCellInBounds(stage.Map, x, y) || stage.Map[x, y] == MapLayout.EMPTY_ROOM_VALUE)
+            {
+                Log($"SetStartRoom: cell ({x},{y}) is empty or out of bounds.");
+                return Array.Empty<byte>();
+            }
+
+            stage.Map.StartX = x;
+            stage.Map.StartY = y;
+            if (stage.MapSingleplayer != null && IsCellInBounds(stage.MapSingleplayer, x, y))
+            {
+                stage.MapSingleplayer.StartX = x;
+                stage.MapSingleplayer.StartY = y;
+            }
+
+            return SerializeStage(stage);
+        }
+        catch (Exception ex)
+        {
+            Log($"SetStartRoom failed: {ex}");
+            return Array.Empty<byte>();
+        }
+    }
+
+    /// <summary>
     /// Deep-copies a room's layers and actors.
     /// </summary>
     /// <remarks>

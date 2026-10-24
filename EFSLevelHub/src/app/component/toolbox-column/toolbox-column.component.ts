@@ -28,6 +28,7 @@ import {
 import { GROUND_DEFINITIONS, GroundDefinition } from '../../entity/ground.entity';
 import { SmartObjectDragService } from '../../service/smart-object-drag.service';
 import { ActorSpriteService } from '../../service/actor-sprite.service';
+import { hideNativeDragImage } from '../../util/drag';
 import { EditorService } from '../../service/editor.service';
 import { ImageBuffer } from '../../service/render/gba-tile-renderer';
 
@@ -463,15 +464,9 @@ export class ToolboxColumnComponent implements AfterViewInit {
   /** Starts a native drag carrying the decoration id. */
   onDecorationDragStart(event: DragEvent, definition: SmartObjectDefinition): void {
     event.dataTransfer?.setData('application/x-smart-object', definition.id);
-    if (event.dataTransfer) {
-      event.dataTransfer.effectAllowed = 'copy';
-      // Hide the default drag image (the toolbox card) so it does not obscure the
-      // transparent preview we draw on the canvas.
-      const blank = document.createElement('canvas');
-      blank.width = 1;
-      blank.height = 1;
-      event.dataTransfer.setDragImage(blank, 0, 0);
-    }
+    // Hide the default drag image (the toolbox card) so it does not obscure the
+    // transparent preview we draw on the canvas.
+    hideNativeDragImage(event);
     // dragover cannot read the data payload, so expose it via the shared service
     // for the canvas preview. Start from the default variant (index 0).
     this.dragService.start(definition, 0);
@@ -498,13 +493,7 @@ export class ToolboxColumnComponent implements AfterViewInit {
       return;
     }
     event.dataTransfer?.setData('application/x-smart-object', definition.id);
-    if (event.dataTransfer) {
-      event.dataTransfer.effectAllowed = 'copy';
-      const blank = document.createElement('canvas');
-      blank.width = 1;
-      blank.height = 1;
-      event.dataTransfer.setDragImage(blank, 0, 0);
-    }
+    hideNativeDragImage(event);
     this.dragService.start(definition, 0, template.variable);
     this.decorationDragStarted.emit();
   }

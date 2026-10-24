@@ -984,6 +984,16 @@ export class RoomPage implements OnInit, OnDestroy {
       return;
     }
 
+    // Moving the start room only relocates the entry point (a grid position in
+    // the map CSV header), so it is its own archive operation.
+    if (action === 'start') {
+      if (room == null) {
+        return;
+      }
+      await this.setStartRoomAt(id, cell.x, cell.y);
+      return;
+    }
+
     // Deleting removes the room's layers and actors — ask first.
     if (action === 'delete') {
       if (room == null) {
@@ -1048,6 +1058,52 @@ export class RoomPage implements OnInit, OnDestroy {
     } catch (error) {
       this.loadError.set(error instanceof Error ? error.message : `Failed to ${action}.`);
       this.logger.error(`RoomPage: room ${action} failed`, error);
+    } finally {
+      this.roomOperation.set(false);
+    }
+  }
+
+  /**
+   * Makes the room at a grid cell the stage's start room.
+   *
+   * The start room is stored as a grid position (`Map.StartX`/`StartY`), so the
+   * archive is rewritten in place; the in-memory stage and any cached previews
+   * are then refreshed so the grid's start ring moves immediately.
+   */
+  private async setStartRoomAt(id: string, x: number, y: number): Promise<void> {
+    this.roomOperation.set(true);
+    try {
+      const bytes = await this.stageEditor.setStartRoom(id, x, y);
+      if (!bytes) {
+        this.loadError.set(`Failed to set the start room at ${x},${y}.`);
+        return;
+      }
+
+      await this.stageService.markSaved(id, new Date());
+      this.lastSaved.set(new Date().toISOString());
+      const reloaded = await this.stageEditor.load(id);
+      if (!reloaded) {
+        return;
+      }
+      this.stageData.set(reloaded.data);
+      this.renderer.set(reloaded.renderer);
+
+      // The start marker is drawn on previews too, so refresh them.
+      try {
+        await this.stagePreview.ensurePreviews(
+          id,
+          reloaded.data,
+          reloaded.arcBytes,
+          undefined,
+          true,
+        );
+      } catch (error) {
+        this.logger.warn(`RoomPage: preview refresh failed for "${id}"`, error);
+      }
+      this.logger.info(`RoomPage: start room moved to ${x},${y}.`);
+    } catch (error) {
+      this.loadError.set(error instanceof Error ? error.message : 'Failed to set the start room.');
+      this.logger.error('RoomPage: setting the start room failed', error);
     } finally {
       this.roomOperation.set(false);
     }
