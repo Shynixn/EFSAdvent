@@ -19,6 +19,9 @@ import { ACTOR_TEMPLATES, ActorTemplate } from './actor-template.entity';
 import { ActorData } from './fsalib.entity';
 import { GroundLayer, ROOM_DIMENSION } from './ground.entity';
 import { PLAYER_START_DEFINITION } from './smartobject/player-start.entity';
+import type { ActivationLink } from './smartobject/activation.entity';
+import { IMPRISONING_FIELD_DEFINITION } from './smartobject/imprisoning-field.entity';
+import { GOAL_DEFINITION } from './smartobject/goal.entity';
 import {
   SmartObjectDefinition,
   SmartObjectTileOffset,
@@ -96,7 +99,12 @@ export const ACTOR_TEMPLATE_SMART_OBJECTS: readonly SmartObjectDefinition[] =
 // Seed the registry so a placed template (`id` = `template:…`) resolves for
 // hover, move, delete and of course baking. Runs once at module load; the actor
 // catalog registration that happens later adds to the same (additive) registry.
-registerActorSmartObjects([...ACTOR_TEMPLATE_SMART_OBJECTS, PLAYER_START_DEFINITION]);
+registerActorSmartObjects([
+  ...ACTOR_TEMPLATE_SMART_OBJECTS,
+  PLAYER_START_DEFINITION,
+  IMPRISONING_FIELD_DEFINITION,
+  GOAL_DEFINITION,
+]);
 
 /**
  * Returns the variant (rotation style) a definition uses for the given index,
@@ -217,6 +225,15 @@ export interface RoomSmartObjects {
   smartObjects: SmartObjectPlacement[];
   /** Ground layers painted in this room, one entry per base layer. */
   ground?: GroundLayer[];
+  /**
+   * "A activates B" links between activation sources and targets.
+   *
+   * Not stored in the archive: the game only needs the shared room-local
+   * variable number (which IS written into both actors' variables). This record
+   * exists so the editor can keep drawing/editing the links. See
+   * `smartobject/activation.entity.ts`.
+   */
+  activationLinks?: ActivationLink[];
 }
 
 /** The 16 tile layers of a room (indices 0-7 base, 8-15 top). */

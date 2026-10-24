@@ -42,6 +42,17 @@ import { AppSettingsService } from '../../service/app-settings.service';
 import { ActorData, RoomData, StageData } from '../../entity/fsalib.entity';
 import { PendingChangesHost } from '../../guard/pending-changes.guard';
 import { RoomClipboardService } from '../../service/room-clipboard.service';
+import {
+  ActivationLink,
+  addActivationLink,
+  detachActivationLinks,
+  placementKey,
+  rekeyLinks,
+  removeSourceLinks,
+  sourceTargets,
+  withActivationVariable,
+  withSetVariable,
+} from '../../entity/smartobject/activation.entity';
 import { GroundDefinition, GroundLayer, createGroundLayer } from '../../entity/ground.entity';
 import {
   SmartObjectDefinition,
@@ -206,6 +217,9 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
     const legacyActors = this.legacyActors().map(placementToActor);
     return [...smartActors, ...legacyActors];
   });
+
+  /** Persisted activation links for the open room. */
+  readonly activationLinks = signal<ActivationLink[]>([]);
 
   /** Placable enemies (actor-baked smart objects), shown in the toolbox. */
   readonly enemies = signal<SmartObjectDefinition[]>([]);
@@ -512,6 +526,8 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
       const record = grid
         ? await this.stageService.getRoomRecord(stageId, grid.row, grid.col)
         : null;
+      // Activation links are stored per room; default to none.
+      this.activationLinks.set(record?.activationLinks ?? []);
       // A room's placements come from two sources with a clear split:
       //  - tile-baked objects (decorations) from the stage JSON, and
       //  - actor-baked objects (enemies) from the ARCHIVE's enemy list.
@@ -713,12 +729,84 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
   }
 
   /**
+   * Records a new "A activates B" link drawn on the canvas.
+   *
+   * The canvas already allocated the room-local variable and emitted the two
+   * updated placements; here we persist the link record and re-encode both
+   * actors' variables (the source gains a `Set Variable`, the target an
+   * `Activation Variable`).
+   */
+  onActivationLinked(event: { source: SmartObjectPlacement; target: SmartObjectPlacement }): void {
+    const result = addActivationLink(event.source, event.target, this.activationLinks());
+    if (!result) {
+      this.logger.warn('RoomPage: could not add activation link (no free variable?).');
+      return;
+    }
+    this.activationLinks.set(result.links);
+    this.stageEditor.setDirty(this.stageId(), true);
+    this.stageRoom.markActorsDirty(this.roomIndex());
+    this.replacePlacement(event.source, result.source);
+    this.replacePlacement(event.target, result.target);
+  }
+
+  /**
+   * Removes every activation link the given placement participates in.
+   *
+   * Works from either end:
+   * - a **target** simply loses its incoming link and its `Activation Variable`
+   *   is cleared (so it is always active again);
+   * - a **source** loses all its outgoing links, and every target it drove has
+   *   its `Activation Variable` cleared as well — otherwise those targets would
+   *   wait forever on a variable nothing writes.
+   */
+  onActivationUnlinked(placement: SmartObjectPlacement): void {
+    const links = this.activationLinks();
+    const key = placementKey(placement);
+    const byKey = new Map(this.smartObjects().map((entry) => [placementKey(entry), entry] as const));
+    const cleared: SmartObjectPlacement[] = [];
+
+    // Case 1: the placement is a SOURCE — drop all of its outgoing links and
+    // clear each target's activation variable.
+    if (links.some((link) => link.from === key)) {
+      const targets = sourceTargets(placement, links).flatMap((targetKey) => {
+        const target = byKey.get(targetKey);
+        return target ? [target] : [];
+      });
+      const removal = removeSourceLinks(placement, targets, links);
+      this.activationLinks.set(removal.links);
+      cleared.push(withSetVariable(placement, 0), ...removal.targets);
+    }
+
+    // Case 2: the placement is a TARGET — remove it from whatever link drives
+    // it and clear its own activation variable.
+    const incoming = links.filter((link) => link.to.includes(key));
+    if (incoming.length > 0) {
+      this.activationLinks.set(detachActivationLinks(placement, this.activationLinks()));
+      cleared.push(withActivationVariable(placement, 0));
+    }
+
+    if (cleared.length === 0) {
+      return;
+    }
+    this.stageEditor.setDirty(this.stageId(), true);
+    this.stageRoom.markActorsDirty(this.roomIndex());
+    // Swap the cleared placements back in by key: the canvas emitted its own
+    // instance, which may not be reference-identical to the one recorded here.
+    const replacements = new Map(cleared.map((entry) => [placementKey(entry), entry] as const));
+    this.smartObjects.update((list) =>
+      list.map((entry) => replacements.get(placementKey(entry)) ?? entry),
+    );
+  }
+
+  /**
    * Records a moved decoration: the canvas already cleared the old tiles and
    * stamped the new ones, so here we replace the placement in the list and mark
    * both layers dirty.
    */
   onDecorationMoved(event: { from: SmartObjectPlacement; to: SmartObjectPlacement }): void {
     this.stageEditor.setDirty(this.stageId(), true);
+    // Keep activation links attached to the moved object.
+    this.activationLinks.set(rekeyLinks(event.from, event.to, this.activationLinks()));
     const definition = findSmartObjectDefinition(event.to.id);
     if (definition?.baking === 'actor') {
       this.stageRoom.markActorsDirty(this.roomIndex());
@@ -794,11 +882,37 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
    * border (identity is how the canvas recognises it).
    */
   private replacePlacement(from: SmartObjectPlacement, to: SmartObjectPlacement): void {
-    this.smartObjects.update((list) =>
-      list.map((placement) => (placement === from ? to : placement)),
-    );
-    this.legacyActors.update((list) =>
-      list.map((placement) => (placement === from ? to : placement)),
+    // Match by REFERENCE first (the common case: the canvas holds the exact
+    // object we recorded), then by placement KEY, then by POSITION.
+    //
+    // The weaker matches are required for actor-baked placements, whose identity
+    // changes on reload: `actorToPlacement` rebinds the archive's actor id to a
+    // template only when the VARIABLE still matches the template exactly. Once
+    // the editor writes an activation variable the variable no longer matches,
+    // so the placement comes back as a raw actor (id `GOAL` instead of `goal`)
+    // and both `===` and `placementKey` miss — which silently dropped the
+    // update on save. Position + base layer is what actually survives a reload.
+    const swap = (placement: SmartObjectPlacement): SmartObjectPlacement =>
+      placement === from || this.samePlacement(placement, from) ? to : placement;
+    this.smartObjects.update((list) => list.map(swap));
+    this.legacyActors.update((list) => list.map(swap));
+  }
+
+  /**
+   * Whether two placements denote the same object in the room.
+   *
+   * Compares the stable key when possible, falling back to the anchor and base
+   * layer — which stay identical across a load even when the placement's id is
+   * rebound from an actor id to a smart-object id (or vice versa).
+   */
+  private samePlacement(a: SmartObjectPlacement, b: SmartObjectPlacement): boolean {
+    if (placementKey(a) === placementKey(b)) {
+      return true;
+    }
+    return (
+      a.anchorRow === b.anchorRow &&
+      a.anchorCol === b.anchorCol &&
+      (a.baseLayerId ?? 0) === (b.baseLayerId ?? 0)
     );
   }
 
@@ -831,6 +945,8 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
     }
     this.smartObjects.update((list) => list.filter((entry) => entry !== placement));
     this.legacyActors.update((list) => list.filter((entry) => entry !== placement));
+    // Drop any activation links that referenced the deleted object.
+    this.activationLinks.set(detachActivationLinks(placement, this.activationLinks()));
   }
 
   /**
@@ -949,6 +1065,7 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
       grid.col,
       this.smartObjects(),
       ground,
+      this.activationLinks(),
     );
   }
 

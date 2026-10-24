@@ -27,6 +27,7 @@ import {
   smartObjectBounds,
   warpLinks,
 } from '../../entity/smartobject.entity';
+import type { ActivationLink } from '../../entity/smartobject/activation.entity';
 
 /** How many base layers a room has (0-7). */
 export const BASE_LAYER_COUNT = 8;
@@ -147,6 +148,18 @@ export class RoomLayersComponent implements AfterViewInit, OnDestroy {
     from: SmartObjectPlacement;
     to: SmartObjectPlacement;
   }>();
+
+  /** Persisted activation links for this room (drawn on every layer canvas). */
+  @Input() activationLinks: readonly ActivationLink[] = [];
+
+  /** Emits when the user links an activation source to a target. */
+  @Output() activationLinked = new EventEmitter<{
+    source: SmartObjectPlacement;
+    target: SmartObjectPlacement;
+  }>();
+
+  /** Emits the placement whose activation links should be removed. */
+  @Output() activationUnlinked = new EventEmitter<SmartObjectPlacement>();
 
   /** Emits when a **legacy** actor is deleted from the context menu. */
   @Output() legacyDeleted = new EventEmitter<SmartObjectPlacement>();

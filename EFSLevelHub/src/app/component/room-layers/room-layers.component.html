@@ -38,6 +38,9 @@
           (decorationDeleted)="decorationDeleted.emit($event)"
           (decorationRotated)="decorationRotated.emit($event)"
           (placementUpdated)="placementUpdated.emit($event)"
+          (activationLinked)="activationLinked.emit($event)"
+          (activationUnlinked)="activationUnlinked.emit($event)"
+          [activationLinks]="activationLinks"
           (legacyDeleted)="legacyDeleted.emit($event)"
           (legacyMoved)="legacyMoved.emit($event)"
         />

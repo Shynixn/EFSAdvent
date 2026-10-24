@@ -41,8 +41,8 @@
         @if (startEndOpen()) {
           <div class="space-y-2 border-t border-slate-800 px-3 py-3">
             <p class="text-[11px] text-slate-500">
-              Drag the player start onto the room canvas. Right-click it to rotate, or to change its
-              player state and colour.
+              Drag these onto the room canvas. Right-click them to change their options (the player
+              start also rotates, changes state and colour).
             </p>
             <div class="flex flex-wrap gap-2">
               <button
@@ -60,6 +60,28 @@
                 </span>
                 <span>{{ playerStart.name }}</span>
               </button>
+
+              @for (item of startEndObjects; track item.id) {
+                <button
+                  type="button"
+                  draggable="true"
+                  (dragstart)="onStartEndDragStart($event, item)"
+                  (dragend)="onDecorationDragEnd()"
+                  class="flex cursor-grab flex-col items-center gap-2 rounded-lg border border-slate-700 bg-slate-800/70 px-3 py-2 text-xs text-slate-200 transition hover:border-indigo-400 hover:bg-slate-700/60 active:cursor-grabbing"
+                  [title]="'Drag ' + item.name + ' onto the canvas'"
+                >
+                  <span
+                    class="flex h-16 w-16 items-center justify-center overflow-hidden rounded border border-slate-700 bg-slate-950/60"
+                  >
+                    <canvas
+                      #startEndPreview
+                      [attr.data-startend-id]="item.id"
+                      style="image-rendering: pixelated"
+                    ></canvas>
+                  </span>
+                  <span class="max-w-16 truncate text-center">{{ item.name }}</span>
+                </button>
+              }
             </div>
           </div>
         }

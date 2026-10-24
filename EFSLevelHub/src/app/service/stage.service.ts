@@ -425,6 +425,7 @@ export class StageService {
     roomCol: number,
     smartObjects: RoomSmartObjects['smartObjects'],
     ground: RoomSmartObjects['ground'] = [],
+    activationLinks: RoomSmartObjects['activationLinks'] = [],
   ): Promise<void> {
     const file = await this.readStageFile(id);
     if (!file) {
@@ -435,10 +436,17 @@ export class StageService {
     const rooms = (file.rooms ?? []).filter(
       (room) => !(room.row === roomRow && room.col === roomCol),
     );
-    if (smartObjects.length > 0 || (ground && ground.length > 0)) {
+    if (
+      smartObjects.length > 0 ||
+      (ground && ground.length > 0) ||
+      (activationLinks && activationLinks.length > 0)
+    ) {
       const entry: RoomSmartObjects = { row: roomRow, col: roomCol, smartObjects };
       if (ground && ground.length > 0) {
         entry.ground = ground;
+      }
+      if (activationLinks && activationLinks.length > 0) {
+        entry.activationLinks = activationLinks;
       }
       rooms.push(entry);
     }
@@ -446,8 +454,9 @@ export class StageService {
 
     await this.writeStageFile(file);
     this.logger.info(
-      `StageService: saved ${smartObjects.length} smart object(s) and ` +
-        `${ground?.length ?? 0} ground layer(s) for room (${roomRow},${roomCol}).`,
+      `StageService: saved ${smartObjects.length} smart object(s), ` +
+        `${ground?.length ?? 0} ground layer(s) and ` +
+        `${activationLinks?.length ?? 0} activation link(s) for room (${roomRow},${roomCol}).`,
     );
   }
 

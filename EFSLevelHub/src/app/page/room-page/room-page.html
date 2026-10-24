@@ -170,6 +170,7 @@
             [groundLayers]="groundLayers()"
             [groundTile]="groundTile()"
             [groundMode]="groundMode()"
+            [activationLinks]="activationLinks()"
             (tileChanged)="onTileChanged($event)"
             (groundChanged)="onGroundChanged($event)"
             (decorationPlaced)="onDecorationPlaced($event)"
@@ -177,6 +178,8 @@
             (decorationDeleted)="onDecorationDeleted($event)"
             (decorationRotated)="onDecorationRotated($event)"
             (placementUpdated)="onPlacementUpdated($event)"
+            (activationLinked)="onActivationLinked($event)"
+            (activationUnlinked)="onActivationUnlinked($event)"
             (legacyDeleted)="onLegacyDeleted($event)"
             (legacyMoved)="onLegacyMoved($event)"
           />

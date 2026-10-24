@@ -33,6 +33,8 @@ import {
   PLAYER_START_ACTOR_ID,
   PLAYER_START_DEFINITION,
 } from '../../entity/smartobject/player-start.entity';
+import { IMPRISONING_FIELD_DEFINITION } from '../../entity/smartobject/imprisoning-field.entity';
+import { GOAL_DEFINITION } from '../../entity/smartobject/goal.entity';
 import { EditorService } from '../../service/editor.service';
 import { ImageBuffer } from '../../service/render/gba-tile-renderer';
 
@@ -248,6 +250,7 @@ export class ToolboxColumnComponent implements AfterViewInit {
       this.enemyCanvases();
       this.templateCanvases();
       this.playerStartCanvases();
+      this.startEndCanvases();
       queueMicrotask(() => void this.drawPreviews());
     });
   }
@@ -444,6 +447,49 @@ export class ToolboxColumnComponent implements AfterViewInit {
         );
       }
     }
+    // Start & End object thumbnails (imprisoning field, goal).
+    const startEndCanvases = this.startEndCanvases();
+    if (startEndCanvases.length > 0) {
+      try {
+        await renderer.prepareActors();
+      } catch {
+        // Sprite sheets may be missing for this stage; skip these thumbnails.
+      }
+      for (const ref of startEndCanvases) {
+        const id = ref.nativeElement.dataset['startendId'];
+        const definition = this.startEndObjects.find((entry) => entry.id === id);
+        const canvas = ref.nativeElement;
+        if (!definition) {
+          continue;
+        }
+        const buffer = await renderer.renderActorPreview(
+          definition.actorId ?? '',
+          definition.actorVariable ?? 0,
+          64,
+          64,
+          this._gba,
+        );
+        if (!buffer) {
+          continue;
+        }
+        canvas.width = buffer.width;
+        canvas.height = buffer.height;
+        const scale = Math.min(64 / buffer.width, 64 / buffer.height);
+        canvas.style.width = `${Math.round(buffer.width * scale)}px`;
+        canvas.style.height = `${Math.round(buffer.height * scale)}px`;
+
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          continue;
+        }
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.putImageData(
+          new ImageData(new Uint8ClampedArray(buffer.pixels), buffer.width, buffer.height),
+          0,
+          0,
+        );
+      }
+    }
   }
 
   /** Selects an actor-template tab. */
@@ -602,6 +648,28 @@ export class ToolboxColumnComponent implements AfterViewInit {
 
   /** The player start smart-object definition (shown in Start & End). */
   readonly playerStart = PLAYER_START_DEFINITION;
+
+  /**
+   * Other Start & End objects (besides the player start), rendered as draggable
+   * cards. All are actor-baked smart objects with their own context-menu
+   * options (currently the imprisoning field and the goal, both `Shape`).
+   */
+  readonly startEndObjects: SmartObjectDefinition[] = [
+    IMPRISONING_FIELD_DEFINITION,
+    GOAL_DEFINITION,
+  ];
+
+  /** The Start & End object preview canvases. */
+  private readonly startEndCanvases =
+    viewChildren<ElementRef<HTMLCanvasElement>>('startEndPreview');
+
+  /** Starts a native drag for a Start & End actor object. */
+  onStartEndDragStart(event: DragEvent, definition: SmartObjectDefinition): void {
+    event.dataTransfer?.setData('application/x-smart-object', definition.id);
+    hideNativeDragImage(event);
+    this.dragService.start(definition, 0);
+    this.decorationDragStarted.emit();
+  }
 
   /**
    * Starts a native drag for the player start marker.

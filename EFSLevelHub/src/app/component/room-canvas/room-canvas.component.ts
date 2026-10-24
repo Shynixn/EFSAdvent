@@ -44,6 +44,14 @@ import {
   withRotatedWarpType,
 } from '../../entity/smartobject/door.entity';
 import { canRotate, nextRotation } from '../../entity/contract/rotateable.entity';
+import { shapeOf, decodeShape, encodeShape } from '../../entity/contract/shapeable.entity';
+import { isActivationSource, isActivationTarget } from '../../entity/contract/activatable.entity';
+import {
+  ActivationLink,
+  isLinkedTarget,
+  placementKey,
+  sourceTargets,
+} from '../../entity/smartobject/activation.entity';
 import {
   isPlayerStart,
   decodePlayerStart,
@@ -466,6 +474,36 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
 
   /** Tile under the cursor while connecting (drives the connect line). */
   private readonly connectCursor = signal<{ x: number; y: number } | null>(null);
+
+  /**
+   * The activation SOURCE the user is currently linking from (context-menu
+   * "Activates"), or null.
+   *
+   * Unlike the door connect (one source → one target), an activation source may
+   * drive MANY targets, so the link mode stays active after each successful
+   * drop and only ends via Escape / right-click / clicking the source again.
+   */
+  readonly activatingFrom = signal<SmartObjectPlacement | null>(null);
+
+  /** Targets picked during the current activation session (for the live lines). */
+  readonly activationTargets = signal<SmartObjectPlacement[]>([]);
+
+  /** Emits `{ source, target }` when the user links a source to a target. */
+  @Output() activationLinked = new EventEmitter<{
+    source: SmartObjectPlacement;
+    target: SmartObjectPlacement;
+  }>();
+
+  /** Emits when the activation session ends (host clears its overlay). */
+  @Output() activationDragChanged = new EventEmitter<boolean>();
+
+  /** Emits the placement whose activation links should be removed. */
+  @Output() activationUnlinked = new EventEmitter<SmartObjectPlacement>();
+
+  /** Persisted activation links for this room (used to draw committed lines). */
+  @Input() activationLinks: readonly ActivationLink[] = [];
+
+  /** Persisted activation links for this room (used to draw committed lines). */
 
   /** Smart object currently hovered by the pointer (for its boundary outline). */
   private hoveredPlacement: SmartObjectPlacement | null = null;
@@ -1141,6 +1179,82 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
     this.drawHoverOutline();
   }
 
+  /**
+   * Starts an ACTIVATION link from the context-menu source.
+   *
+   * The session is multi-target: each release over a valid target emits
+   * {@link activationLinked} and the mode stays on, so one source can be linked
+   * to several targets (the game uses a single room-local variable for all of
+   * them). Ends via {@link cancelActivation} (Escape / right-click / re-click).
+   */
+  startActivation(): void {
+    const placement = this.contextMenu()?.placement;
+    if (!placement) {
+      return;
+    }
+    this.contextMenu.set(null);
+    // Clicking the same source again ends the session.
+    if (this.activatingFrom() === placement) {
+      this.cancelActivation();
+      return;
+    }
+    this.activatingFrom.set(placement);
+    this.activationTargets.set([]);
+    this.connectCursor.set(null);
+    window.addEventListener('pointermove', this.onWindowConnectMove);
+    window.addEventListener('pointerup', this.onWindowConnectUp);
+    window.addEventListener('keydown', this.onActivationKey);
+    this.activationDragChanged.emit(true);
+    void this.redraw();
+  }
+
+  /** Ends the activation session, clearing its lines. */
+  cancelActivation(): void {
+    if (!this.activatingFrom()) {
+      return;
+    }
+    this.activatingFrom.set(null);
+    this.activationTargets.set([]);
+    this.connectCursor.set(null);
+    this.stopConnectTracking();
+    window.removeEventListener('keydown', this.onActivationKey);
+    this.activationDragChanged.emit(false);
+    this.drawHoverOutline();
+    void this.redraw();
+  }
+
+  /** Escape cancels the activation session. */
+  private readonly onActivationKey = (event: KeyboardEvent): void => {
+    if (event.key === 'Escape') {
+      this.cancelActivation();
+    }
+  };
+
+  /**
+   * The activation TARGET (an actor object with `activatable.isTarget`) under a
+   * tile, or null. Targets are actor placements, so the sprite bounds are used.
+   */
+  activationTargetAtTile(tile: { x: number; y: number }): SmartObjectPlacement | null {
+    const source = this.activatingFrom();
+    for (let i = this.smartObjects.length - 1; i >= 0; i--) {
+      const placement = this.smartObjects[i];
+      if (placement === source || (placement.baseLayerId ?? 0) !== this.layerIndex) {
+        continue;
+      }
+      const definition = findSmartObjectDefinition(placement.id);
+      if (!isActivationTarget(definition)) {
+        continue;
+      }
+      const box = this.boxOf(placement, definition!);
+      const px = tile.x * TILE_SIZE;
+      const py = tile.y * TILE_SIZE;
+      if (px >= box.x && px < box.x + box.width && py >= box.y && py < box.y + box.height) {
+        return placement;
+      }
+    }
+    return null;
+  }
+
   /** Stops listening for the connect drag once it leaves this canvas. */
   private stopConnectTracking(): void {
     window.removeEventListener('pointermove', this.onWindowConnectMove);
@@ -1148,16 +1262,153 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
   }
 
   private readonly onWindowConnectMove = (event: PointerEvent): void => {
-    if (this.connectingFrom()) {
+    if (this.connectingFrom() || this.activatingFrom()) {
       this.drawConnectLine(event);
     }
   };
 
   private readonly onWindowConnectUp = (event: PointerEvent): void => {
+    if (this.activatingFrom()) {
+      this.finishActivation(event);
+      return;
+    }
     if (this.connectingFrom()) {
       this.finishConnect(event);
     }
   };
+
+  /**
+   * Links the current activation source to the target under the pointer.
+   *
+   * Releasing over a valid target adds the link and the session STAYS OPEN, so
+   * the user can link further targets. Releasing anywhere else cancels the
+   * session — clicking empty space is the natural way out, alongside Escape.
+   */
+  private finishActivation(event: PointerEvent): void {
+    const source = this.activatingFrom();
+    if (!source) {
+      return;
+    }
+    const target = this.activationTargetAtPointer(event);
+    if (!target) {
+      // Nothing under the cursor: treat the click as "I'm done".
+      this.cancelActivation();
+      return;
+    }
+    if (this.activationTargets().includes(target)) {
+      // Already linked — keep the session open without adding a duplicate.
+      return;
+    }
+    this.activationTargets.update((list) => [...list, target]);
+    this.activationLinked.emit({ source, target });
+    void this.redraw();
+  }
+
+  /** Resolves the activation target under a page-wide pointer position. */
+  private activationTargetAtPointer(event: PointerEvent): SmartObjectPlacement | null {
+    if (this.isPointerOverCanvas(event)) {
+      const tile = this.tileAt(event);
+      const local = tile ? this.activationTargetAtTile(tile) : null;
+      if (local) {
+        return local;
+      }
+    }
+    return this.resolveDoor?.(event.clientX, event.clientY) ?? null;
+  }
+
+  /**
+   * Paints every activation link as a dashed amber line from the source's centre
+   * to each target's centre, plus the live line to the cursor while a link
+   * session is running.
+   *
+   * Lines are drawn for links whose BOTH ends live on this canvas's base layer;
+   * the host draws the cross-layer remainder (there is only ever one activation
+   * layer view per room section, but targets may sit on other base layers).
+   */
+  private paintActivationLines(ctx: CanvasRenderingContext2D): void {
+    const centre = (placement: SmartObjectPlacement): { x: number; y: number } | null => {
+      const definition = findSmartObjectDefinition(placement.id);
+      if (!definition) {
+        return null;
+      }
+      const bounds = this.actorBox(placement);
+      return { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
+    };
+
+    const drawLine = (
+      from: SmartObjectPlacement,
+      to: SmartObjectPlacement,
+      dash: number[],
+      alpha: number,
+    ): void => {
+      const a = centre(from);
+      const b = centre(to);
+      if (!a || !b) {
+        return;
+      }
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.strokeStyle = '#f59e0b';
+      ctx.lineWidth = 2;
+      ctx.setLineDash(dash);
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+      ctx.restore();
+    };
+
+    // Committed links (source → every recorded target).
+    //
+    // Only links whose SOURCE lives on THIS canvas's base layer are drawn: every
+    // base layer renders its own `<app-room-canvas>`, so without this filter the
+    // same line would appear once per layer section. (The source owns the link;
+    // its targets may sit on other layers, and the line still belongs to the
+    // source's section.)
+    const byKey = new Map(this.smartObjects.map((p) => [placementKey(p), p] as const));
+    for (const link of this.activationLinks) {
+      const source = byKey.get(link.from);
+      if (!source || (source.baseLayerId ?? 0) !== this.layerIndex) {
+        continue;
+      }
+      for (const targetKey of link.to) {
+        const target = byKey.get(targetKey);
+        if (target) {
+          drawLine(source, target, [5, 4], 0.9);
+        }
+      }
+    }
+
+    // Live session: the source, the targets picked so far, and the cursor.
+    // Also only on the source's own layer canvas.
+    const source = this.activatingFrom();
+    if (!source || (source.baseLayerId ?? 0) !== this.layerIndex) {
+      return;
+    }
+    for (const target of this.activationTargets()) {
+      drawLine(source, target, [5, 4], 1);
+    }
+    const cursor = this.connectCursor();
+    const from = centre(source);
+    if (cursor && from) {
+      ctx.save();
+      ctx.strokeStyle = '#fbbf24';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath();
+      ctx.moveTo(from.x, from.y);
+      ctx.lineTo((cursor.x + 0.5) * TILE_SIZE, (cursor.y + 0.5) * TILE_SIZE);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Highlight a target under the cursor.
+    const hovered = this.activationTargetAtTile(cursor ?? { x: -1, y: -1 });
+    if (hovered) {
+      const box = this.actorBox(hovered);
+      this.strokeOutline(ctx, box.x, box.y, box.width, box.height, { color: '#22c55e', dash: [] });
+    }
+  }
 
   /**
    * Completes a connect drag: if another door is under the pointer, delegates to
@@ -1337,6 +1588,24 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
         icon: 'M4 2a1 1 0 011 1v1.6a7 7 0 119.2 10.4 1 1 0 11-1.2-1.6A5 5 0 106 6.7V8a1 1 0 11-2 0V3a1 1 0 011-1z',
       });
     }
+    // Activation SOURCES can link to targets. Targets never show this.
+    if (this.isContextActivationSource()) {
+      actions.push({
+        id: 'activate',
+        label: 'Activates',
+        accent: true,
+        icon: 'M11 2a1 1 0 10-2 0v7H2a1 1 0 100 2h7v7a1 1 0 102 0v-7h7a1 1 0 100-2h-7V2z',
+      });
+    }
+    // Either end of an existing link can drop it from this menu.
+    if (this.hasContextActivationLink()) {
+      actions.push({
+        id: 'unlink-activation',
+        label: 'Cancel activation',
+        accent: true,
+        icon: 'M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z',
+      });
+    }
     if (this.canConnectContextPlacement()) {
       if (this.isContextPlacementConnected()) {
         actions.push({
@@ -1397,6 +1666,17 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
       });
     }
 
+    // Shaped actor objects (imprisoning field, goal) list their `Shape` values.
+    const shape = shapeOf(findSmartObjectDefinition(this.contextMenu()?.placement?.id ?? ''));
+    if (shape) {
+      groups.push({
+        id: 'shape',
+        label: 'Shape',
+        choices: shape.shapes.map((entry) => ({ value: entry.value, label: entry.name })),
+        selected: decodeShape(this.contextMenu()?.placement?.actorVariable ?? 0),
+      });
+    }
+
     return groups;
   }
 
@@ -1415,7 +1695,55 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
       case 'delete':
         this.deleteContextPlacement();
         break;
+      case 'activate':
+        this.startActivation();
+        break;
+      case 'unlink-activation':
+        this.unlinkContextActivation();
+        break;
     }
+  }
+
+  /** Whether the context-menu target can start activation links. */
+  isContextActivationSource(): boolean {
+    const placement = this.contextMenu()?.placement;
+    return !!placement && isActivationSource(findSmartObjectDefinition(placement.id));
+  }
+
+  /**
+   * Whether the context-menu target is either end of an existing activation
+   * link — i.e. there is something for "Cancel activation" to remove.
+   */
+  hasContextActivationLink(): boolean {
+    const placement = this.contextMenu()?.placement;
+    if (!placement) {
+      return false;
+    }
+    if (isLinkedTarget(placement, this.activationLinks)) {
+      return true;
+    }
+    return sourceTargets(placement, this.activationLinks).length > 0;
+  }
+
+  /**
+   * Drops every activation link the context-menu target participates in and
+   * emits the updated placements so the host clears their variables.
+   *
+   * A target only ever has one incoming link, so removing it means clearing
+   * that target. A source may drive several targets, so removing it clears the
+   * source's `Set Variable` AND every one of its targets' `Activation
+   * Variable` — otherwise those targets would wait forever on a variable
+   * nothing writes.
+   */
+  unlinkContextActivation(): void {
+    const placement = this.contextMenu()?.placement;
+    if (!placement) {
+      return;
+    }
+    this.contextMenu.set(null);
+    this.hoveredPlacement = null;
+    this.activationUnlinked.emit(placement);
+    void this.redraw();
   }
 
   /** Dispatches a submenu choice from the shared context menu. */
@@ -1430,7 +1758,21 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
       case 'player-color':
         this.selectContextPlayerColor(event.value as PlayerColor);
         break;
+      case 'shape':
+        this.selectContextShape(event.value);
+        break;
     }
+  }
+
+  /**
+   * Applies a new `Shape` to the context-menu target.
+   *
+   * The shape lives in the actor `Variable` (bits 0-3), so this repacks the
+   * variable and re-renders — the same path the player start uses for its own
+   * variable-backed fields.
+   */
+  selectContextShape(shape: number): void {
+    this.updateContextPlayerVariable((variable) => encodeShape(variable, shape));
   }
 
   /** Applies a new player state to the context-menu target. */
@@ -2117,6 +2459,10 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
     if (this.connectingFrom()) {
       this.paintConnectLine(ctx);
     }
+
+    // Draw activation links: the committed ones, plus the live line to the
+    // cursor while an activation session is running.
+    this.paintActivationLines(ctx);
 
     // Red markers for **legacy** actors on this layer only — editor-placed
     // objects show nothing until hovered.
