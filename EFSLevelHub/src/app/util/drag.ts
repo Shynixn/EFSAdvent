@@ -38,9 +38,5 @@ export function hideNativeDragImage(event: DragEvent): void {
   // deferring the removal keeps it reliable across browsers.
   setTimeout(() => image.remove(), 0);
 
-  event.currentTarget?.addEventListener(
-    'dragend',
-    () => image.remove(),
-    { once: true },
-  );
+  event.currentTarget?.addEventListener('dragend', () => image.remove(), { once: true });
 }
