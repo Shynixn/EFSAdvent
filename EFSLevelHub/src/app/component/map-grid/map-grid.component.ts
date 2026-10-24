@@ -229,9 +229,7 @@ export class MapGridComponent {
     // Only existing rooms can become the start room, and offering it for the
     // current start room would be a no-op.
     const canBeStart = !this.isStart(menu.cell.x, menu.cell.y);
-    const actions: RoomMenuAction[] = canPaste
-      ? ['paste', 'copy', 'delete']
-      : ['copy', 'delete'];
+    const actions: RoomMenuAction[] = canPaste ? ['paste', 'copy', 'delete'] : ['copy', 'delete'];
     if (canBeStart) {
       actions.push('start');
     }
