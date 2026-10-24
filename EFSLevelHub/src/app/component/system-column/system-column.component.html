@@ -56,92 +56,92 @@
     <!-- Debug (collapsible): layer options + the live room JSON. Hidden unless enabled in Settings. -->
     @if (showDebug) {
       <div class="rounded-lg border border-slate-800">
-      <button
-        type="button"
-        (click)="debugOpen.set(!debugOpen())"
-        class="flex w-full cursor-pointer items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400"
-      >
-        <span>Debug</span>
-        <span class="text-slate-500">{{ debugOpen() ? '▾' : '▸' }}</span>
-      </button>
-      @if (debugOpen()) {
-        <div class="space-y-4 border-t border-slate-800 px-3 py-3">
-          <!-- Layer options -->
-          <div class="flex flex-col gap-2 text-sm">
-            <label class="flex cursor-pointer items-center gap-2">
-              <input
-                type="checkbox"
-                class="accent-indigo-500"
-                [checked]="gba"
-                (change)="gbaChange.emit($any($event.target).checked)"
-              />
-              <span class="text-xs uppercase tracking-wide text-slate-400">GBA layer</span>
-            </label>
+        <button
+          type="button"
+          (click)="debugOpen.set(!debugOpen())"
+          class="flex w-full cursor-pointer items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400"
+        >
+          <span>Debug</span>
+          <span class="text-slate-500">{{ debugOpen() ? '▾' : '▸' }}</span>
+        </button>
+        @if (debugOpen()) {
+          <div class="space-y-4 border-t border-slate-800 px-3 py-3">
+            <!-- Layer options -->
+            <div class="flex flex-col gap-2 text-sm">
+              <label class="flex cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  class="accent-indigo-500"
+                  [checked]="gba"
+                  (change)="gbaChange.emit($any($event.target).checked)"
+                />
+                <span class="text-xs uppercase tracking-wide text-slate-400">GBA layer</span>
+              </label>
 
-            <label class="flex cursor-pointer items-center gap-2">
-              <input
-                type="checkbox"
-                class="accent-indigo-500"
-                [checked]="topLayer"
-                (change)="topLayerChange.emit($any($event.target).checked)"
-              />
-              <span class="text-xs uppercase tracking-wide text-slate-400">Top layer</span>
-            </label>
+              <label class="flex cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  class="accent-indigo-500"
+                  [checked]="topLayer"
+                  (change)="topLayerChange.emit($any($event.target).checked)"
+                />
+                <span class="text-xs uppercase tracking-wide text-slate-400">Top layer</span>
+              </label>
 
-            <label class="flex cursor-pointer items-center gap-2">
-              <input
-                type="checkbox"
-                class="accent-indigo-500"
-                [checked]="paintTop"
-                (change)="paintTopChange.emit($any($event.target).checked)"
-              />
-              <span class="text-xs uppercase tracking-wide text-slate-400">Edit top layer</span>
-            </label>
-          </div>
-
-          <!-- Room JSON: the room's current in-memory data -->
-          <div class="flex flex-col gap-2">
-            <div class="flex items-center justify-between gap-2">
-              <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                Room JSON
-              </h3>
-              <div class="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  (click)="copyRoomJson()"
-                  class="cursor-pointer rounded border border-slate-600 bg-slate-800/70 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-300 transition hover:border-indigo-400 hover:text-indigo-300"
-                  title="Copy the room JSON as minified JSON"
-                >
-                  {{ copied() ? 'Copied!' : 'Copy JSON' }}
-                </button>
-                <button
-                  type="button"
-                  (click)="copyRoomJsonWithoutLegacy()"
-                  class="cursor-pointer rounded border border-slate-600 bg-slate-800/70 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-300 transition hover:border-indigo-400 hover:text-indigo-300"
-                  title="Copy the room JSON without the legacy actors and ground"
-                >
-                  {{ copiedWithoutLegacy() ? 'Copied!' : 'Copy JSON (no legacy)' }}
-                </button>
-                <button
-                  type="button"
-                  (click)="clearRoomData.emit()"
-                  class="cursor-pointer rounded border border-red-500/40 bg-red-500/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-red-400 transition hover:border-red-400 hover:bg-red-500/20"
-                  title="Remove all smart objects and ground from this room"
-                >
-                  Clear room data
-                </button>
-              </div>
+              <label class="flex cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  class="accent-indigo-500"
+                  [checked]="paintTop"
+                  (change)="paintTopChange.emit($any($event.target).checked)"
+                />
+                <span class="text-xs uppercase tracking-wide text-slate-400">Edit top layer</span>
+              </label>
             </div>
-            @if (roomJson) {
-              <pre
-                class="max-h-96 overflow-auto rounded-lg border border-slate-700 bg-slate-950/80 p-3 font-mono text-[10px] leading-relaxed text-slate-300"
-              ><code>{{ roomJson }}</code></pre>
-            } @else {
-              <p class="text-xs text-slate-500">Loading…</p>
-            }
+
+            <!-- Room JSON: the room's current in-memory data -->
+            <div class="flex flex-col gap-2">
+              <div class="flex items-center justify-between gap-2">
+                <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                  Room JSON
+                </h3>
+                <div class="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    (click)="copyRoomJson()"
+                    class="cursor-pointer rounded border border-slate-600 bg-slate-800/70 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-300 transition hover:border-indigo-400 hover:text-indigo-300"
+                    title="Copy the room JSON as minified JSON"
+                  >
+                    {{ copied() ? 'Copied!' : 'Copy JSON' }}
+                  </button>
+                  <button
+                    type="button"
+                    (click)="copyRoomJsonWithoutLegacy()"
+                    class="cursor-pointer rounded border border-slate-600 bg-slate-800/70 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-300 transition hover:border-indigo-400 hover:text-indigo-300"
+                    title="Copy the room JSON without the legacy actors and ground"
+                  >
+                    {{ copiedWithoutLegacy() ? 'Copied!' : 'Copy JSON (no legacy)' }}
+                  </button>
+                  <button
+                    type="button"
+                    (click)="clearRoomData.emit()"
+                    class="cursor-pointer rounded border border-red-500/40 bg-red-500/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-red-400 transition hover:border-red-400 hover:bg-red-500/20"
+                    title="Remove all smart objects and ground from this room"
+                  >
+                    Clear room data
+                  </button>
+                </div>
+              </div>
+              @if (roomJson) {
+                <pre
+                  class="max-h-96 overflow-auto rounded-lg border border-slate-700 bg-slate-950/80 p-3 font-mono text-[10px] leading-relaxed text-slate-300"
+                ><code>{{ roomJson }}</code></pre>
+              } @else {
+                <p class="text-xs text-slate-500">Loading…</p>
+              }
+            </div>
           </div>
-        </div>
-      }
+        }
       </div>
     }
   </div>
