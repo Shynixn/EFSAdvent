@@ -29,6 +29,7 @@ import { GROUND_DEFINITIONS, GroundDefinition } from '../../entity/ground.entity
 import { SmartObjectDragService } from '../../service/smart-object-drag.service';
 import { ActorSpriteService } from '../../service/actor-sprite.service';
 import { hideNativeDragImage } from '../../util/drag';
+import { PLAYER_START_ACTOR_ID, PLAYER_START_DEFINITION } from '../../entity/smartobject/player-start.entity';
 import { EditorService } from '../../service/editor.service';
 import { ImageBuffer } from '../../service/render/gba-tile-renderer';
 
@@ -127,19 +128,47 @@ export class ToolboxColumnComponent implements AfterViewInit {
   private readonly iconCache = new Map<string, ImageBitmap | null>();
 
   /** Whether the Advanced (manual drawing) section is expanded. */
-  readonly advancedOpen = signal(false);
+  readonly advancedOpen = signal(true);
 
   /** Whether the Ground section is expanded. */
   readonly groundOpen = signal(true);
 
-  /** Whether the Doors section is expanded. */
-  readonly doorsOpen = signal(true);
+  /** Whether the Start & End section is expanded. */
+  readonly startEndOpen = signal(true);
+
+  /** Whether the Walls section is expanded. */
+  readonly wallsOpen = signal(true);
 
   /** Whether the Decorations section is expanded. */
   readonly decorationsOpen = signal(true);
 
   /** Whether the Enemies section is expanded. */
   readonly enemiesOpen = signal(true);
+
+  /** Whether the NPC section is expanded. */
+  readonly npcsOpen = signal(true);
+
+  /** Whether the Misc (actor template) section is expanded. */
+  readonly miscOpen = signal(true);
+
+  /**
+   * Toolbox tabs. Each tab groups related sections; every section starts
+   * expanded.
+   *
+   * - **Common**: the tile-level pieces used in most rooms (ground, walls,
+   *   decorations, advanced tile reference, start/end markers).
+   * - **Enemies+NPC**: actor-baked smart objects (enemies and NPCs).
+   * - **Misc**: everything else — the EFSAdvent actor presets, plus the doors.
+   */
+  readonly tabs = ['Common', 'Enemies & NPC', 'Misc'] as const;
+
+  /** The tab currently selected. */
+  readonly activeTab = signal<(typeof this.tabs)[number]>('Common');
+
+  /** Switches tabs. */
+  selectTab(tab: (typeof this.tabs)[number]): void {
+    this.activeTab.set(tab);
+  }
 
   /** The actor-template tabs, in display order. */
   readonly sections = ACTOR_TEMPLATE_SECTIONS;
@@ -177,6 +206,17 @@ export class ToolboxColumnComponent implements AfterViewInit {
     queueMicrotask(() => void this.drawPreviews());
   }
 
+  /** Placable NPCs (actor-baked smart objects), shown in the NPC section. */
+  private _npcs: SmartObjectDefinition[] = [];
+  @Input()
+  get npcs(): SmartObjectDefinition[] {
+    return this._npcs;
+  }
+  set npcs(value: SmartObjectDefinition[]) {
+    this._npcs = value ?? [];
+    queueMicrotask(() => void this.drawPreviews());
+  }
+
   /** Available ground definitions, shown in the Ground box. */
   readonly grounds: GroundDefinition[] = GROUND_DEFINITIONS;
 
@@ -193,6 +233,10 @@ export class ToolboxColumnComponent implements AfterViewInit {
   private readonly templateCanvases =
     viewChildren<ElementRef<HTMLCanvasElement>>('templatePreview');
 
+  /** The player-start preview canvas (Common → Start & End). */
+  private readonly playerStartCanvases =
+    viewChildren<ElementRef<HTMLCanvasElement>>('playerStartPreview');
+
   constructor() {
     // Redraw the mini previews once the canvases are available.
     effect(() => {
@@ -200,6 +244,7 @@ export class ToolboxColumnComponent implements AfterViewInit {
       this.groundCanvases();
       this.enemyCanvases();
       this.templateCanvases();
+      this.playerStartCanvases();
       queueMicrotask(() => void this.drawPreviews());
     });
   }
@@ -316,6 +361,38 @@ export class ToolboxColumnComponent implements AfterViewInit {
       }
     }
 
+    // Player start preview (Common → Start & End).
+    const playerStartCanvases = this.playerStartCanvases();
+    if (playerStartCanvases.length > 0) {
+      try {
+        await renderer.prepareActors();
+      } catch {
+        // Sprite sheets may be missing; skip the thumbnail.
+      }
+      for (const ref of playerStartCanvases) {
+        const canvas = ref.nativeElement;
+        canvas.width = 32;
+        canvas.height = 32;
+        const buffer = await renderer.renderActorPreview(
+          PLAYER_START_ACTOR_ID,
+          PLAYER_START_DEFINITION.actorVariable ?? 0,
+          32,
+          32,
+          this._gba,
+        );
+        const ctx = canvas.getContext('2d');
+        if (!ctx || !buffer) {
+          continue;
+        }
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.putImageData(
+          new ImageData(new Uint8ClampedArray(buffer.pixels), buffer.width, buffer.height),
+          0,
+          0,
+        );
+      }
+    }
+
     // Enemy thumbnails: render each actor's default variant into its canvas.
     const enemyCanvases = this.enemyCanvases();
     if (enemyCanvases.length > 0) {
@@ -326,7 +403,8 @@ export class ToolboxColumnComponent implements AfterViewInit {
       }
       for (const ref of enemyCanvases) {
         const id = ref.nativeElement.dataset['enemyId'];
-        const enemy = this.enemies.find((entry) => entry.id === id);
+        const enemy = this.enemies.find((entry) => entry.id === id) ??
+          this.npcs.find((entry) => entry.id === id);
         const canvas = ref.nativeElement;
         if (!enemy) {
           continue;
@@ -437,9 +515,14 @@ export class ToolboxColumnComponent implements AfterViewInit {
     this.groundOpen.update((open) => !open);
   }
 
-  /** Toggles the Doors section. */
-  toggleDoors(): void {
-    this.doorsOpen.update((open) => !open);
+  /** Toggles the Start & End section. */
+  toggleStartEnd(): void {
+    this.startEndOpen.update((open) => !open);
+  }
+
+  /** Toggles the Walls section. */
+  toggleWalls(): void {
+    this.wallsOpen.update((open) => !open);
   }
 
   /** Toggles the Decorations section. */
@@ -450,6 +533,16 @@ export class ToolboxColumnComponent implements AfterViewInit {
   /** Toggles the Enemies section. */
   toggleEnemies(): void {
     this.enemiesOpen.update((open) => !open);
+  }
+
+  /** Toggles the NPC section. */
+  toggleNpcs(): void {
+    this.npcsOpen.update((open) => !open);
+  }
+
+  /** Toggles the Misc (actor template) section. */
+  toggleMisc(): void {
+    this.miscOpen.update((open) => !open);
   }
 
   /** Selects a ground (or deselects it when the same one is clicked again). */
@@ -501,5 +594,22 @@ export class ToolboxColumnComponent implements AfterViewInit {
   /** Clears the shared drag state when a template drag ends. */
   onTemplateDragEnd(): void {
     this.dragService.clear();
+  }
+
+  /** The player start smart-object definition (shown in Start & End). */
+  readonly playerStart = PLAYER_START_DEFINITION;
+
+  /**
+   * Starts a native drag for the player start marker.
+   *
+   * Modelled as an ordinary actor-baked smart object so it uses the shared
+   * drag/drop, preview and context-menu paths; only its own menu items (rotate,
+   * player state, player colour) are specific to it.
+   */
+  onPlayerStartDragStart(event: DragEvent): void {
+    event.dataTransfer?.setData('application/x-smart-object', PLAYER_START_DEFINITION.id);
+    hideNativeDragImage(event);
+    this.dragService.start(PLAYER_START_DEFINITION, PLAYER_START_DEFINITION.rotation?.defaultRotation ?? 0);
+    this.decorationDragStarted.emit();
   }
 }

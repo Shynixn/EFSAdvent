@@ -13,6 +13,11 @@ import {
 } from '@angular/core';
 import { RoomData } from '../../entity/fsalib.entity';
 import { ActorData } from '../../entity/fsalib.entity';
+import {
+  CanvasContextMenuComponent,
+  ContextMenuAction,
+  ContextMenuChoiceGroup,
+} from '../canvas-context-menu/canvas-context-menu.component';
 import { ImageBuffer, TILE_SIZE } from '../../service/render/gba-tile-renderer';
 import { StageRenderer } from '../../service/render/stage-renderer';
 import {
@@ -37,7 +42,18 @@ import {
   isConnected,
   isDoorDefinition,
   withRotatedWarpType,
-} from '../../entity/door.entity';
+} from '../../entity/smartobject/door.entity';
+import { canRotate, nextRotation } from '../../entity/contract/rotateable.entity';
+import {
+  isPlayerStart,
+  decodePlayerStart,
+  rotatePlayerStart,
+  withPlayerColor,
+  withPlayerState,
+  PLAYER_COLORS,
+  PLAYER_STATES,
+} from '../../entity/smartobject/player-start.entity';
+import type { PlayerColor, PlayerState } from '../../entity/smartobject/player-start.entity';
 import { SmartObjectDragService } from '../../service/smart-object-drag.service';
 import {
   DIMENSION,
@@ -106,6 +122,7 @@ function mergeSkip(a: Set<number> | undefined, b: Set<number>): Set<number> {
  */
 @Component({
   selector: 'app-room-canvas',
+  imports: [CanvasContextMenuComponent],
   templateUrl: './room-canvas.component.html',
 })
 export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
@@ -476,8 +493,6 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
    * backdrop that closes it, so the submenu is toggled by click (a hover-open
    * popup would fight the backdrop / the `left-full` positioning).
    */
-  readonly subMenuOpen = signal(false);
-
   ngAfterViewInit(): void {
     this.applyCanvasSize();
     void this.redraw();
@@ -989,21 +1004,14 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
     const y = rect ? event.clientY - rect.top : event.offsetY;
 
     const placement = tile ? this.findPlacementAt(tile) : null;
-    this.subMenuOpen.set(false);
     this.contextMenu.set(placement ? { placement, x, y } : null);
     this.drawHoverOutline();
   }
 
   /** Closes the context menu. */
   closeContextMenu(): void {
-    this.subMenuOpen.set(false);
     this.contextMenu.set(null);
     this.drawHoverOutline();
-  }
-
-  /** Toggles the context menu's "Type" submenu (click, not hover). */
-  toggleSubMenu(): void {
-    this.subMenuOpen.update((open) => !open);
   }
 
   /** Deletes the smart object targeted by the context menu. */
@@ -1047,11 +1055,7 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
     if (!placement) {
       return false;
     }
-    const definition = findSmartObjectDefinition(placement.id);
-    if (!definition) {
-      return false;
-    }
-    return variantsForSubType(definition, placement.subTypeIndex ?? 0).length > 1;
+    return canRotate(findSmartObjectDefinition(placement.id));
   }
 
   /**
@@ -1254,27 +1258,22 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
       return;
     }
     const definition = findSmartObjectDefinition(from.id);
-    if (!definition) {
+    if (!canRotate(definition) || !definition) {
       return;
     }
-    const set = variantsForSubType(definition, from.subTypeIndex ?? 0);
-    if (set.length <= 1) {
-      return;
-    }
-    const nextVariant = ((from.variantIndex ?? 0) + 1) % set.length;
-    // Re-stamp the next variant at the same anchor, keeping the same stacking.
-    // A connected door also advances its WARP child's type (21→23→22→24) so the
-    // entrance direction matches the sprite facing, and re-centres it because a
-    // rotation can change the door's footprint (big door 6×2 ↔ 2×6).
-    const rotated = withRotatedWarpType(
-      { ...from, variantIndex: nextVariant },
-      nextVariant,
-      definition,
-    );
+
+    // The rotation descriptor says HOW MANY orientations exist; the owning domain
+    // module knows how to apply one. A door restamps its next tile variant and
+    // advances its WARP type; the player start repacks its actor Variable.
+    const nextVariant = nextRotation(definition, from.variantIndex ?? 0);
+    const rotated = isPlayerStart(from.id)
+      ? rotatePlayerStart(from)
+      : withRotatedWarpType({ ...from, variantIndex: nextVariant }, nextVariant, definition);
+
     const list = this.smartObjects.map((placement) => (placement === from ? rotated : placement));
-    // `stale: [from]` tears down the OLD variant's footprint — essential for
-    // large objects like the big door whose footprint changes drastically when
-    // rotated (6×2 ↔ 2×6), otherwise the old tiles linger as ghosts.
+    // `stale: [from]` tears down the OLD footprint — essential for objects whose
+    // footprint changes drastically when rotated (big door 6×2 ↔ 2×6), otherwise
+    // the old tiles linger as ghosts.
     this.redrawSmartObjects({ list, skip: [from], stale: [from] });
     this.contextMenu.set(null);
     this.hoveredPlacement = null;
@@ -1294,6 +1293,177 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
       return [];
     }
     return findSmartObjectDefinition(placement.id)?.subTypes ?? [];
+  }
+
+  /** Selectable player states for the context menu. */
+  readonly playerStates = PLAYER_STATES;
+  /** Selectable player colours for the context menu. */
+  readonly playerColors = PLAYER_COLORS;
+
+  /** The context-menu target's player state (0 standing, 1 lying). */
+  contextPlayerState(): number {
+    const placement = this.contextMenu()?.placement;
+    return placement ? decodePlayerStart(placement.actorVariable ?? 0).state : 0;
+  }
+
+  /** The context-menu target's player colour (0 green, 1 red, 2 blue, 3 purple). */
+  contextPlayerColor(): number {
+    const placement = this.contextMenu()?.placement;
+    return placement ? decodePlayerStart(placement.actorVariable ?? 0).color : 0;
+  }
+
+  /**
+   * Whether the context-menu target is a player start marker.
+   *
+   * Kept as a method (not a computed) because the menu renders through the
+   * shared component, which asks for the full action/group lists instead.
+   */
+  isContextPlayerStart(): boolean {
+    const placement = this.contextMenu()?.placement;
+    return !!placement && isPlayerStart(placement.id);
+  }
+
+  /**
+   * Plain actions for the shared context menu, in display order. Built from the
+   * target's capabilities so the same menu serves decorations, enemies, doors and
+   * the player start without per-type markup.
+   */
+  contextActions(): ContextMenuAction[] {
+    const actions: ContextMenuAction[] = [];
+    if (this.canRotateContextPlacement()) {
+      actions.push({
+        id: 'rotate',
+        label: 'Rotate',
+        icon: 'M4 2a1 1 0 011 1v1.6a7 7 0 119.2 10.4 1 1 0 11-1.2-1.6A5 5 0 106 6.7V8a1 1 0 11-2 0V3a1 1 0 011-1z',
+      });
+    }
+    if (this.canConnectContextPlacement()) {
+      if (this.isContextPlacementConnected()) {
+        actions.push({
+          id: 'disconnect',
+          label: 'Cancel connect',
+          accent: true,
+          icon: 'M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z',
+        });
+      } else {
+        actions.push({
+          id: 'connect',
+          label: 'Connect',
+          accent: true,
+          icon: 'M12.586 4.586a2 2 0 112.828 2.828l-3 3a2 2 0 01-2.828 0 1 1 0 00-1.414 1.414 4 4 0 005.656 0l3-3a4 4 0 00-5.656-5.656l-1.5 1.5a1 1 0 101.414 1.414l1.5-1.5zm-5 5a2 2 0 012.828 0 1 1 0 101.414-1.414 4 4 0 00-5.656 0l-3 3a4 4 0 105.656 5.656l1.5-1.5a1 1 0 10-1.414-1.414l-1.5 1.5a2 2 0 11-2.828-2.828l3-3z',
+        });
+      }
+    }
+    actions.push({
+      id: 'delete',
+      label: 'Delete',
+      danger: true,
+      icon: 'M8 2a1 1 0 00-1 1v1H4a1 1 0 000 2h12a1 1 0 100-2h-3V3a1 1 0 00-1-1H8zM5 8a1 1 0 011 1v6a1 1 0 102 0V9a1 1 0 112 0v6a1 1 0 102 0V9a1 1 0 112 0v6a2 2 0 01-2 2H7a2 2 0 01-2-2V9a1 1 0 011-1z',
+    });
+    return actions;
+  }
+
+  /**
+   * Submenu groups for the shared context menu: door styles ("Type") and the
+   * player start's state/colour. Rendered as nested submenus, never as one long
+   * list.
+   */
+  contextChoiceGroups(): ContextMenuChoiceGroup[] {
+    const groups: ContextMenuChoiceGroup[] = [];
+
+    const subTypes = this.contextSubTypes();
+    if (subTypes.length > 0) {
+      groups.push({
+        id: 'type',
+        label: 'Type',
+        icon: 'M10 2a1 1 0 011 1v1.6a5.5 5.5 0 014.4 4.4H17a1 1 0 110 2h-1.6a5.5 5.5 0 01-4.4 4.4V17a1 1 0 11-2 0v-1.6a5.5 5.5 0 01-4.4-4.4H3a1 1 0 110-2h1.6A5.5 5.5 0 019 4.6V3a1 1 0 011-1zm0 5.5a2.5 2.5 0 100 5 2.5 2.5 0 000-5z',
+        choices: subTypes.map((subType, index) => ({ value: index, label: subType.name })),
+        selected: this.contextSubTypeIndex(),
+      });
+    }
+
+    if (this.isContextPlayerStart()) {
+      groups.push({
+        id: 'player-state',
+        label: 'Player State',
+        choices: this.playerStates.map((state) => ({ value: state.value, label: state.name })),
+        selected: this.contextPlayerState(),
+      });
+      groups.push({
+        id: 'player-color',
+        label: 'Player Color',
+        choices: this.playerColors.map((color) => ({ value: color.value, label: color.name })),
+        selected: this.contextPlayerColor(),
+      });
+    }
+
+    return groups;
+  }
+
+  /** Dispatches a plain action from the shared context menu. */
+  onContextAction(id: string): void {
+    switch (id) {
+      case 'rotate':
+        this.rotateContextPlacement();
+        break;
+      case 'connect':
+        this.startConnect();
+        break;
+      case 'disconnect':
+        this.disconnectContextPlacement();
+        break;
+      case 'delete':
+        this.deleteContextPlacement();
+        break;
+    }
+  }
+
+  /** Dispatches a submenu choice from the shared context menu. */
+  onContextChoice(event: { group: string; value: number }): void {
+    switch (event.group) {
+      case 'type':
+        this.selectContextSubType(event.value);
+        break;
+      case 'player-state':
+        this.selectContextPlayerState(event.value as PlayerState);
+        break;
+      case 'player-color':
+        this.selectContextPlayerColor(event.value as PlayerColor);
+        break;
+    }
+  }
+
+  /** Applies a new player state to the context-menu target. */
+  selectContextPlayerState(state: PlayerState): void {
+    this.updateContextPlayerVariable((variable) => withPlayerState(variable, state));
+  }
+
+  /** Applies a new player colour to the context-menu target. */
+  selectContextPlayerColor(color: PlayerColor): void {
+    this.updateContextPlayerVariable((variable) => withPlayerColor(variable, color));
+  }
+
+  /**
+   * Rewrites the context-menu target's actor `Variable` via `change`, then
+   * re-renders. Player start bakes no tiles, so nothing needs restamping — the
+   * redraw picks up the new render variant.
+   */
+  private updateContextPlayerVariable(change: (variable: number) => number): void {
+    const from = this.contextMenu()?.placement;
+    if (!from) {
+      return;
+    }
+    const to: SmartObjectPlacement = {
+      ...from,
+      actorVariable: change(from.actorVariable ?? 0),
+    };
+    const list = this.smartObjects.map((placement) => (placement === from ? to : placement));
+    this.redrawSmartObjects({ list });
+    this.contextMenu.set(null);
+    this.hoveredPlacement = null;
+    this.placementUpdated.emit({ from, to });
+    this.drawHoverOutline();
+    void this.redraw();
   }
 
   /** Index of the sub-type the context-menu target currently uses. */
@@ -1457,6 +1627,8 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
         placement.baseLayerId,
         placement.variantIndex ?? 0,
         placement.subTypeIndex ?? 0,
+        // Preserve user-edited actor fields (player start colour/state/facing).
+        placement.actorVariable,
       );
     }
   }
@@ -1754,6 +1926,8 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
         placement.baseLayerId,
         placement.variantIndex ?? 0,
         placement.subTypeIndex ?? 0,
+        // Keep any user-edited actor fields (player start colour/state/facing).
+        placement.actorVariable,
       );
     }
     return applySmartObject(
@@ -1764,6 +1938,8 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
       baseLayerId,
       variantIndex,
       subTypeIndex,
+      // The moved object's own variable, not the definition default.
+      source.actorVariable,
     );
   }
 

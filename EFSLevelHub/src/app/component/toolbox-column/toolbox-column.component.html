@@ -6,265 +6,391 @@
     Toolbox
   </h2>
 
-  <!-- Tabs: one tab per actor-template category (Items, NPC, Objects, …) -->
-  <div class="flex shrink-0 flex-wrap gap-1 border-b border-slate-800 px-2 py-2" role="tablist">
-    @for (section of sections; track section) {
+  <!-- Tabs: Common · Enemies & NPC · Misc -->
+  <div class="flex shrink-0 gap-1 border-b border-slate-800 px-2 py-2" role="tablist">
+    @for (tab of tabs; track tab) {
       <button
         type="button"
         role="tab"
-        [attr.aria-selected]="activeSection() === section"
-        (click)="selectSection(section)"
-        class="cursor-pointer rounded-md px-2 py-1 text-[11px] font-medium transition"
-        [class.bg-indigo-500]="activeSection() === section"
-        [class.text-white]="activeSection() === section"
-        [class.text-slate-400]="activeSection() !== section"
-        [class.hover:bg-slate-800]="activeSection() !== section"
-        [class.hover:text-slate-200]="activeSection() !== section"
+        [attr.aria-selected]="activeTab() === tab"
+        (click)="selectTab(tab)"
+        class="cursor-pointer rounded-md px-2.5 py-1 text-[11px] font-medium transition"
+        [class.bg-indigo-500]="activeTab() === tab"
+        [class.text-white]="activeTab() === tab"
+        [class.text-slate-400]="activeTab() !== tab"
+        [class.hover:bg-slate-800]="activeTab() !== tab"
+        [class.hover:text-slate-200]="activeTab() !== tab"
       >
-        {{ section }}
+        {{ tab }}
       </button>
     }
   </div>
 
   <div class="min-h-0 flex-1 overflow-y-auto p-4">
-    <!-- Active tab: draggable actor templates -->
-    <div class="rounded-lg border border-slate-800">
-      <div class="border-b border-slate-800 px-3 py-2">
-        <p class="text-xs font-semibold uppercase tracking-wide text-slate-400">
-          {{ activeSection() }}
-        </p>
-        <p class="mt-1 text-[11px] text-slate-500">
-          Drag a preset onto the room canvas to place it. The preset already carries its actor
-          variable (e.g. which item a <code>KEY0</code> actor shows), so no extra setup is needed.
-        </p>
-      </div>
-      <div class="space-y-2 px-3 py-3">
-        <div class="flex flex-wrap gap-2">
-          @for (template of templates; track template.id) {
-            <button
-              type="button"
-              draggable="true"
-              (dragstart)="onTemplateDragStart($event, template)"
-              (dragend)="onTemplateDragEnd()"
-              class="flex w-24 cursor-grab flex-col items-center gap-2 rounded-lg border border-slate-700 bg-slate-800/70 px-2 py-2 text-xs text-slate-200 transition hover:border-indigo-400 hover:bg-slate-700/60 active:cursor-grabbing"
-              [title]="template.name + ' (' + template.actorId + ')'"
-            >
-              <span
-                class="flex h-16 w-16 items-center justify-center overflow-hidden rounded border border-slate-700 bg-slate-950/60"
-              >
-                <canvas
-                  #templatePreview
-                  [attr.data-template-id]="template.id"
-                  style="image-rendering: pixelated"
-                ></canvas>
-              </span>
-              <span class="w-full text-center leading-tight break-words">{{ template.name }}</span>
-            </button>
-          }
-        </div>
-      </div>
-    </div>
-
-    <!-- Ground: pick a ground, then paint it onto the room with the brush -->
-    <div class="mt-3 rounded-lg border border-slate-800">
-      <button
-        type="button"
-        (click)="toggleGround()"
-        class="flex w-full cursor-pointer items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400"
-      >
-        <span>Ground</span>
-        <span class="text-slate-500">{{ groundOpen() ? '▾' : '▸' }}</span>
-      </button>
-      @if (groundOpen()) {
-        <div class="space-y-2 border-t border-slate-800 px-3 py-3">
-          <p class="text-[11px] text-slate-500">
-            Pick a ground, then paint it onto the room with the brush. Grounds cannot be dragged.
-            Paint over decorations freely — a decoration always draws on top.
-          </p>
-          <div class="flex flex-wrap gap-2">
-            @for (ground of grounds; track ground.id) {
-              <button
-                type="button"
-                (click)="selectGround(ground)"
-                class="flex cursor-pointer flex-col items-center gap-2 rounded-lg border px-3 py-2 text-xs transition"
-                [class.border-indigo-400]="selectedGroundId === ground.id"
-                [class.bg-indigo-500/20]="selectedGroundId === ground.id"
-                [class.text-white]="selectedGroundId === ground.id"
-                [class.border-slate-700]="selectedGroundId !== ground.id"
-                [class.bg-slate-800/70]="selectedGroundId !== ground.id"
-                [class.text-slate-200]="selectedGroundId !== ground.id"
-                [class.hover:border-indigo-400]="selectedGroundId !== ground.id"
-                [title]="'Paint ground #' + ground.tile + ' with the brush'"
-              >
-                <span
-                  class="flex h-10 w-10 items-center justify-center overflow-hidden rounded border border-slate-700 bg-slate-950/60"
-                >
-                  <canvas
-                    #groundPreview
-                    class="h-full w-full"
-                    style="image-rendering: pixelated"
-                  ></canvas>
-                </span>
-              </button>
-            }
-          </div>
-        </div>
-      }
-    </div>
-
-    <!-- Advanced (collapsible): manual tile drawing (reference only) -->
-    <div class="mt-3 rounded-lg border border-slate-800">
-      <button
-        type="button"
-        (click)="toggleAdvanced()"
-        class="flex w-full cursor-pointer items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400"
-      >
-        <span>Advanced</span>
-        <span class="text-slate-500">{{ advancedOpen() ? '▾' : '▸' }}</span>
-      </button>
-      @if (advancedOpen()) {
-        <div class="space-y-3 border-t border-slate-800 px-3 py-3">
-          <p class="text-[11px] text-slate-500">
-            For reference only — tiles can no longer be selected directly. Pick a ground above to
-            paint with the brush.
-          </p>
-          <app-tile-palette
-            [renderer]="renderer"
-            [gba]="gba"
-            [themeIndex]="themeIndex"
-            [tile]="brushTile"
-          />
-        </div>
-      }
-    </div>
-
-    <!-- Doors (smart objects with rotation variants): drag onto the canvas -->
-    <div class="mt-3 rounded-lg border border-slate-800">
-      <button
-        type="button"
-        (click)="toggleDoors()"
-        class="flex w-full cursor-pointer items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400"
-      >
-        <span>Doors</span>
-        <span class="text-slate-500">{{ doorsOpen() ? '▾' : '▸' }}</span>
-      </button>
-      @if (doorsOpen()) {
-        <div class="space-y-2 border-t border-slate-800 px-3 py-3">
-          <p class="text-[11px] text-slate-500">
-            Drag a door onto the room canvas, then right-click it to rotate.
-          </p>
-          <div class="flex flex-wrap gap-2">
-            @for (decoration of doorDefinitions; track decoration.id) {
+    @if (activeTab() === 'Common') {
+      <!-- Start & End -->
+      <div class="rounded-lg border border-slate-800">
+        <button
+          type="button"
+          (click)="toggleStartEnd()"
+          class="flex w-full cursor-pointer items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400"
+        >
+          <span>Start &amp; End</span>
+          <span class="text-slate-500">{{ startEndOpen() ? '▾' : '▸' }}</span>
+        </button>
+        @if (startEndOpen()) {
+          <div class="space-y-2 border-t border-slate-800 px-3 py-3">
+            <p class="text-[11px] text-slate-500">
+              Drag the player start onto the room canvas. Right-click it to rotate, or to change
+              its player state and colour.
+            </p>
+            <div class="flex flex-wrap gap-2">
               <button
                 type="button"
                 draggable="true"
-                (dragstart)="onDecorationDragStart($event, decoration)"
+                (dragstart)="onPlayerStartDragStart($event)"
                 (dragend)="onDecorationDragEnd()"
                 class="flex cursor-grab flex-col items-center gap-2 rounded-lg border border-slate-700 bg-slate-800/70 px-3 py-2 text-xs text-slate-200 transition hover:border-indigo-400 hover:bg-slate-700/60 active:cursor-grabbing"
-                [title]="'Drag ' + decoration.name + ' onto the canvas'"
-              >
-                <span
-                  class="flex h-20 w-full items-center justify-center overflow-hidden rounded border border-slate-700 bg-slate-950/60"
-                >
-                  <canvas
-                    #decoPreview
-                    [attr.data-deco-id]="decoration.id"
-                    class="max-h-full max-w-full"
-                    style="image-rendering: pixelated"
-                  ></canvas>
-                </span>
-                <span>{{ decoration.name }}</span>
-              </button>
-            }
-          </div>
-        </div>
-      }
-    </div>
-
-    <!-- Decorations (smart objects): drag onto the canvas to place -->
-    <div class="mt-3 rounded-lg border border-slate-800">
-      <button
-        type="button"
-        (click)="toggleDecorations()"
-        class="flex w-full cursor-pointer items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400"
-      >
-        <span>Decorations</span>
-        <span class="text-slate-500">{{ decorationsOpen() ? '▾' : '▸' }}</span>
-      </button>
-      @if (decorationsOpen()) {
-        <div class="space-y-2 border-t border-slate-800 px-3 py-3">
-          <p class="text-[11px] text-slate-500">
-            Drag a decoration onto the room canvas to place it. All its tiles are stamped at once.
-          </p>
-          <div class="flex flex-wrap gap-2">
-            @for (decoration of otherDefinitions; track decoration.id) {
-              <button
-                type="button"
-                draggable="true"
-                (dragstart)="onDecorationDragStart($event, decoration)"
-                (dragend)="onDecorationDragEnd()"
-                class="flex cursor-grab flex-col items-center gap-2 rounded-lg border border-slate-700 bg-slate-800/70 px-3 py-2 text-xs text-slate-200 transition hover:border-indigo-400 hover:bg-slate-700/60 active:cursor-grabbing"
-                [title]="'Drag ' + decoration.name + ' onto the canvas'"
-              >
-                <span
-                  class="flex h-20 w-full items-center justify-center overflow-hidden rounded border border-slate-700 bg-slate-950/60"
-                >
-                  <canvas
-                    #decoPreview
-                    [attr.data-deco-id]="decoration.id"
-                    class="max-h-full max-w-full"
-                    style="image-rendering: pixelated"
-                  ></canvas>
-                </span>
-                <span>{{ decoration.name }}</span>
-              </button>
-            }
-          </div>
-        </div>
-      }
-    </div>
-
-    <!-- Enemies: place actor enemies from the game's actor catalog -->
-    <div class="mt-3 rounded-lg border border-slate-800">
-      <button
-        type="button"
-        (click)="toggleEnemies()"
-        class="flex w-full cursor-pointer items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400"
-      >
-        <span>Enemies</span>
-        <span class="text-slate-500">{{ enemiesOpen() ? '▾' : '▸' }}</span>
-      </button>
-      @if (enemiesOpen()) {
-        <div class="space-y-2 border-t border-slate-800 px-3 py-3">
-          <p class="text-[11px] text-slate-500">
-            Drag an enemy onto the room canvas to place it. Enemies are smart objects that bake an
-            actor into the room's enemy list instead of tiles.
-          </p>
-          <div class="flex flex-wrap gap-2">
-            @for (enemy of enemies; track enemy.id) {
-              <button
-                type="button"
-                draggable="true"
-                (dragstart)="onDecorationDragStart($event, enemy)"
-                (dragend)="onDecorationDragEnd()"
-                class="flex cursor-grab flex-col items-center gap-2 rounded-lg border border-slate-700 bg-slate-800/70 px-3 py-2 text-xs text-slate-200 transition hover:border-indigo-400 hover:bg-slate-700/60 active:cursor-grabbing"
-                [title]="'Drag ' + enemy.name + ' (' + enemy.id + ') onto the canvas'"
+                title="Drag the player start position onto the canvas"
               >
                 <span
                   class="flex h-16 w-16 items-center justify-center overflow-hidden rounded border border-slate-700 bg-slate-950/60"
                 >
                   <canvas
-                    #enemyPreview
-                    [attr.data-enemy-id]="enemy.id"
+                    #playerStartPreview
                     style="image-rendering: pixelated"
                   ></canvas>
                 </span>
-                <span class="max-w-16 truncate">{{ enemy.name }}</span>
+                <span>{{ playerStart.name }}</span>
+              </button>
+            </div>
+          </div>
+        }
+      </div>
+
+      <!-- Ground: pick a ground, then paint it onto the room with the brush -->
+      <div class="mt-3 rounded-lg border border-slate-800">
+        <button
+          type="button"
+          (click)="toggleGround()"
+          class="flex w-full cursor-pointer items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400"
+        >
+          <span>Ground</span>
+          <span class="text-slate-500">{{ groundOpen() ? '▾' : '▸' }}</span>
+        </button>
+        @if (groundOpen()) {
+          <div class="space-y-2 border-t border-slate-800 px-3 py-3">
+            <p class="text-[11px] text-slate-500">
+              Pick a ground, then paint it onto the room with the brush. Grounds cannot be dragged.
+              Paint over decorations freely — a decoration always draws on top.
+            </p>
+            <div class="flex flex-wrap gap-2">
+              @for (ground of grounds; track ground.id) {
+                <button
+                  type="button"
+                  (click)="selectGround(ground)"
+                  class="flex cursor-pointer flex-col items-center gap-2 rounded-lg border px-3 py-2 text-xs transition"
+                  [class.border-indigo-400]="selectedGroundId === ground.id"
+                  [class.bg-indigo-500/20]="selectedGroundId === ground.id"
+                  [class.text-white]="selectedGroundId === ground.id"
+                  [class.border-slate-700]="selectedGroundId !== ground.id"
+                  [class.bg-slate-800/70]="selectedGroundId !== ground.id"
+                  [class.text-slate-200]="selectedGroundId !== ground.id"
+                  [class.hover:border-indigo-400]="selectedGroundId !== ground.id"
+                  [title]="'Paint ground #' + ground.tile + ' with the brush'"
+                >
+                  <span
+                    class="flex h-10 w-10 items-center justify-center overflow-hidden rounded border border-slate-700 bg-slate-950/60"
+                  >
+                    <canvas
+                      #groundPreview
+                      class="h-full w-full"
+                      style="image-rendering: pixelated"
+                    ></canvas>
+                  </span>
+                </button>
+              }
+            </div>
+          </div>
+        }
+      </div>
+
+      <!-- Walls -->
+      <div class="mt-3 rounded-lg border border-slate-800">
+        <button
+          type="button"
+          (click)="toggleWalls()"
+          class="flex w-full cursor-pointer items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400"
+        >
+          <span>Walls</span>
+          <span class="text-slate-500">{{ wallsOpen() ? '▾' : '▸' }}</span>
+        </button>
+        @if (wallsOpen()) {
+          <div class="border-t border-slate-800 px-3 py-3">
+            <p class="text-[11px] text-slate-500">Nothing here yet.</p>
+          </div>
+        }
+      </div>
+
+      <!-- Decorations (smart objects): drag onto the canvas to place -->
+      <div class="mt-3 rounded-lg border border-slate-800">
+        <button
+          type="button"
+          (click)="toggleDecorations()"
+          class="flex w-full cursor-pointer items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400"
+        >
+          <span>Decorations</span>
+          <span class="text-slate-500">{{ decorationsOpen() ? '▾' : '▸' }}</span>
+        </button>
+        @if (decorationsOpen()) {
+          <div class="space-y-2 border-t border-slate-800 px-3 py-3">
+            <p class="text-[11px] text-slate-500">
+              Drag a decoration onto the room canvas to place it. All its tiles are stamped at once.
+            </p>
+            <div class="flex flex-wrap gap-2">
+              @for (decoration of otherDefinitions; track decoration.id) {
+                <button
+                  type="button"
+                  draggable="true"
+                  (dragstart)="onDecorationDragStart($event, decoration)"
+                  (dragend)="onDecorationDragEnd()"
+                  class="flex cursor-grab flex-col items-center gap-2 rounded-lg border border-slate-700 bg-slate-800/70 px-3 py-2 text-xs text-slate-200 transition hover:border-indigo-400 hover:bg-slate-700/60 active:cursor-grabbing"
+                  [title]="'Drag ' + decoration.name + ' onto the canvas'"
+                >
+                  <span
+                    class="flex h-20 w-full items-center justify-center overflow-hidden rounded border border-slate-700 bg-slate-950/60"
+                  >
+                    <canvas
+                      #decoPreview
+                      [attr.data-deco-id]="decoration.id"
+                      class="max-h-full max-w-full"
+                      style="image-rendering: pixelated"
+                    ></canvas>
+                  </span>
+                  <span>{{ decoration.name }}</span>
+                </button>
+              }
+            </div>
+          </div>
+        }
+      </div>
+
+      <!-- Advanced (collapsible): manual tile drawing (reference only) -->
+      <div class="mt-3 rounded-lg border border-slate-800">
+        <button
+          type="button"
+          (click)="toggleAdvanced()"
+          class="flex w-full cursor-pointer items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400"
+        >
+          <span>Advanced</span>
+          <span class="text-slate-500">{{ advancedOpen() ? '▾' : '▸' }}</span>
+        </button>
+        @if (advancedOpen()) {
+          <div class="space-y-3 border-t border-slate-800 px-3 py-3">
+            <p class="text-[11px] text-slate-500">
+              For reference only — tiles can no longer be selected directly. Pick a ground above to
+              paint with the brush.
+            </p>
+            <app-tile-palette
+              [renderer]="renderer"
+              [gba]="gba"
+              [themeIndex]="themeIndex"
+              [tile]="brushTile"
+            />
+          </div>
+        }
+      </div>
+    }
+
+    @if (activeTab() === 'Enemies & NPC') {
+      <!-- Enemies: place actor enemies from the game's actor catalog -->
+      <div class="rounded-lg border border-slate-800">
+        <button
+          type="button"
+          (click)="toggleEnemies()"
+          class="flex w-full cursor-pointer items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400"
+        >
+          <span>Enemies</span>
+          <span class="text-slate-500">{{ enemiesOpen() ? '▾' : '▸' }}</span>
+        </button>
+        @if (enemiesOpen()) {
+          <div class="space-y-2 border-t border-slate-800 px-3 py-3">
+            <p class="text-[11px] text-slate-500">
+              Drag an enemy onto the room canvas to place it. Enemies are smart objects that bake an
+              actor into the room's enemy list instead of tiles.
+            </p>
+            <div class="flex flex-wrap gap-2">
+              @for (enemy of enemies; track enemy.id) {
+                <button
+                  type="button"
+                  draggable="true"
+                  (dragstart)="onDecorationDragStart($event, enemy)"
+                  (dragend)="onDecorationDragEnd()"
+                  class="flex cursor-grab flex-col items-center gap-2 rounded-lg border border-slate-700 bg-slate-800/70 px-3 py-2 text-xs text-slate-200 transition hover:border-indigo-400 hover:bg-slate-700/60 active:cursor-grabbing"
+                  [title]="'Drag ' + enemy.name + ' (' + enemy.id + ') onto the canvas'"
+                >
+                  <span
+                    class="flex h-16 w-16 items-center justify-center overflow-hidden rounded border border-slate-700 bg-slate-950/60"
+                  >
+                    <canvas
+                      #enemyPreview
+                      [attr.data-enemy-id]="enemy.id"
+                      style="image-rendering: pixelated"
+                    ></canvas>
+                  </span>
+                  <span class="max-w-16 truncate">{{ enemy.name }}</span>
+                </button>
+              }
+            </div>
+          </div>
+        }
+      </div>
+
+      <!-- NPC: place actor NPCs from the game's actor catalog -->
+      <div class="mt-3 rounded-lg border border-slate-800">
+        <button
+          type="button"
+          (click)="toggleNpcs()"
+          class="flex w-full cursor-pointer items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400"
+        >
+          <span>NPC</span>
+          <span class="text-slate-500">{{ npcsOpen() ? '▾' : '▸' }}</span>
+        </button>
+        @if (npcsOpen()) {
+          <div class="space-y-2 border-t border-slate-800 px-3 py-3">
+            <p class="text-[11px] text-slate-500">
+              Drag an NPC onto the room canvas to place it. NPCs are smart objects that bake an
+              actor into the room's enemy list instead of tiles.
+            </p>
+            <div class="flex flex-wrap gap-2">
+              @for (npc of npcs; track npc.id) {
+                <button
+                  type="button"
+                  draggable="true"
+                  (dragstart)="onDecorationDragStart($event, npc)"
+                  (dragend)="onDecorationDragEnd()"
+                  class="flex cursor-grab flex-col items-center gap-2 rounded-lg border border-slate-700 bg-slate-800/70 px-3 py-2 text-xs text-slate-200 transition hover:border-indigo-400 hover:bg-slate-700/60 active:cursor-grabbing"
+                  [title]="'Drag ' + npc.name + ' (' + npc.id + ') onto the canvas'"
+                >
+                  <span
+                    class="flex h-16 w-16 items-center justify-center overflow-hidden rounded border border-slate-700 bg-slate-950/60"
+                  >
+                    <canvas
+                      #enemyPreview
+                      [attr.data-enemy-id]="npc.id"
+                      style="image-rendering: pixelated"
+                    ></canvas>
+                  </span>
+                  <span class="max-w-16 truncate">{{ npc.name }}</span>
+                </button>
+              }
+            </div>
+          </div>
+        }
+      </div>
+    }
+
+    @if (activeTab() === 'Misc') {
+      <!-- Doors (smart objects with rotation variants): drag onto the canvas -->
+      <div class="rounded-lg border border-slate-800">
+        <button
+          type="button"
+          (click)="toggleMisc()"
+          class="flex w-full cursor-pointer items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400"
+        >
+          <span>Doors</span>
+          <span class="text-slate-500">{{ miscOpen() ? '▾' : '▸' }}</span>
+        </button>
+        @if (miscOpen()) {
+          <div class="space-y-2 border-t border-slate-800 px-3 py-3">
+            <p class="text-[11px] text-slate-500">
+              Drag a door onto the room canvas, then right-click it to rotate.
+            </p>
+            <div class="flex flex-wrap gap-2">
+              @for (decoration of doorDefinitions; track decoration.id) {
+                <button
+                  type="button"
+                  draggable="true"
+                  (dragstart)="onDecorationDragStart($event, decoration)"
+                  (dragend)="onDecorationDragEnd()"
+                  class="flex cursor-grab flex-col items-center gap-2 rounded-lg border border-slate-700 bg-slate-800/70 px-3 py-2 text-xs text-slate-200 transition hover:border-indigo-400 hover:bg-slate-700/60 active:cursor-grabbing"
+                  [title]="'Drag ' + decoration.name + ' onto the canvas'"
+                >
+                  <span
+                    class="flex h-20 w-full items-center justify-center overflow-hidden rounded border border-slate-700 bg-slate-950/60"
+                  >
+                    <canvas
+                      #decoPreview
+                      [attr.data-deco-id]="decoration.id"
+                      class="max-h-full max-w-full"
+                      style="image-rendering: pixelated"
+                    ></canvas>
+                  </span>
+                  <span>{{ decoration.name }}</span>
+                </button>
+              }
+            </div>
+          </div>
+        }
+      </div>
+
+      <!-- Actor presets (EFSAdvent actortemplates) -->
+      <div class="mt-3 rounded-lg border border-slate-800">
+        <div class="border-b border-slate-800 px-3 py-2">
+          <p class="text-xs font-semibold uppercase tracking-wide text-slate-400">
+            {{ activeSection() }}
+          </p>
+          <p class="mt-1 text-[11px] text-slate-500">
+            Drag a preset onto the room canvas to place it. The preset already carries its actor
+            variable (e.g. which item a <code>KEY0</code> actor shows), so no extra setup is needed.
+          </p>
+        </div>
+        <div class="flex shrink-0 flex-wrap gap-1 border-b border-slate-800 px-2 py-2" role="tablist">
+          @for (section of sections; track section) {
+            <button
+              type="button"
+              role="tab"
+              [attr.aria-selected]="activeSection() === section"
+              (click)="selectSection(section)"
+              class="cursor-pointer rounded-md px-2 py-1 text-[11px] font-medium transition"
+              [class.bg-indigo-500]="activeSection() === section"
+              [class.text-white]="activeSection() === section"
+              [class.text-slate-400]="activeSection() !== section"
+              [class.hover:bg-slate-800]="activeSection() !== section"
+              [class.hover:text-slate-200]="activeSection() !== section"
+            >
+              {{ section }}
+            </button>
+          }
+        </div>
+        <div class="space-y-2 px-3 py-3">
+          <div class="flex flex-wrap gap-2">
+            @for (template of templates; track template.id) {
+              <button
+                type="button"
+                draggable="true"
+                (dragstart)="onTemplateDragStart($event, template)"
+                (dragend)="onTemplateDragEnd()"
+                class="flex w-24 cursor-grab flex-col items-center gap-2 rounded-lg border border-slate-700 bg-slate-800/70 px-2 py-2 text-xs text-slate-200 transition hover:border-indigo-400 hover:bg-slate-700/60 active:cursor-grabbing"
+                [title]="template.name + ' (' + template.actorId + ')'"
+              >
+                <span
+                  class="flex h-16 w-16 items-center justify-center overflow-hidden rounded border border-slate-700 bg-slate-950/60"
+                >
+                  <canvas
+                    #templatePreview
+                    [attr.data-template-id]="template.id"
+                    style="image-rendering: pixelated"
+                  ></canvas>
+                </span>
+                <span class="w-full text-center leading-tight break-words">{{
+                  template.name
+                }}</span>
               </button>
             }
           </div>
         </div>
-      }
-    </div>
+      </div>
+    }
   </div>
 </aside>

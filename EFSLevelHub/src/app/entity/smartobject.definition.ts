@@ -10,6 +10,8 @@
  * negative (e.g. a canopy that overhangs to the left of the anchor).
  */
 
+import { IRotateable } from './contract/rotateable.entity';
+
 /**
  * What a smart object bakes into when placed.
  *
@@ -79,6 +81,14 @@ export interface SmartObjectDefinition {
   /** Toolbox section this definition is grouped under. */
   section: SmartObjectSection;
   /**
+   * Rotation behaviour (`IRotateable`), when this object can be turned.
+   *
+   * `set`/`subTypes` describe the tiles; this describes WHICH orientation the
+   * object starts in and how many it has. Objects without it cannot be rotated
+   * and the canvas hides the "Rotate" action.
+   */
+  rotation?: IRotateable;
+  /**
    * The variants (rotation styles) of this object. Single-entry for objects
    * that do not rotate (e.g. a tree); four entries for doors (one per facing).
    * Actor-baked objects have a single (empty) variant — they bake no tiles.
@@ -120,6 +130,8 @@ export const SMART_OBJECT_DEFINITIONS: SmartObjectDefinition[] = [
     baking: 'tile',
     name: 'Door',
     section: 'Doors',
+    // Doors open facing north first and rotate through all four facings.
+    rotation: { defaultRotation: 0, rotationCount: 4 },
     subTypes: [
       {
         id: 'door',
@@ -294,6 +306,8 @@ export const SMART_OBJECT_DEFINITIONS: SmartObjectDefinition[] = [
     baking: 'tile',
     name: 'Big Door',
     section: 'Doors',
+    // Big doors also open facing north first.
+    rotation: { defaultRotation: 0, rotationCount: 4 },
     subTypes: [
       {
         id: 'big-door',

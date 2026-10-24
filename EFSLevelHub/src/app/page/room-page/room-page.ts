@@ -60,8 +60,8 @@ import {
   detachConnections as detachDoorConnections,
   reanchorConnections,
   warpChildOf,
-} from '../../entity/door.entity';
-import { actorSmartObjects, enemyDefinitions } from '../../entity/enemy.definition';
+} from '../../entity/smartobject/door.entity';
+import { actorSmartObjects, enemyDefinitions, npcDefinitions } from '../../entity/actor.definition';
 import { TilesetTheme } from '../../entity/tileset.util';
 import { StageRenderer } from '../../service/render/stage-renderer';
 import { nextPaint } from '../../util/paint';
@@ -209,6 +209,9 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
 
   /** Placable enemies (actor-baked smart objects), shown in the toolbox. */
   readonly enemies = signal<SmartObjectDefinition[]>([]);
+
+  /** Placable NPCs (actor-baked smart objects), shown in the toolbox. */
+  readonly npcs = signal<SmartObjectDefinition[]>([]);
 
   /**
    * Ground layers painted in the current room (one entry per base layer).
@@ -885,6 +888,13 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
               renderer.canRenderActor(enemy.id, enemy.actorVariable ?? 0, true),
           )
         : enemyDefinitions(actors);
+      const npcs = renderer
+        ? npcDefinitions(actors).filter(
+            (npc) =>
+              renderer.canRenderActor(npc.id, npc.actorVariable ?? 0, false) ||
+              renderer.canRenderActor(npc.id, npc.actorVariable ?? 0, true),
+          )
+        : npcDefinitions(actors);
       if (enemies.length === 0) {
         this.logger.warn(
           `RoomPage: no drawable enemy actors resolved from ${Object.keys(actors).length} definitions`,
@@ -895,6 +905,7 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
       // NPCs, … — resolve by id for rendering, hover, move and delete.
       registerActorSmartObjects(actorSmartObjects(actors));
       this.enemies.set(enemies);
+      this.npcs.set(npcs);
     } catch (error) {
       this.logger.warn('RoomPage: failed to load enemy definitions', error);
     }

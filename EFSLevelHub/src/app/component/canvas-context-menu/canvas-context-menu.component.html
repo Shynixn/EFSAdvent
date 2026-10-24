@@ -1,0 +1,83 @@
+@if (open) {
+  <!-- Backdrop: closes the menu on any outside interaction. -->
+  <div
+    class="fixed inset-0 z-10"
+    (pointerdown)="close()"
+    (contextmenu)="$event.preventDefault(); close()"
+  ></div>
+
+  <div
+    class="absolute z-20 min-w-32 overflow-hidden rounded-lg border border-slate-700 bg-slate-800 py-1 text-sm shadow-lg"
+    [style.left.px]="x"
+    [style.top.px]="y"
+  >
+    <!-- Plain actions -->
+    @for (action of actions; track action.id) {
+      <button
+        type="button"
+        (click)="pick(action)"
+        class="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left transition hover:bg-slate-700"
+        [class.text-red-400]="action.danger"
+        [class.text-sky-300]="action.accent"
+        [class.text-slate-200]="!action.danger && !action.accent"
+      >
+        @if (action.icon) {
+          <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <path [attr.d]="action.icon" [attr.fill-rule]="'evenodd'" [attr.clip-rule]="'evenodd'" />
+          </svg>
+        }
+        <span class="flex-1">{{ action.label }}</span>
+      </button>
+    }
+
+    <!-- Submenu groups (e.g. Type, Player Color, Player State) -->
+    @for (group of choiceGroups; track group.id) {
+      <div class="relative" [class.border-t]="true" [class.border-slate-700/60]="true">
+        <button
+          type="button"
+          (click)="toggleGroup(group.id)"
+          class="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-slate-200 transition hover:bg-slate-700"
+        >
+          @if (group.icon) {
+            <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+              <path [attr.d]="group.icon" fill-rule="evenodd" clip-rule="evenodd" />
+            </svg>
+          }
+          <span class="flex-1">{{ group.label }}</span>
+          <svg
+            class="h-3 w-3 transition-transform"
+            [class.rotate-90]="isGroupOpen(group.id)"
+            viewBox="0 0 20 20"
+            fill="currentColor"
+            aria-hidden="true"
+          >
+            <path
+              fill-rule="evenodd"
+              d="M7.21 14.77a.75.75 0 010-1.06L10.94 10 7.21 6.29a.75.75 0 111.06-1.06l4.25 4.24a.75.75 0 010 1.06l-4.25 4.24a.75.75 0 01-1.06 0z"
+              clip-rule="evenodd"
+            />
+          </svg>
+        </button>
+
+        @if (isGroupOpen(group.id)) {
+          <div
+            class="mx-2 mb-1 overflow-hidden rounded-md border border-slate-700 bg-slate-900/60 py-0.5"
+          >
+            @for (choice of group.choices; track choice.value) {
+              <button
+                type="button"
+                (click)="pickChoice(group, choice)"
+                class="flex w-full cursor-pointer items-center gap-2 px-2 py-1 text-left transition hover:bg-slate-700"
+                [class.text-sky-300]="group.selected === choice.value"
+                [class.text-slate-200]="group.selected !== choice.value"
+              >
+                <span class="w-3 text-center">{{ group.selected === choice.value ? '✓' : '' }}</span>
+                <span class="flex-1">{{ choice.label }}</span>
+              </button>
+            }
+          </div>
+        }
+      </div>
+    }
+  </div>
+}

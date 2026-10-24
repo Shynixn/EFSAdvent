@@ -146,7 +146,6 @@ const TEMPLATE_LINES: Record<ActorTemplateSection, readonly string[]> = {
     'Invisible Player Wall;PTMI, L:0, X:0, Y:0, V:0,0,0,0.',
   ],
   Special: [
-    'Player Start Position;PLAS, L:0, X:0, Y:0, V:0,0,0,0.',
     'Evil Imprisoning Field;GOL2, L:0, X:0, Y:0, V:0,0,0,2.',
     'Goal Warp;GLWP, L:0, X:0, Y:0, V:0,0,0,17.',
     'Goal;GOAL, L:0, X:0, Y:0, V:0,0,0,0.',

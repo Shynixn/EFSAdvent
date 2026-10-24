@@ -71,8 +71,52 @@ export function actorVariants(definition: ActorDefinition, variable: number): Ac
     return [];
   }
   const key = (variable & (definition.BitMask ?? 0)) >>> 0;
-  const match = keys.find((entry) => entry.Key === key) ?? keys[0];
-  return match?.Variants ?? [];
+
+  const exact = keys.find((entry) => entry.Key === key);
+  if (exact) {
+    return exact.Variants;
+  }
+
+  // No exact entry. Rather than blindly falling back to the FIRST key (which
+  // snaps every unmatched variable back to the default look), pick the key that
+  // preserves as much of `key` as possible, most-significant bits first.
+  //
+  // `PLAS` (player start) is the motivating case: it only defines a lying
+  // sprite for one facing (west, keys 304-307). Asking for "lying + south"
+  // yields 256 (0x100), which has no entry — so we must drop only the DIRECTION
+  // bits and keep state (bit 8) + colour (bits 0-3), resolving to a lying sprite
+  // instead of standing-green.
+  const best = closestKey(keys, key);
+  return best?.Variants ?? [];
+}
+
+/**
+ * The render key sharing the most significant bits with `key`.
+ *
+ * Higher bits win ties first: a key with the same bit 8 (state) is preferred
+ * over one that merely shares bits 0-3 (colour), so an unsupported facing keeps
+ * the requested state/colour and only concedes the direction.
+ */
+function closestKey(keys: readonly ActorRenderKey[], key: number): ActorRenderKey | undefined {
+  let best: ActorRenderKey | undefined;
+  let bestWeight = -1;
+  for (const entry of keys) {
+    let weight = 0;
+    let weightSum = 0;
+    for (let bit = 0; bit <= 15; bit++) {
+      const shift = 1 << (bit - 4 >= 0 ? bit - 4 : 0);
+      weightSum += shift;
+      if (entry.Key & key & (1 << bit)) {
+        weight += shift;
+      }
+    }
+    const score = weight / weightSum;
+    if (score > bestWeight) {
+      best = entry;
+      bestWeight = score;
+    }
+  }
+  return best;
 }
 
 /** The first (default) render variant for an actor. */

@@ -18,6 +18,7 @@ import { ImageBuffer, TILE_SIZE } from '../service/render/gba-tile-renderer';
 import { ACTOR_TEMPLATES, ActorTemplate } from './actor-template.entity';
 import { ActorData } from './fsalib.entity';
 import { GroundLayer, ROOM_DIMENSION } from './ground.entity';
+import { PLAYER_START_DEFINITION } from './smartobject/player-start.entity';
 import {
   SmartObjectDefinition,
   SmartObjectTileOffset,
@@ -36,6 +37,27 @@ export {
 } from './smartobject.definition';
 export { ACTOR_TEMPLATE_SECTIONS, actorTemplatesFor } from './actor-template.entity';
 export type { ActorTemplate, ActorTemplateSection } from './actor-template.entity';
+export {
+  PLAYER_START_ACTOR_ID,
+  PLAYER_START_DEFINITION,
+  PLAYER_START_ID,
+  PLAYER_COLORS,
+  PLAYER_DIRECTIONS,
+  PLAYER_STATES,
+  decodePlayerStart,
+  encodePlayerStart,
+  isPlayerStart,
+  nextPlayerDirection,
+  withPlayerColor,
+  withPlayerDirection,
+  withPlayerState,
+} from './smartobject/player-start.entity';
+export type {
+  PlayerColor,
+  PlayerDirection,
+  PlayerStartVariable,
+  PlayerState,
+} from './smartobject/player-start.entity';
 export type {
   SmartObjectDefinition,
   SmartObjectSection,
@@ -74,7 +96,7 @@ export const ACTOR_TEMPLATE_SMART_OBJECTS: readonly SmartObjectDefinition[] =
 // Seed the registry so a placed template (`id` = `template:…`) resolves for
 // hover, move, delete and of course baking. Runs once at module load; the actor
 // catalog registration that happens later adds to the same (additive) registry.
-registerActorSmartObjects([...ACTOR_TEMPLATE_SMART_OBJECTS]);
+registerActorSmartObjects([...ACTOR_TEMPLATE_SMART_OBJECTS, PLAYER_START_DEFINITION]);
 
 /**
  * Returns the variant (rotation style) a definition uses for the given index,
@@ -208,6 +230,11 @@ export interface SmartObjectTargetLayer {
  *
  * Tiles whose target falls outside the room (0-31) are skipped. The base layer
  * index is `baseLayerIndex`; its paired top layer is `baseLayerIndex + 8`.
+ *
+ * @param actorVariable For actor-baked objects, the `Variable` to record instead
+ *   of the definition's default. Pass the existing placement's value when
+ *   moving/restamping an actor, otherwise the default would reset user-edited
+ *   fields (e.g. the player start's colour/state/facing).
  */
 export function applySmartObject(
   definition: SmartObjectDefinition,
@@ -217,6 +244,7 @@ export function applySmartObject(
   baseLayerIndex = 0,
   variantIndex = 0,
   subTypeIndex = 0,
+  actorVariable?: number,
 ): SmartObjectPlacement {
   const variant = smartObjectVariant(definition, variantIndex, subTypeIndex);
   const placement: SmartObjectPlacement = {
@@ -229,7 +257,9 @@ export function applySmartObject(
     bottomLayerTiles: [],
     topLayerTiles: [],
     // Actor-baked objects record the variable used; tile-baked ones leave it off.
-    ...(definition.baking === 'actor' ? { actorVariable: definition.actorVariable ?? 0 } : {}),
+    ...(definition.baking === 'actor'
+      ? { actorVariable: actorVariable ?? definition.actorVariable ?? 0 }
+      : {}),
   };
 
   const write = (

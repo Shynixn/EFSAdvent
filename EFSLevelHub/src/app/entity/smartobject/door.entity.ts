@@ -33,7 +33,7 @@ import {
   smartObjectBounds,
   warpChildDestination,
   withChildren,
-} from './smartobject.entity';
+} from '../smartobject.entity';
 
 /** Toolbox section a door belongs to (doors are tile-baked smart objects). */
 export const DOOR_SECTION = 'Doors';
