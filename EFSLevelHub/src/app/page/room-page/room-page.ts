@@ -762,7 +762,9 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
   onActivationUnlinked(placement: SmartObjectPlacement): void {
     const links = this.activationLinks();
     const key = placementKey(placement);
-    const byKey = new Map(this.smartObjects().map((entry) => [placementKey(entry), entry] as const));
+    const byKey = new Map(
+      this.smartObjects().map((entry) => [placementKey(entry), entry] as const),
+    );
     const cleared: SmartObjectPlacement[] = [];
 
     // Case 1: the placement is a SOURCE — drop all of its outgoing links and

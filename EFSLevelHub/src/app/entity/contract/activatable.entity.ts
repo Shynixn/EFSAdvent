@@ -51,17 +51,13 @@ export function activatableOf(
 }
 
 /** Whether a definition is an activation **source** (shows "Activates"). */
-export function isActivationSource(
-  definition: SmartObjectDefinition | undefined,
-): boolean {
+export function isActivationSource(definition: SmartObjectDefinition | undefined): boolean {
   const activatable = activatableOf(definition);
   return !!activatable && !activatable.isTarget;
 }
 
 /** Whether a definition is an activation **target**. */
-export function isActivationTarget(
-  definition: SmartObjectDefinition | undefined,
-): boolean {
+export function isActivationTarget(definition: SmartObjectDefinition | undefined): boolean {
   return activatableOf(definition)?.isTarget === true;
 }
 
@@ -116,7 +112,9 @@ export function encodeSetVariable(variable: number, value: number): number {
  * (1-31), or `null` when the room has exhausted them all.
  */
 export function findFreeLocalVariable(used: readonly number[]): number | null {
-  const taken = new Set(used.filter((value) => value >= LOCAL_VARIABLE_MIN && value <= LOCAL_VARIABLE_MAX));
+  const taken = new Set(
+    used.filter((value) => value >= LOCAL_VARIABLE_MIN && value <= LOCAL_VARIABLE_MAX),
+  );
   for (let value = LOCAL_VARIABLE_MIN; value <= LOCAL_VARIABLE_MAX; value++) {
     if (!taken.has(value)) {
       return value;

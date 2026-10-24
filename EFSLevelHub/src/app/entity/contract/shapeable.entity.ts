@@ -37,9 +37,7 @@ export interface ShapeableSmartObjectDefinition extends SmartObjectDefinition {
 }
 
 /** The shape descriptor of a definition, when it has shapes. */
-export function shapeOf(
-  definition: SmartObjectDefinition | undefined,
-): IShapeable | undefined {
+export function shapeOf(definition: SmartObjectDefinition | undefined): IShapeable | undefined {
   return (definition as ShapeableSmartObjectDefinition | undefined)?.shape;
 }
 
