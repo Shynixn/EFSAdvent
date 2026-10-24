@@ -46,11 +46,7 @@ import {
 import { canRotate, nextRotation } from '../../entity/contract/rotateable.entity';
 import { shapeOf, decodeShape, encodeShape } from '../../entity/contract/shapeable.entity';
 import { isActivationSource, isActivationTarget } from '../../entity/contract/activatable.entity';
-import {
-  decodeGemType,
-  encodeGemType,
-  gemTypeOf,
-} from '../../entity/smartobject/force-gem.entity';
+import { decodeGemType, encodeGemType, gemTypeOf } from '../../entity/smartobject/force-gem.entity';
 import {
   ActivationLink,
   isLinkedTarget,

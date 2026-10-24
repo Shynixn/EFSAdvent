@@ -719,8 +719,7 @@ export class ToolboxColumnComponent implements AfterViewInit {
   readonly itemObjects: SmartObjectDefinition[] = [FORCE_GEM_DEFINITION];
 
   /** The item preview canvases. */
-  private readonly itemCanvases =
-    viewChildren<ElementRef<HTMLCanvasElement>>('itemPreview');
+  private readonly itemCanvases = viewChildren<ElementRef<HTMLCanvasElement>>('itemPreview');
 
   /** Starts a native drag for an item actor object. */
   onItemDragStart(event: DragEvent, definition: SmartObjectDefinition): void {

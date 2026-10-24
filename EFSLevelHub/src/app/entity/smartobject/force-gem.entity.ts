@@ -98,9 +98,7 @@ export const FORCE_GEM_DEFINITION: GemTypeSmartObjectDefinition = {
 };
 
 /** The gem-type descriptor of a definition, when it has one. */
-export function gemTypeOf(
-  definition: { readonly id: string } | undefined,
-): IGemType | undefined {
+export function gemTypeOf(definition: { readonly id: string } | undefined): IGemType | undefined {
   if (!definition || definition.id !== FORCE_GEM_ID) {
     return undefined;
   }
