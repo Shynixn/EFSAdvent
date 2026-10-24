@@ -29,7 +29,10 @@ import { GROUND_DEFINITIONS, GroundDefinition } from '../../entity/ground.entity
 import { SmartObjectDragService } from '../../service/smart-object-drag.service';
 import { ActorSpriteService } from '../../service/actor-sprite.service';
 import { hideNativeDragImage } from '../../util/drag';
-import { PLAYER_START_ACTOR_ID, PLAYER_START_DEFINITION } from '../../entity/smartobject/player-start.entity';
+import {
+  PLAYER_START_ACTOR_ID,
+  PLAYER_START_DEFINITION,
+} from '../../entity/smartobject/player-start.entity';
 import { EditorService } from '../../service/editor.service';
 import { ImageBuffer } from '../../service/render/gba-tile-renderer';
 
@@ -403,7 +406,8 @@ export class ToolboxColumnComponent implements AfterViewInit {
       }
       for (const ref of enemyCanvases) {
         const id = ref.nativeElement.dataset['enemyId'];
-        const enemy = this.enemies.find((entry) => entry.id === id) ??
+        const enemy =
+          this.enemies.find((entry) => entry.id === id) ??
           this.npcs.find((entry) => entry.id === id);
         const canvas = ref.nativeElement;
         if (!enemy) {
@@ -609,7 +613,10 @@ export class ToolboxColumnComponent implements AfterViewInit {
   onPlayerStartDragStart(event: DragEvent): void {
     event.dataTransfer?.setData('application/x-smart-object', PLAYER_START_DEFINITION.id);
     hideNativeDragImage(event);
-    this.dragService.start(PLAYER_START_DEFINITION, PLAYER_START_DEFINITION.rotation?.defaultRotation ?? 0);
+    this.dragService.start(
+      PLAYER_START_DEFINITION,
+      PLAYER_START_DEFINITION.rotation?.defaultRotation ?? 0,
+    );
     this.decorationDragStarted.emit();
   }
 }

@@ -23,7 +23,11 @@
       >
         @if (action.icon) {
           <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-            <path [attr.d]="action.icon" [attr.fill-rule]="'evenodd'" [attr.clip-rule]="'evenodd'" />
+            <path
+              [attr.d]="action.icon"
+              [attr.fill-rule]="'evenodd'"
+              [attr.clip-rule]="'evenodd'"
+            />
           </svg>
         }
         <span class="flex-1">{{ action.label }}</span>
@@ -71,7 +75,9 @@
                 [class.text-sky-300]="group.selected === choice.value"
                 [class.text-slate-200]="group.selected !== choice.value"
               >
-                <span class="w-3 text-center">{{ group.selected === choice.value ? '✓' : '' }}</span>
+                <span class="w-3 text-center">{{
+                  group.selected === choice.value ? '✓' : ''
+                }}</span>
                 <span class="flex-1">{{ choice.label }}</span>
               </button>
             }
