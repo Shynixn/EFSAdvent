@@ -227,7 +227,7 @@ export class ToolboxColumnComponent implements AfterViewInit {
     queueMicrotask(() => void this.drawPreviews());
   }
 
-  /** Placable NPCs (actor-baked smart objects), shown in the NPC section. */
+  /** Placable NPCs (generated actor smart objects with context-menu fields). */
   private _npcs: SmartObjectDefinition[] = [];
   @Input()
   get npcs(): SmartObjectDefinition[] {
@@ -425,8 +425,9 @@ export class ToolboxColumnComponent implements AfterViewInit {
       }
       for (const ref of enemyCanvases) {
         const id = ref.nativeElement.dataset['enemyId'];
+        // All three sections share the `enemyPreview` canvas reference; resolve
+        // the definition from whichever list actually contains the id.
         const enemy =
-          this.enemies.find((entry) => entry.id === id) ??
           this.enemies.find((entry) => entry.id === id) ??
           this.npcs.find((entry) => entry.id === id);
         const canvas = ref.nativeElement;

@@ -72,8 +72,11 @@ import {
   TINGLE_BUSTER_LAYER,
   withTingleBuster,
 } from '../../entity/smartobject/tingle-buster.entity';
-import { enemyDefinitions as generatedEnemyDefinitions } from '../../entity/smartobject/enemy-smart-objects.entity';
-import { actorSmartObjects, npcDefinitions } from '../../entity/actor.definition';
+import {
+  enemyDefinitions as generatedEnemyDefinitions,
+  npcSmartObjectDefinitions as generatedNpcDefinitions,
+} from '../../entity/smartobject/enemy-npc-smart-objects.entity';
+import { actorSmartObjects } from '../../entity/actor.definition';
 import type { ActorDefinition } from '../../entity/actor-definition.entity';
 import { FORCE_GEM_ACTOR_ID, forceGemDefinition } from '../../entity/smartobject/force-gem.entity';
 import { TilesetTheme } from '../../entity/tileset.util';
@@ -233,7 +236,7 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
    */
   readonly actorCatalog = signal<Record<string, ActorDefinition> | null>(null);
 
-  /** Placable NPCs (actor-baked smart objects), shown in the toolbox. */
+  /** Placable NPCs (generated smart objects with context-menu fields). */
   readonly npcs = signal<SmartObjectDefinition[]>([]);
 
   /**
@@ -1003,17 +1006,6 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
     try {
       const actors = await this.fsaLib.loadActors();
       const renderer = this.renderer();
-      // Only offer NPCs whose graphics actually exist in this stage's resources;
-      // sprite parts and BTI textures live in the stage archive, so an actor the
-      // catalog knows can still be undrawable here. Check both the TV and GBA
-      // sprite sheets so toggling the GBA layer never empties the list.
-      const npcs = renderer
-        ? npcDefinitions(actors).filter(
-            (npc) =>
-              renderer.canRenderActor(npc.id, npc.actorVariable ?? 0, false) ||
-              renderer.canRenderActor(npc.id, npc.actorVariable ?? 0, true),
-          )
-        : npcDefinitions(actors);
       // Register EVERY actor as a smart object (not just the Enemy toolbox
       // subset), so actors already present in a room — Objects, Properties,
       // NPCs, … — resolve by id for rendering, hover, move and delete.
@@ -1022,13 +1014,15 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
       // Share the catalog so entity definitions can build their menus from it.
       this.actorCatalog.set(actors);
 
-      // Enemies are generated GENERICALLY from the catalog: each one is a smart
-      // object whose context menu is built from its declared variable fields
-      // (see rawiso/entitymig.md). The page never names an individual enemy.
+      // Enemies and NPCs are generated GENERICALLY from the catalog: each one is
+      // a smart object whose context menu is built from its declared variable
+      // fields (see rawiso/entitymig.md). The page never names an individual
+      // actor.
       //
-      // They are filtered to what this stage can actually draw, registered so
-      // their ids resolve for hover/move/delete, and removed from the legacy
-      // list so nothing is offered twice.
+      // They are filtered to what this stage can actually draw (sprite parts
+      // and BTI textures live in the stage archive, so a catalogued actor can
+      // still be undrawable here), then registered so their ids resolve for
+      // hover/move/delete.
       const drawable = (definition: SmartObjectDefinition): boolean =>
         renderer
           ? renderer.canRenderActor(
@@ -1043,10 +1037,12 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
             )
           : true;
 
-      const generated = generatedEnemyDefinitions(actors).filter(drawable);
-      registerActorSmartObjects(generated);
-      this.enemies.set(generated);
-      this.npcs.set(npcs);
+      const generatedEnemies = generatedEnemyDefinitions(actors).filter(drawable);
+      const generatedNpcs = generatedNpcDefinitions(actors).filter(drawable);
+      registerActorSmartObjects(generatedEnemies);
+      registerActorSmartObjects(generatedNpcs);
+      this.enemies.set(generatedEnemies);
+      this.npcs.set(generatedNpcs);
 
       // The stand-alone item objects (the force gem) are registered at module
       // load WITHOUT catalog metadata, so their context-menu fields are empty.

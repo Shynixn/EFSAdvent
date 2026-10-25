@@ -315,45 +315,51 @@
         }
       </div>
 
-      <!-- NPC: place actor NPCs from the game's actor catalog -->
+      <!-- NPCs (new): generated smart objects with full context-menu fields -->
       <div class="mt-3 rounded-lg border border-slate-800">
         <button
           type="button"
           (click)="toggleNpcs()"
           class="flex w-full cursor-pointer items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400"
         >
-          <span>NPC</span>
+          <span>NPCs</span>
           <span class="text-slate-500">{{ npcsOpen() ? '▾' : '▸' }}</span>
         </button>
         @if (npcsOpen()) {
           <div class="space-y-2 border-t border-slate-800 px-3 py-3">
             <p class="text-[11px] text-slate-500">
-              Drag an NPC onto the room canvas to place it. NPCs are smart objects that bake an
-              actor into the room's enemy list instead of tiles.
+              Drag an NPC onto the room canvas. Right-click a placed NPC to edit every field the
+              game exposes.
             </p>
-            <div class="flex flex-wrap gap-2">
-              @for (npc of npcs; track npc.id) {
-                <button
-                  type="button"
-                  draggable="true"
-                  (dragstart)="onDecorationDragStart($event, npc)"
-                  (dragend)="onDecorationDragEnd()"
-                  class="flex cursor-grab flex-col items-center gap-2 rounded-lg border border-slate-700 bg-slate-800/70 px-3 py-2 text-xs text-slate-200 transition hover:border-indigo-400 hover:bg-slate-700/60 active:cursor-grabbing"
-                  [title]="'Drag ' + npc.name + ' (' + npc.id + ') onto the canvas'"
-                >
-                  <span
-                    class="flex h-16 w-16 items-center justify-center overflow-hidden rounded border border-slate-700 bg-slate-950/60"
+            @if (npcs.length === 0) {
+              <p class="text-[11px] text-slate-600 italic">
+                No NPC loaded yet — open a stage that carries this hero's sprites.
+              </p>
+            } @else {
+              <div class="flex flex-wrap gap-2">
+                @for (npc of npcs; track npc.id) {
+                  <button
+                    type="button"
+                    draggable="true"
+                    (dragstart)="onDecorationDragStart($event, npc)"
+                    (dragend)="onDecorationDragEnd()"
+                    class="flex cursor-grab flex-col items-center gap-2 rounded-lg border border-slate-700 bg-slate-800/70 px-3 py-2 text-xs text-slate-200 transition hover:border-indigo-400 hover:bg-slate-700/60 active:cursor-grabbing"
+                    [title]="'Drag ' + npc.name + ' (' + npc.id + ') onto the canvas'"
                   >
-                    <canvas
-                      #enemyPreview
-                      [attr.data-enemy-id]="npc.id"
-                      style="image-rendering: pixelated"
-                    ></canvas>
-                  </span>
-                  <span class="max-w-16 truncate">{{ npc.name }}</span>
-                </button>
-              }
-            </div>
+                    <span
+                      class="flex h-16 w-16 items-center justify-center overflow-hidden rounded border border-slate-700 bg-slate-950/60"
+                    >
+                      <canvas
+                        #enemyPreview
+                        [attr.data-enemy-id]="npc.id"
+                        style="image-rendering: pixelated"
+                      ></canvas>
+                    </span>
+                    <span class="max-w-16 truncate">{{ npc.name }}</span>
+                  </button>
+                }
+              </div>
+            }
           </div>
         }
       </div>
