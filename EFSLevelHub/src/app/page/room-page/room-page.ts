@@ -72,11 +72,8 @@ import {
   TINGLE_BUSTER_LAYER,
   withTingleBuster,
 } from '../../entity/smartobject/tingle-buster.entity';
-import {
-  migratedActorIds,
-  migratedEnemies,
-} from '../../entity/smartobject/migrated-enemies.entity';
-import { actorSmartObjects, enemyDefinitions, npcDefinitions } from '../../entity/actor.definition';
+import { enemyDefinitions as generatedEnemyDefinitions } from '../../entity/smartobject/enemy-smart-objects.entity';
+import { actorSmartObjects, npcDefinitions } from '../../entity/actor.definition';
 import type { ActorDefinition } from '../../entity/actor-definition.entity';
 import { FORCE_GEM_ACTOR_ID, forceGemDefinition } from '../../entity/smartobject/force-gem.entity';
 import { TilesetTheme } from '../../entity/tileset.util';
@@ -227,14 +224,8 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
   /** Persisted activation links for the open room. */
   readonly activationLinks = signal<ActivationLink[]>([]);
 
-  /** Placable enemies (actor-baked smart objects), shown in the toolbox. */
+  /** Placable enemies, with context-menu fields derived from the catalog. */
   readonly enemies = signal<SmartObjectDefinition[]>([]);
-
-  /**
-   * Enemies migrated to first-class smart objects with real context-menu
-   * fields (see `rawiso/entitymig.md`), shown above the legacy list.
-   */
-  readonly migratedEnemies = signal<SmartObjectDefinition[]>([]);
 
   /**
    * The loaded actor catalog, shared with the toolbox so entity definitions can
@@ -409,9 +400,15 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
     () => !this.saving() && !this.exportingStage() && this.room() != null,
   );
 
-  /** Whether the "Export Test ISO" button is actionable. */
+  /**
+   * Whether the "Export Test ISO" button is actionable.
+   *
+   * Note this must NOT depend on {@link exporting}: that flag is only raised
+   * *after* this check passes (it guards the export itself, not the button
+   * state), so depending on it here would make the button permanently disabled.
+   */
   readonly canSaveAndExport = computed(
-    () => !this.saving() && !this.exporting() && this.canExport() && this.room() != null,
+    () => !this.saving() && this.canExport() && this.room() != null,
   );
 
   /** Route param subscription; re-loads when the open room changes. */
@@ -575,29 +572,16 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
       const recordedActors = recordedPlacements.filter(isActorBaked);
 
       const archiveActors = (room.Actors ?? []).map((actor) => actorToPlacement(actor));
-      // An archive actor whose **actor id** is already present in `smartObjects`
-      // (as a root OR as any child) is NOT legacy — it is already recorded, so
-      // it must not be surfaced a second time.
-      //
-      // This is intentionally keyed on the actor id ALONE: position, layer and
-      // variable are all things the editor rewrites (moving a door, rotating it,
-      // re-centring its `WARP`), while the archive still holds the pre-save
-      // values. Comparing more made recorded warps/actors miss their archive
-      // counterpart and reappear as legacy actors (and then get baked twice).
-      //
-      // The id comes from `bakedActorId` (definition `actorId` ?? placement id),
-      // so a template recorded as `template:…` still matches the archive's actor.
-      const recordedActorIds = new Set(
-        flattenPlacements(recordedPlacements).map((placement) => bakedActorId(placement)),
-      );
-      const legacy = archiveActors.filter(
-        (placement) => !recordedActorIds.has(bakedActorId(placement)),
-      );
 
       // Legacy actors stay in their OWN list — never mixed into `smartObjects`,
       // so they cannot appear as editor placements. The canvas draws them (red)
       // from `legacyActors`, and the `actors` computed bakes them on save.
-      this.legacyActors.set(legacy);
+      //
+      // The actual classification happens in `classifyLegacyActors()` AFTER the
+      // smart-object catalog is registered (see below): deciding it here made
+      // every generated enemy look legacy, because `bakedActorId()` resolves an
+      // actor-baked definition's `actorId` through that registry.
+      this.legacyActors.set([]);
       this.smartObjects.set([...tilePlacements, ...recordedActors]);
       this.groundLayers.set((record?.ground ?? []).map((layer) => ({ ...layer })));
 
@@ -610,6 +594,11 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
       toolboxTimer.lap('sprite sheets ready');
       await this.ensureEnemies();
       toolboxTimer.stop('RoomPage:');
+
+      // Only now is the smart-object catalog complete, so actor-baked
+      // definitions resolve to their `actorId` and the archive actors can be
+      // matched against the recorded placements.
+      this.legacyActors.set(classifyLegacyActors(recordedPlacements, archiveActors));
 
       // Register this room as an open tab and mark the stage active so the side
       // nav highlights it and the stage page's save picks up the edits.
@@ -1014,17 +1003,10 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
     try {
       const actors = await this.fsaLib.loadActors();
       const renderer = this.renderer();
-      // Only offer enemies whose graphics actually exist in this stage's
-      // resources; sprite parts and BTI textures live in the stage archive, so
-      // an enemy the catalog knows can still be undrawable here. Check both the
-      // TV and GBA sprite sheets so toggling the GBA layer never empties the list.
-      const enemies = renderer
-        ? enemyDefinitions(actors).filter(
-            (enemy) =>
-              renderer.canRenderActor(enemy.id, enemy.actorVariable ?? 0, false) ||
-              renderer.canRenderActor(enemy.id, enemy.actorVariable ?? 0, true),
-          )
-        : enemyDefinitions(actors);
+      // Only offer NPCs whose graphics actually exist in this stage's resources;
+      // sprite parts and BTI textures live in the stage archive, so an actor the
+      // catalog knows can still be undrawable here. Check both the TV and GBA
+      // sprite sheets so toggling the GBA layer never empties the list.
       const npcs = renderer
         ? npcDefinitions(actors).filter(
             (npc) =>
@@ -1032,11 +1014,6 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
               renderer.canRenderActor(npc.id, npc.actorVariable ?? 0, true),
           )
         : npcDefinitions(actors);
-      if (enemies.length === 0) {
-        this.logger.warn(
-          `RoomPage: no drawable enemy actors resolved from ${Object.keys(actors).length} definitions`,
-        );
-      }
       // Register EVERY actor as a smart object (not just the Enemy toolbox
       // subset), so actors already present in a room — Objects, Properties,
       // NPCs, … — resolve by id for rendering, hover, move and delete.
@@ -1045,12 +1022,14 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
       // Share the catalog so entity definitions can build their menus from it.
       this.actorCatalog.set(actors);
 
-      // Migrated enemies are first-class smart objects with real context-menu
-      // fields (see rawiso/entitymig.md). The registry owns the list, so this
-      // page never names an individual enemy entity. They are registered on top
-      // so their ids resolve, and their actor ids are removed from the legacy
-      // list so nothing appears twice.
-      const migrated = migratedEnemies(actors).filter((definition) =>
+      // Enemies are generated GENERICALLY from the catalog: each one is a smart
+      // object whose context menu is built from its declared variable fields
+      // (see rawiso/entitymig.md). The page never names an individual enemy.
+      //
+      // They are filtered to what this stage can actually draw, registered so
+      // their ids resolve for hover/move/delete, and removed from the legacy
+      // list so nothing is offered twice.
+      const drawable = (definition: SmartObjectDefinition): boolean =>
         renderer
           ? renderer.canRenderActor(
               definition.actorId ?? definition.id,
@@ -1062,19 +1041,16 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
               definition.actorVariable ?? 0,
               true,
             )
-          : true,
-      );
-      const migratedIds = migratedActorIds();
-      registerActorSmartObjects(migrated);
-      this.migratedEnemies.set(migrated);
-      this.enemies.set(enemies.filter((enemy) => !migratedIds.has(enemy.id)));
+          : true;
+
+      const generated = generatedEnemyDefinitions(actors).filter(drawable);
+      registerActorSmartObjects(generated);
+      this.enemies.set(generated);
       this.npcs.set(npcs);
 
       // The stand-alone item objects (the force gem) are registered at module
       // load WITHOUT catalog metadata, so their context-menu fields are empty.
-      // Re-register them from the catalog now that it is available, otherwise
-      // the canvas resolves the stale, field-less definition and the menu shows
-      // nothing but Delete.
+      // Re-register them from the catalog now that it is available.
       registerActorSmartObjects([forceGemDefinition(actors[FORCE_GEM_ACTOR_ID])]);
     } catch (error) {
       this.logger.warn('RoomPage: failed to load enemy definitions', error);
@@ -1133,8 +1109,19 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
    */
   private syncRoomActors(): void {
     const room = this.room();
-    if (room) {
-      room.Actors = withTingleBuster(this.actors(), [TINGLE_BUSTER_LAYER]);
+    if (!room) {
+      return;
+    }
+    const next = withTingleBuster(this.actors(), [TINGLE_BUSTER_LAYER]);
+    // `StageEditorService.save` only writes the actor payload for rooms listed
+    // in `dirtyActorRoomIndices`. Assigning `room.Actors` without marking the
+    // room dirty therefore updates the in-memory room but writes NOTHING to the
+    // archive — the save looks successful while the enemies are silently lost.
+    // Only mark when the list actually changed, so an untouched room is not
+    // rewritten on every save.
+    if (!sameActorList(room.Actors, next)) {
+      room.Actors = next;
+      this.stageRoom.markActorsDirty(this.roomIndex());
     }
   }
 
@@ -1493,7 +1480,8 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
       // the archive by the save below (ground otherwise only lives in the JSON).
       this.bakeGroundIntoRoom();
       // Sync the room's in-memory actor list from the editor's placements so the
-      // save writes the current enemies into the archive.
+      // save writes the current enemies into the archive. Both of the above mark
+      // their own dirty state; without that the save silently writes nothing.
       this.syncRoomActors();
       const result = await this.stageEditor.save(
         id,
@@ -1701,3 +1689,68 @@ type SaveFilePickerFn = (options?: {
   suggestedName?: string;
   types?: { description?: string; accept: Record<string, string[]> }[];
 }) => Promise<FileSystemFileHandle>;
+
+/**
+ * Whether two actor lists are byte-for-byte equivalent for serialization.
+ *
+ * Order is significant: the archive stores the actors as an ordered array, so
+ * a reordering is a real change and must be written back.
+ */
+function sameActorList(a: readonly ActorData[] | undefined, b: readonly ActorData[]): boolean {
+  if (!a || a.length !== b.length) {
+    return false;
+  }
+  for (let i = 0; i < a.length; i++) {
+    const left = a[i];
+    const right = b[i];
+    if (
+      left.Id !== right.Id ||
+      left.Layer !== right.Layer ||
+      left.X !== right.X ||
+      left.Y !== right.Y ||
+      left.Variable !== right.Variable
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Splits the archive's actors into the ones the editor already knows about and
+ * the ones it does not (“legacy” — they predate the editor or came from
+ * another tool).
+ *
+ * MUST be called after the smart-object catalog is registered: the comparison
+ * uses {@link bakedActorId}, which resolves an actor-baked definition's `actorId`
+ * through that registry. Running it earlier made every generated enemy (whose
+ * placement id is `enemy:XXX`) look legacy, so each load duplicated the room's
+ * actors.
+ *
+ * Matching is by actor id AND tile anchor AND layer, consuming each recorded
+ * placement so an archive actor can pair with exactly one. Keying on the id
+ * alone loses duplicate enemies of the same type (two Armos Knights); keying on
+ * the raw `Variable` loses doors, whose variable the editor rewrites while the
+ * archive still holds the pre-save value.
+ */
+function classifyLegacyActors(
+  recordedPlacements: readonly SmartObjectPlacement[],
+  archiveActors: readonly SmartObjectPlacement[],
+): SmartObjectPlacement[] {
+  const key = (placement: SmartObjectPlacement): string =>
+    `${bakedActorId(placement)}|${placement.anchorRow}|${placement.anchorCol}|${placement.baseLayerId}`;
+  const unmatched = new Map<string, number>();
+  for (const placement of flattenPlacements(recordedPlacements)) {
+    const id = key(placement);
+    unmatched.set(id, (unmatched.get(id) ?? 0) + 1);
+  }
+  return archiveActors.filter((placement) => {
+    const id = key(placement);
+    const remaining = unmatched.get(id) ?? 0;
+    if (remaining === 0) {
+      return true;
+    }
+    unmatched.set(id, remaining - 1);
+    return false;
+  });
+}

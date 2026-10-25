@@ -1612,6 +1612,9 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
         label: field.label,
         choices: field.choices.map((entry) => ({ value: entry.value, label: entry.label })),
         selected: placement ? field.value(placement) : 0,
+        kind: field.kind,
+        min: field.min,
+        max: field.max,
       });
     }
 
@@ -1693,7 +1696,9 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
     const definition = placement ? findSmartObjectDefinition(placement.id) : undefined;
     const field = fieldsOf(definition).find((entry) => entry.id === event.group);
     if (field) {
-      this.updateContextPlacement(field.withValue(placement!, event.value));
+      // Flags and steppers stay open so several edits can be made in one go.
+      const keepOpen = field.kind === 'flags' || field.kind === 'number';
+      this.updateContextPlacement(field.withValue(placement!, event.value), keepOpen);
       return;
     }
     if (event.group === 'type') {
@@ -1707,15 +1712,23 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
    * Used by the variable-backed field setters; the definition supplied the new
    * placement, so nothing here depends on which field it was.
    */
-  private updateContextPlacement(to: SmartObjectPlacement): void {
+  private updateContextPlacement(to: SmartObjectPlacement, keepOpen = false): void {
     const from = this.contextMenu()?.placement;
     if (!from) {
       return;
     }
     const list = this.smartObjects.map((placement) => (placement === from ? to : placement));
     this.redrawSmartObjects({ list });
-    this.contextMenu.set(null);
-    this.hoveredPlacement = null;
+    if (keepOpen) {
+      // Flags and numeric steppers stay open across edits, so the menu keeps
+      // pointing at the UPDATED placement (otherwise the next toggle would be
+      // applied to the stale copy and lose the previous change).
+      this.contextMenu.update((menu) => (menu ? { ...menu, placement: to } : menu));
+      this.hoveredPlacement = to;
+    } else {
+      this.contextMenu.set(null);
+      this.hoveredPlacement = null;
+    }
     this.placementUpdated.emit({ from, to });
     this.drawHoverOutline();
     void this.redraw();

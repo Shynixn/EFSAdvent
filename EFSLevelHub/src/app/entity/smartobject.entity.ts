@@ -600,23 +600,35 @@ export function warpLinks(actors: readonly ActorData[]): WarpLink[] {
 
 /** The inverse of {@link placementToActor}: an actor record back to a placement. */
 export function actorToPlacement(actor: ActorData): SmartObjectPlacement {
-  const anchorCol = Math.floor(actor.X / 2);
-  const anchorRow = Math.floor(actor.Y / 2);
+  // Split the half-tile coordinate into a tile anchor plus a 0|1 remainder,
+  // keeping the remainder in `halfTileDx/Dy`. Truncating instead would move a
+  // sub-tile actor (e.g. a door's centred `WARP`) onto a different tile and
+  // make it impossible to match the recorded placement — which then reappears
+  // as a duplicate "legacy" actor on the next load.
+  const halfX = actor.X < 0 ? actor.X + 1 : actor.X;
+  const halfY = actor.Y < 0 ? actor.Y + 1 : actor.Y;
+  const dx = halfX & 1;
+  const dy = halfY & 1;
   // The archive stores the ACTOR id. Rebind it to the actor-template smart
   // object when one carries the same id AND variable, so a room saved with a
   // template reloads as that template (instead of a raw actor placement that
   // would bake back under a different id).
   const template = findActorTemplatePlacement(actor.Id, actor.Variable);
-  return {
+  const placement: SmartObjectPlacement = {
     id: template?.id ?? actor.Id,
     variantIndex: 0,
     baseLayerId: actor.Layer & 0x0f,
-    anchorRow,
-    anchorCol,
+    anchorRow: (halfY - dy) / 2,
+    anchorCol: (halfX - dx) / 2,
     bottomLayerTiles: [],
     topLayerTiles: [],
     actorVariable: actor.Variable,
   };
+  if (dx !== 0 || dy !== 0) {
+    placement.halfTileDx = dx;
+    placement.halfTileDy = dy;
+  }
+  return placement;
 }
 
 /**

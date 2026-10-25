@@ -37,6 +37,19 @@ export interface ContextMenuChoiceGroup {
   choices: ContextMenuChoice[];
   /** Currently selected value (shown with a checkmark). */
   selected: number | null;
+  /**
+   * How the entries behave:
+   *
+   * - `choice` (default) — mutually exclusive, picking one closes the menu.
+   * - `flags` — `selected` is a BITFIELD; each entry toggles its own bit and the
+   *   menu stays open so several can be switched on in a row.
+   * - `number` — a `−`/`+` stepper between `min` and `max` over `selected`.
+   */
+  kind?: 'choice' | 'flags' | 'number';
+  /** Lower bound for `kind: 'number'`. */
+  min?: number;
+  /** Upper bound for `kind: 'number'`. */
+  max?: number;
 }
 
 /**
@@ -120,5 +133,30 @@ export class CanvasContextMenuComponent {
     this.openGroup.set(null);
     this.choiceSelected.emit({ group: group.id, value: choice.value });
     this.closed.emit();
+  }
+
+  /**
+   * Toggles one bit of a `flags` group and keeps the menu OPEN, so several bits
+   * can be switched without re-opening the menu each time.
+   */
+  toggleFlag(group: ContextMenuChoiceGroup, choice: ContextMenuChoice): void {
+    const current = group.selected ?? 0;
+    const next = (current ^ choice.value) >>> 0;
+    this.choiceSelected.emit({ group: group.id, value: next });
+  }
+
+  /** Whether a `flags` group has a given bit set. */
+  hasFlag(group: ContextMenuChoiceGroup, choice: ContextMenuChoice): boolean {
+    return ((group.selected ?? 0) & choice.value) !== 0;
+  }
+
+  /** Steps a `number` group by `delta`, clamped to `[min, max]`, menu stays open. */
+  stepNumber(group: ContextMenuChoiceGroup, delta: number): void {
+    const min = group.min ?? 0;
+    const max = group.max ?? 255;
+    const next = Math.min(max, Math.max(min, (group.selected ?? 0) + delta));
+    if (next !== group.selected) {
+      this.choiceSelected.emit({ group: group.id, value: next });
+    }
   }
 }

@@ -155,9 +155,6 @@ export class ToolboxColumnComponent implements AfterViewInit {
   /** Whether the Enemies section is expanded. */
   readonly enemiesOpen = signal(true);
 
-  /** Whether the legacy "Enemies (OLD)" section is expanded. */
-  readonly legacyEnemiesOpen = signal(true);
-
   /**
    * Enemies migrated to first-class smart objects.
    *
@@ -165,8 +162,6 @@ export class ToolboxColumnComponent implements AfterViewInit {
    * variable-backed context-menu fields, so editing an enemy is bit-accurate
    * rather than drag-and-drop only. See `rawiso/entitymig.md`.
    */
-  @Input() migratedEnemies: SmartObjectDefinition[] = [];
-
   /** Whether the NPC section is expanded. */
   readonly npcsOpen = signal(true);
 
@@ -431,7 +426,7 @@ export class ToolboxColumnComponent implements AfterViewInit {
       for (const ref of enemyCanvases) {
         const id = ref.nativeElement.dataset['enemyId'];
         const enemy =
-          this.migratedEnemies.find((entry) => entry.id === id) ??
+          this.enemies.find((entry) => entry.id === id) ??
           this.enemies.find((entry) => entry.id === id) ??
           this.npcs.find((entry) => entry.id === id);
         const canvas = ref.nativeElement;
@@ -652,11 +647,6 @@ export class ToolboxColumnComponent implements AfterViewInit {
   /** Toggles the Enemies section. */
   toggleEnemies(): void {
     this.enemiesOpen.update((open) => !open);
-  }
-
-  /** Toggles the legacy "Enemies (OLD)" section. */
-  toggleLegacyEnemies(): void {
-    this.legacyEnemiesOpen.update((open) => !open);
   }
 
   /** Toggles the NPC section. */

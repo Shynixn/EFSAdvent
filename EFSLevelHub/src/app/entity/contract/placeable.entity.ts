@@ -52,12 +52,26 @@ export interface PlacementField {
   readonly id: string;
   /** Menu group label, e.g. `Player State`. */
   readonly label: string;
-  /** The selectable options, in menu order. */
+  /** The selectable options, in menu order (empty for numeric fields). */
   readonly choices: readonly PlacementFieldChoice[];
   /** Reads the current value out of the placement's actor `Variable`. */
   readonly value: (placement: SmartObjectPlacement) => number;
   /** Returns the placement with `value` written. */
   readonly withValue: (placement: SmartObjectPlacement, value: number) => SmartObjectPlacement;
+  /**
+   * How the menu renders this field.
+   *
+   * - `choice` (default) — mutually exclusive submenu entries.
+   * - `flags` — the value is a BITFIELD, so each choice toggles one bit and
+   *   several may be on at once. Used by GLFW-style `Flags` actor fields.
+   * - `number` — a numeric stepper between {@link min} and {@link max}, for
+   *   free-form `Integer` fields (e.g. `Rail ID`, `Range`).
+   */
+  readonly kind?: 'choice' | 'flags' | 'number';
+  /** Lower bound for {@link kind} `number` (default 0). */
+  readonly min?: number;
+  /** Upper bound for {@link kind} `number` (defaults to the field mask). */
+  readonly max?: number;
 }
 
 /** Placement lifecycle behaviour of a smart object. */
