@@ -81,13 +81,6 @@ export interface RoomGroundChange {
   tile: number;
 }
 
-/**
- * Actor ids that render nothing in-game and are placed at fixed spots (often
- * the room's top-left corner). No sprite is drawn for them, so no actor marker
- * is drawn either — a box would outline empty tiles.
- */
-const HIDDEN_ACTOR_MARKERS = new Set(['SWEV', 'TINB', 'GFBS', 'BGMN']);
-
 /** Merges two optional skip sets into one (either may be undefined/empty). */
 function mergeSkip(a: Set<number> | undefined, b: Set<number>): Set<number> {
   if (!a || a.size === 0) {
@@ -302,16 +295,14 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
    * **Legacy** actor placements on this canvas's base layer (`layerIndex`) that
    * draw a sprite — the only actors marked with a red border.
    *
-   * Actors on other base layers belong to their own section, and
-   * {@link HIDDEN_ACTOR_MARKERS} actors (which render nothing) are excluded.
+   * Actors on other base layers belong to their own section. Every actor is
+   * shown, including invisible markers such as `TINB`/`SWEV` — the editor
+   * deliberately surfaces them so nothing in the room is hidden from the user.
    * Editor-placed objects are intentionally NOT marked; they show only the
    * hover outline.
    */
   private legacyActorsOnLayer(): SmartObjectPlacement[] {
     return this.legacyActors.filter((placement) => {
-      if (HIDDEN_ACTOR_MARKERS.has(placement.id)) {
-        return false;
-      }
       const definition = findSmartObjectDefinition(placement.id);
       return definition?.baking === 'actor' && (placement.baseLayerId ?? 0) === this.layerIndex;
     });

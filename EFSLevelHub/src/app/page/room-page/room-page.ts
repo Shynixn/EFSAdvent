@@ -68,6 +68,10 @@ import {
   WARP_ACTOR_ID,
 } from '../../entity/smartobject.entity';
 import { expandPlaced, applyDelete, applyMove } from '../../entity/contract/placeable.entity';
+import {
+  TINGLE_BUSTER_LAYER,
+  withTingleBuster,
+} from '../../entity/smartobject/tingle-buster.entity';
 import { actorSmartObjects, enemyDefinitions, npcDefinitions } from '../../entity/actor.definition';
 import { TilesetTheme } from '../../entity/tileset.util';
 import { StageRenderer } from '../../service/render/stage-renderer';
@@ -1071,11 +1075,15 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
   /**
    * Copies the editor's actor-baked placements onto the room object the archive
    * is serialized from, so the save writes the current enemies.
+   *
+   * Every save also guarantees a Tingle Buster (`TINB`) exists on base layer 0,
+   * so Tingle can never appear in an edited room. An existing marker — including
+   * one placed by hand on any layer — is left untouched.
    */
   private syncRoomActors(): void {
     const room = this.room();
     if (room) {
-      room.Actors = this.actors();
+      room.Actors = withTingleBuster(this.actors(), [TINGLE_BUSTER_LAYER]);
     }
   }
 
