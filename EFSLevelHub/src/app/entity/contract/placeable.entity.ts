@@ -141,9 +141,7 @@ export interface PlaceableSmartObjectDefinition extends SmartObjectDefinition {
 }
 
 /** The placement descriptor of a definition, when it has one. */
-export function placeableOf(
-  definition: SmartObjectDefinition | undefined,
-): IPlaceable | undefined {
+export function placeableOf(definition: SmartObjectDefinition | undefined): IPlaceable | undefined {
   return (definition as PlaceableSmartObjectDefinition | undefined)?.placement;
 }
 
@@ -207,15 +205,11 @@ export function applyRotation(
 }
 
 /** The variable-backed fields a definition exposes, or `[]` when it has none. */
-export function fieldsOf(
-  definition: SmartObjectDefinition | undefined,
-): readonly PlacementField[] {
+export function fieldsOf(definition: SmartObjectDefinition | undefined): readonly PlacementField[] {
   return placeableOf(definition)?.fields ?? [];
 }
 
 /** Whether a definition can be connected to another object (e.g. a door). */
-export function isConnectableDefinition(
-  definition: SmartObjectDefinition | undefined,
-): boolean {
+export function isConnectableDefinition(definition: SmartObjectDefinition | undefined): boolean {
   return placeableOf(definition)?.connectable === true;
 }

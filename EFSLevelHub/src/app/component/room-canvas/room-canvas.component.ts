@@ -36,11 +36,7 @@ import {
   SmartObjectSubType,
   SmartObjectTileOffset,
 } from '../../entity/smartobject.entity';
-import {
-  connectDoors,
-  disconnectDoor,
-  isConnected,
-} from '../../entity/smartobject/door.entity';
+import { connectDoors, disconnectDoor, isConnected } from '../../entity/smartobject/door.entity';
 import { canRotate, nextRotation } from '../../entity/contract/rotateable.entity';
 import {
   applyRotation,

@@ -46,19 +46,18 @@ export function withDoorLifecycle<T extends SmartObjectDefinition>(definition: T
     // `placements` already has the move applied, which is exactly what
     // `reanchorConnections` expects (it skips the moved door itself).
     onMove: (from, to, placements, movedDefinition) => {
-      const { references, repointed } = reanchorConnections(
-        from,
-        to,
-        placements,
-        movedDefinition,
-      );
+      const { references, repointed } = reanchorConnections(from, to, placements, movedDefinition);
       return [...repointed, ...references];
     },
     onDelete: (deleted, placements) => detachConnections(deleted, placements),
     // A door's rotation also drives its child `WARP`'s warp type, so the sprite
     // facing and the connection direction stay in lock-step.
     onRotate: (placement, nextVariant, rotatedDefinition) =>
-      withRotatedWarpType({ ...placement, variantIndex: nextVariant }, nextVariant, rotatedDefinition),
+      withRotatedWarpType(
+        { ...placement, variantIndex: nextVariant },
+        nextVariant,
+        rotatedDefinition,
+      ),
   };
   return definition;
 }
