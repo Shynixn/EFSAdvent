@@ -354,10 +354,7 @@ export class FSALibService {
    * @param disallow `1` to disallow Tingle, `0` to allow him.
    * @returns The re-serialized archive, or `null` on failure.
    */
-  async setStageDisallowTingle(
-    arcData: Uint8Array,
-    disallow: number,
-  ): Promise<Uint8Array | null> {
+  async setStageDisallowTingle(arcData: Uint8Array, disallow: number): Promise<Uint8Array | null> {
     const fsa = await this.getFsa();
     const result = fsa.SetStageDisallowTingle(arcData, disallow);
     return result && result.byteLength > 0 ? result : null;
