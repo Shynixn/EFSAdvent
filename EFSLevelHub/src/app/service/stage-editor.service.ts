@@ -3,7 +3,7 @@ import { EditorService } from './editor.service';
 import { FSALibService } from './fsalib.service';
 import { LoggingService } from './logging.service';
 import { stageArcFilePath } from './stage.service';
-import { StageData } from '../entity/fsalib.entity';
+import { ActorData, StageData } from '../entity/fsalib.entity';
 import { StageRenderer } from './render/stage-renderer';
 
 /** A parsed stage plus its archive bytes and renderer, ready for editing. */
@@ -176,68 +176,45 @@ export class StageEditorService {
       return null;
     }
 
-    let bytes = await this.fsaLib.setStageTileSheet(loaded.arcBytes, loaded.data.Map.TileSheetId);
-    if (!bytes) {
-      this.logger.error(`StageEditor: failed to serialize stage "${stageId}" (tileset).`);
-      return null;
-    }
-
-    // The background music lives in the same map CSV headers, so it needs its
-    // own re-serialization pass (`Map` + `MapSingleplayer`).
-    const musicBytes = await this.fsaLib.setStageBackgroundMusic(
-      bytes,
-      loaded.data.Map.BackgroundMusicId,
-    );
-    if (!musicBytes) {
-      this.logger.error(`StageEditor: failed to serialize stage "${stageId}" (background music).`);
-      return null;
-    }
-    bytes = musicBytes;
-
-    // Tingle is always disallowed on save: the editor never surfaces the flag
-    // and every stage the user builds should be free of him. It shares the map
-    // CSV header with the music, hence another dedicated pass.
-    const tingleBytes = await this.fsaLib.setStageDisallowTingle(bytes, 1);
-    if (!tingleBytes) {
-      this.logger.error(`StageEditor: failed to serialize stage "${stageId}" (disallow Tingle).`);
-      return null;
-    }
-    bytes = tingleBytes;
-
-    // Write back each edited room layer, chaining the re-serialized archive.
+    // One round-trip for the whole save. The individual setters each re-opened
+    // the archive and re-serialized it twice, so a room save (tileset + music +
+    // 2 layers + actors) used to pay that ~5 times. All of these fields live in
+    // files the serializer rewrites as a unit, so one pass produces the same
+    // bytes for a fraction of the cost.
+    const layerPayload = dirtyLayers
+      .map(({ roomIndex, layerIndex }) => ({
+        roomIndex,
+        layerIndex,
+        tiles: loaded.data.Rooms[roomIndex]?.Layers[layerIndex]?.Tiles,
+      }))
+      .filter(
+        (
+          entry,
+        ): entry is { roomIndex: number; layerIndex: number; tiles: number[] } =>
+          !!entry.tiles,
+      );
     for (const { roomIndex, layerIndex } of dirtyLayers) {
-      const room = loaded.data.Rooms[roomIndex];
-      const tiles = room?.Layers[layerIndex]?.Tiles;
-      if (!tiles) {
+      if (!loaded.data.Rooms[roomIndex]?.Layers[layerIndex]?.Tiles) {
         this.logger.warn(
           `StageEditor: skipping missing layer ${layerIndex} of room ${roomIndex} in "${stageId}".`,
         );
-        continue;
       }
-      const updated = await this.fsaLib.setRoomLayer(bytes, roomIndex, layerIndex, tiles);
-      if (!updated) {
-        this.logger.error(
-          `StageEditor: failed to serialize layer ${layerIndex} of room ${roomIndex} in "${stageId}".`,
-        );
-        return null;
-      }
-      bytes = updated;
     }
 
-    // Write back each room whose actor list changed (enemies).
-    for (const roomIndex of dirtyActorRooms) {
-      const actors = loaded.data.Rooms[roomIndex]?.Actors;
-      if (!actors) {
-        continue;
-      }
-      const updated = await this.fsaLib.setRoomActors(bytes, roomIndex, actors);
-      if (!updated) {
-        this.logger.error(
-          `StageEditor: failed to serialize actors of room ${roomIndex} in "${stageId}".`,
-        );
-        return null;
-      }
-      bytes = updated;
+    const actorPayload = dirtyActorRooms
+      .map((roomIndex) => ({ roomIndex, actors: loaded.data.Rooms[roomIndex]?.Actors }))
+      .filter((entry): entry is { roomIndex: number; actors: ActorData[] } => !!entry.actors);
+
+    const bytes = await this.fsaLib.saveRoom(
+      loaded.arcBytes,
+      loaded.data.Map.TileSheetId,
+      loaded.data.Map.BackgroundMusicId,
+      layerPayload,
+      actorPayload,
+    );
+    if (!bytes) {
+      this.logger.error(`StageEditor: failed to serialize stage "${stageId}".`);
+      return null;
     }
 
     await this.editor.writeEditorFile(stageArcFilePath(stageId), bytes);

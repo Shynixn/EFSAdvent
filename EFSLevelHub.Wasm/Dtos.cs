@@ -56,6 +56,22 @@ public sealed class ActorDto
     public uint Variable { get; set; }
 }
 
+/// <summary>One room layer to replace during a combined save.</summary>
+public sealed class RoomLayerDto
+{
+    public int RoomIndex { get; set; }
+    public int LayerIndex { get; set; }
+    /// <summary>Flat row-major tile values (32×32 = 1024 entries).</summary>
+    public ushort[]? Tiles { get; set; }
+}
+
+/// <summary>One room's actor list to replace during a combined save.</summary>
+public sealed class RoomActorsDto
+{
+    public int RoomIndex { get; set; }
+    public List<ActorDto>? Actors { get; set; }
+}
+
 /// <summary>JSON-serializable projection of a FSALib <c>Rarc.DirectoryNode</c>.</summary>
 public sealed class RarcDirectoryDto
 {

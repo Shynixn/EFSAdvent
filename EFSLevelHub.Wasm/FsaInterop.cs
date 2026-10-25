@@ -177,143 +177,8 @@ public static partial class FsaInterop
             NormalizeCsvFiles(dir);
     }
 
-    /// <summary>
-    /// Sets a stage's tileset (its <c>Map.TileSheetId</c>) and re-serializes the
-    /// archive, so the change is written back into the stage's own <c>.arc</c>.
-    /// </summary>
-    /// <remarks>
-    /// The tileset id lives in the map's CSV header. A stage carries TWO maps:
-    /// <c>mapNNN.csv</c> (the shared/multiplayer map, <see cref="Stage.Map"/>) and
-    /// <c>mapNNN_1.csv</c> (the single-player map,
-    /// <see cref="Stage.MapSingleplayer"/>, which is what the game actually uses
-    /// in single-player). Both headers must be updated or the game keeps drawing
-    /// the old tileset. Serialization goes through <see cref="SerializeStage"/>
-    /// so the CSVs keep the CRLF/no-BOM format the game requires.
-    /// </remarks>
-    /// <param name="arcData">Raw bytes of the stage archive.</param>
-    /// <param name="tileSheetId">New tileset index to store.</param>
-    /// <returns>The re-serialized archive bytes, or an empty array on failure.</returns>
-    [JSExport]
-    public static byte[] SetStageTileSheet(byte[] arcData, int tileSheetId)
-    {
-        using var trace = Trace("SetStageTileSheet", $"(tileset {tileSheetId})");
-        try
-        {
-            using var stream = new MemoryStream(arcData, writable: false);
-            using var rarc = new Rarc(stream);
-            using var stage = new Stage(rarc);
-            stage.Map.TileSheetId = tileSheetId;
-            // The single-player map (`mapNNN_1.csv`) is a separate CSV and is the
-            // one the game reads in single-player, so it must be updated too.
-            // Shadow-battle stages have no single-player map.
-            if (stage.MapSingleplayer != null)
-            {
-                stage.MapSingleplayer.TileSheetId = tileSheetId;
-            }
-            return SerializeStage(stage);
-        }
-        catch
-        {
-            return Array.Empty<byte>();
-        }
-    }
 
-    /// <summary>
-    /// Sets a stage's background music and re-serializes the archive.
-    /// </summary>
-    /// <remarks>
-    /// Like the tileset, the music id lives in the map's CSV header. Both
-    /// <c>Map</c> (<c>mapNNN.csv</c>) and <c>MapSingleplayer</c>
-    /// (<c>mapNNN_1.csv</c>, the one the game uses in single-player) are
-    /// updated, otherwise the change has no effect in-game.
-    /// </remarks>
-    /// <param name="arcData">Raw bytes of the stage archive.</param>
-    /// <param name="musicId">New background music id (<c>Map.BackgroundMusicId</c>).</param>
-    /// <returns>The re-serialized archive bytes, or an empty array on failure.</returns>
-    [JSExport]
-    public static byte[] SetStageBackgroundMusic(byte[] arcData, int musicId)
-    {
-        using var trace = Trace("SetStageBackgroundMusic", $"(music {musicId})");
-        try
-        {
-            using var stream = new MemoryStream(arcData, writable: false);
-            using var rarc = new Rarc(stream);
-            using var stage = new Stage(rarc);
-            stage.Map.BackgroundMusicId = musicId;
-            if (stage.MapSingleplayer != null)
-            {
-                stage.MapSingleplayer.BackgroundMusicId = musicId;
-            }
-            return SerializeStage(stage);
-        }
-        catch
-        {
-            return Array.Empty<byte>();
-        }
-    }
 
-    /// <summary>
-    /// Replaces one room layer's tiles in a stage archive and re-serializes it.
-    /// </summary>
-    /// The editable room canvas paints individual tiles, so writing back just the
-    /// affected layer (rather than the whole stage graph) keeps the round-trip
-    /// small and avoids clobbering any data the browser does not model. The
-    /// layer is written through FSALib's <see cref="Room.SaveToRarc"/> (via
-    /// <see cref="SerializeStage"/>) so the SZS-compressed layer files keep the
-    /// format the game expects.
-    /// </remarks>
-    /// <param name="arcData">Raw bytes of the stage archive.</param>
-    /// <param name="roomIndex">Room whose layer is being replaced.</param>
-    /// <param name="layerIndex">Layer index (0-7 base, 8-15 top).</param>
-    /// <param name="tilesJson">
-    /// JSON array of flat row-major tile values (32×32 = 1024 entries). Shorter
-    /// input is rejected; extra entries are ignored. Passed as JSON because
-    /// <c>ushort[]</c> is not supported by the source-generated JS interop.
-    /// </param>
-    /// <returns>The re-serialized archive bytes, or an empty array on failure.</returns>
-    [JSExport]
-    public static byte[] SetRoomLayer(byte[] arcData, int roomIndex, int layerIndex, string tilesJson)
-    {
-        using var trace = Trace("SetRoomLayer", $"(room {roomIndex}, layer {layerIndex})");
-        try
-        {
-            ushort[]? tiles;
-            try
-            {
-                tiles = JsonSerializer.Deserialize<ushort[]>(tilesJson, JsonOptions);
-            }
-            catch
-            {
-                return Array.Empty<byte>();
-            }
-
-            if (tiles == null || tiles.Length < Layer.TILES)
-            {
-                return Array.Empty<byte>();
-            }
-
-            using var stream = new MemoryStream(arcData, writable: false);
-            using var rarc = new Rarc(stream);
-            using var stage = new Stage(rarc);
-
-            if (roomIndex < 0 || roomIndex >= stage.Rooms.Length)
-            {
-                return Array.Empty<byte>();
-            }
-            Room? room = stage.Rooms[roomIndex];
-            if (room == null || layerIndex < 0 || layerIndex >= room.Layers.Length)
-            {
-                return Array.Empty<byte>();
-            }
-
-            room.Layers[layerIndex].SetTiles(tiles.AsSpan(0, Layer.TILES), 0);
-            return SerializeStage(stage);
-        }
-        catch
-        {
-            return Array.Empty<byte>();
-        }
-    }
 
     /// <summary>
     /// Creates, replaces or deletes a room in the map layout and re-serializes
@@ -542,44 +407,6 @@ public static partial class FsaInterop
     }
 
     /// <summary>
-    /// Sets the map-level `DisallowTingle` flag and re-serializes the archive.
-    /// </summary>
-    /// <remarks>
-    /// `DisallowTingle = 1` stops Tingle appearing in the stage; `0` allows him.
-    /// The flag is the 10th field of the map CSV header (`mapNNN,...`), so it is
-    /// not covered by the room, layer or actor writers and needs its own pass —
-    /// same reason as <see cref="SetStageBackgroundMusic"/>.
-    ///
-    /// Both layouts are written when the stage has a single-player map, because
-    /// the game reads `mapNNN_1.csv` during normal play.
-    /// </remarks>
-    /// <param name="arcData">Raw bytes of the stage archive.</param>
-    /// <param name="disallow">`1` to disallow Tingle, `0` to allow him.</param>
-    /// <returns>The re-serialized archive bytes, or an empty array on failure.</returns>
-    [JSExport]
-    public static byte[] SetStageDisallowTingle(byte[] arcData, int disallow)
-    {
-        using var trace = Trace("SetStageDisallowTingle", $"({disallow})");
-        try
-        {
-            using var stream = new MemoryStream(arcData, writable: false);
-            using var rarc = new Rarc(stream);
-            using var stage = new Stage(rarc);
-            stage.Map.DisallowTingle = disallow;
-            if (stage.MapSingleplayer != null)
-            {
-                stage.MapSingleplayer.DisallowTingle = disallow;
-            }
-            return SerializeStage(stage);
-        }
-        catch (Exception ex)
-        {
-            Log($"SetStageDisallowTingle failed: {ex}");
-            return Array.Empty<byte>();
-        }
-    }
-
-    /// <summary>
     /// Deep-copies a room's layers and actors.
     /// </summary>
     /// <remarks>
@@ -602,83 +429,6 @@ public static partial class FsaInterop
         return room;
     }
 
-    /// <summary>
-    /// Replaces a room's actor list (the <c>d_enemy_mapMMM_RR.bin</c> contents) in
-    /// a stage archive and re-serializes it.
-    ///
-    /// Used by the room editor to persist placed/removed enemies (smart objects
-    /// of type <c>enemy</c>). Coordinates are half-tiles, matching FSALib's
-    /// <c>Actor</c> struct.
-    /// </summary>
-    /// <param name="arcData">Raw bytes of the stage archive.</param>
-    /// <param name="roomIndex">Room whose actors are being replaced.</param>
-    /// <param name="actorsJson">
-    /// JSON array of <c>{ id, layer, x, y, variable }</c> objects. Passed as JSON
-    /// because the struct array is not supported by the source-generated interop.
-    /// </param>
-    /// <returns>The re-serialized archive bytes, or an empty array on failure.</returns>
-    [JSExport]
-    public static byte[] SetRoomActors(byte[] arcData, int roomIndex, string actorsJson)
-    {
-        using var trace = Trace("SetRoomActors", $"(room {roomIndex})");
-        try
-        {
-            List<ActorDto>? actors;
-            try
-            {
-                actors = JsonSerializer.Deserialize<List<ActorDto>>(actorsJson, JsonOptions);
-            }
-            catch
-            {
-                return Array.Empty<byte>();
-            }
-
-            if (actors == null)
-            {
-                return Array.Empty<byte>();
-            }
-
-            using var stream = new MemoryStream(arcData, writable: false);
-            using var rarc = new Rarc(stream);
-            using var stage = new Stage(rarc);
-
-            if (roomIndex < 0 || roomIndex >= stage.Rooms.Length)
-            {
-                return Array.Empty<byte>();
-            }
-            Room? room = stage.Rooms[roomIndex];
-            if (room == null)
-            {
-                return Array.Empty<byte>();
-            }
-
-            room.Actors.Clear();
-            foreach (var dto in actors)
-            {
-                if (string.IsNullOrEmpty(dto.Id))
-                {
-                    // A blank id means the payload did not map onto ActorDto
-                    // (e.g. a JSON casing mismatch) — fail loudly instead of
-                    // writing a corrupt actor.
-                    Log("SetRoomActors: actor payload has an empty id.");
-                    return Array.Empty<byte>();
-                }
-                room.Actors.Add(new Actor(
-                    new Identifier32(dto.Id.AsSpan()),
-                    dto.Layer,
-                    dto.X,
-                    dto.Y,
-                    dto.Variable));
-            }
-
-            return SerializeStage(stage);
-        }
-        catch (Exception ex)
-        {
-            Log($"SetRoomActors failed: {ex}");
-            return Array.Empty<byte>();
-        }
-    }
 
     /// <summary>Liveness probe returning the FSALib version.</summary>
     [JSExport]
@@ -686,6 +436,162 @@ public static partial class FsaInterop
     {
         using var trace = Trace("GetVersion");
         return typeof(Stage).Assembly.GetName().Version?.ToString() ?? "unknown";
+    }
+
+    /// <summary>
+    /// Applies a whole room save in ONE deserialize/serialize cycle.
+    /// </summary>
+    /// <remarks>
+    /// Saving used to call one setter per change — <c>SetStageTileSheet</c>,
+    /// <c>SetStageBackgroundMusic</c>, one <c>SetRoomLayer</c> per dirty layer and
+    /// one <c>SetRoomActors</c> per dirty room. Every one of those re-opened the
+    /// archive, ran a full (double) re-serialization and handed the whole archive
+    /// back across the WASM boundary; a single room save therefore paid that cost
+    /// around five times.
+    ///
+    /// This method opens the archive ONCE, applies every pending change to the
+    /// in-memory <see cref="Stage"/>, and serializes once. It produces exactly the
+    /// same bytes, because all of these fields live in files that
+    /// <see cref="SerializeStage"/> rewrites as a unit anyway.
+    ///
+    /// Every argument is optional (`null`/empty skips that part), so the caller can
+    /// pass only what actually changed.
+    /// </remarks>
+    /// <param name="arcData">Raw bytes of the stage archive.</param>
+    /// <param name="tileSheetId">Tileset id to write into both map headers, or -1 to leave it.</param>
+    /// <param name="musicId">Background music id to write into both map headers, or -1 to leave it.</param>
+    /// <param name="layersJson">
+    /// JSON array of <c>{ roomIndex, layerIndex, tiles }</c>. Each entry replaces
+    /// that room layer's 1024 tiles.
+    /// </param>
+    /// <param name="actorsJson">
+    /// JSON array of <c>{ roomIndex, actors }</c>. Each entry replaces that room's
+    /// actor list.
+    /// </param>
+    /// <returns>The re-serialized archive bytes, or an empty array on failure.</returns>
+    [JSExport]
+    public static byte[] SaveRoom(
+        byte[] arcData,
+        int tileSheetId,
+        int musicId,
+        string? layersJson,
+        string? actorsJson)
+    {
+        using var trace = Trace("SaveRoom", $"(tileset {tileSheetId}, music {musicId})");
+        try
+        {
+            List<RoomLayerDto> layers = new();
+            if (!string.IsNullOrEmpty(layersJson))
+            {
+                var parsed = JsonSerializer.Deserialize<List<RoomLayerDto>>(layersJson, JsonOptions);
+                if (parsed == null)
+                {
+                    Log("SaveRoom: layer payload did not parse.");
+                    return Array.Empty<byte>();
+                }
+                layers = parsed;
+            }
+
+            List<RoomActorsDto> actorRooms = new();
+            if (!string.IsNullOrEmpty(actorsJson))
+            {
+                var parsed = JsonSerializer.Deserialize<List<RoomActorsDto>>(actorsJson, JsonOptions);
+                if (parsed == null)
+                {
+                    Log("SaveRoom: actor payload did not parse.");
+                    return Array.Empty<byte>();
+                }
+                actorRooms = parsed;
+            }
+
+            // Validate every tile payload BEFORE touching the stage, so a bad
+            // request can never leave a half-updated archive behind.
+            foreach (var layer in layers)
+            {
+                if (layer.Tiles == null || layer.Tiles.Length < Layer.TILES)
+                {
+                    Log($"SaveRoom: room {layer.RoomIndex} layer {layer.LayerIndex} has too few tiles.");
+                    return Array.Empty<byte>();
+                }
+            }
+
+            using var stream = new MemoryStream(arcData, writable: false);
+            using var rarc = new Rarc(stream);
+            using var stage = new Stage(rarc);
+
+            // --- map headers (tileset + music), both layouts -------------------
+            if (tileSheetId >= 0)
+            {
+                stage.Map.TileSheetId = tileSheetId;
+                if (stage.MapSingleplayer != null)
+                    stage.MapSingleplayer.TileSheetId = tileSheetId;
+            }
+            if (musicId >= 0)
+            {
+                stage.Map.BackgroundMusicId = musicId;
+                if (stage.MapSingleplayer != null)
+                    stage.MapSingleplayer.BackgroundMusicId = musicId;
+            }
+
+            // --- room layers ---------------------------------------------------
+            foreach (var layer in layers)
+            {
+                if (layer.RoomIndex < 0 || layer.RoomIndex >= stage.Rooms.Length)
+                {
+                    Log($"SaveRoom: room index {layer.RoomIndex} out of range.");
+                    return Array.Empty<byte>();
+                }
+                Room? room = stage.Rooms[layer.RoomIndex];
+                if (room == null || layer.LayerIndex < 0 || layer.LayerIndex >= room.Layers.Length)
+                {
+                    Log($"SaveRoom: layer {layer.LayerIndex} of room {layer.RoomIndex} is missing.");
+                    return Array.Empty<byte>();
+                }
+                room.Layers[layer.LayerIndex].SetTiles(layer.Tiles.AsSpan(0, Layer.TILES), 0);
+            }
+
+            // --- room actors ---------------------------------------------------
+            foreach (var entry in actorRooms)
+            {
+                if (entry.RoomIndex < 0 || entry.RoomIndex >= stage.Rooms.Length)
+                {
+                    Log($"SaveRoom: room index {entry.RoomIndex} out of range (actors).");
+                    return Array.Empty<byte>();
+                }
+                Room? room = stage.Rooms[entry.RoomIndex];
+                if (room == null)
+                {
+                    Log($"SaveRoom: room {entry.RoomIndex} is missing (actors).");
+                    return Array.Empty<byte>();
+                }
+
+                room.Actors.Clear();
+                foreach (var dto in entry.Actors ?? new List<ActorDto>())
+                {
+                    if (string.IsNullOrEmpty(dto.Id))
+                    {
+                        // A blank id means the payload did not map onto ActorDto
+                        // (e.g. a JSON casing mismatch) — fail loudly instead of
+                        // writing a corrupt actor.
+                        Log("SaveRoom: actor payload has an empty id.");
+                        return Array.Empty<byte>();
+                    }
+                    room.Actors.Add(new Actor(
+                        new Identifier32(dto.Id.AsSpan()),
+                        dto.Layer,
+                        dto.X,
+                        dto.Y,
+                        dto.Variable));
+                }
+            }
+
+            return SerializeStage(stage);
+        }
+        catch (Exception ex)
+        {
+            Log($"SaveRoom failed: {ex}");
+            return Array.Empty<byte>();
+        }
     }
 
     /// <summary>
