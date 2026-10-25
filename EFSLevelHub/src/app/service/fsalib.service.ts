@@ -58,6 +58,7 @@ interface DotnetExports {
         MergeStageContent(targetArcData: Uint8Array, sourceArcData: Uint8Array): Uint8Array;
         SetStageTileSheet(arcData: Uint8Array, tileSheetId: number): Uint8Array;
         SetStageBackgroundMusic(arcData: Uint8Array, musicId: number): Uint8Array;
+        SetStageDisallowTingle(arcData: Uint8Array, disallow: number): Uint8Array;
         SetRoomLayer(
           arcData: Uint8Array,
           roomIndex: number,
@@ -339,6 +340,26 @@ export class FSALibService {
   async setStageBackgroundMusic(arcData: Uint8Array, musicId: number): Promise<Uint8Array | null> {
     const fsa = await this.getFsa();
     const result = fsa.SetStageBackgroundMusic(arcData, musicId);
+    return result && result.byteLength > 0 ? result : null;
+  }
+
+  /**
+   * Sets the map-level `DisallowTingle` flag and re-serializes the stage.
+   *
+   * `1` stops Tingle appearing in the stage; `0` allows him. The flag is part of
+   * the map CSV header, so it needs its own pass (`Map` + `MapSingleplayer`),
+   * exactly like the background music.
+   *
+   * @param arcData  Raw bytes of the stage archive.
+   * @param disallow `1` to disallow Tingle, `0` to allow him.
+   * @returns The re-serialized archive, or `null` on failure.
+   */
+  async setStageDisallowTingle(
+    arcData: Uint8Array,
+    disallow: number,
+  ): Promise<Uint8Array | null> {
+    const fsa = await this.getFsa();
+    const result = fsa.SetStageDisallowTingle(arcData, disallow);
     return result && result.byteLength > 0 ? result : null;
   }
 

@@ -542,6 +542,44 @@ public static partial class FsaInterop
     }
 
     /// <summary>
+    /// Sets the map-level `DisallowTingle` flag and re-serializes the archive.
+    /// </summary>
+    /// <remarks>
+    /// `DisallowTingle = 1` stops Tingle appearing in the stage; `0` allows him.
+    /// The flag is the 10th field of the map CSV header (`mapNNN,...`), so it is
+    /// not covered by the room, layer or actor writers and needs its own pass —
+    /// same reason as <see cref="SetStageBackgroundMusic"/>.
+    ///
+    /// Both layouts are written when the stage has a single-player map, because
+    /// the game reads `mapNNN_1.csv` during normal play.
+    /// </remarks>
+    /// <param name="arcData">Raw bytes of the stage archive.</param>
+    /// <param name="disallow">`1` to disallow Tingle, `0` to allow him.</param>
+    /// <returns>The re-serialized archive bytes, or an empty array on failure.</returns>
+    [JSExport]
+    public static byte[] SetStageDisallowTingle(byte[] arcData, int disallow)
+    {
+        using var trace = Trace("SetStageDisallowTingle", $"({disallow})");
+        try
+        {
+            using var stream = new MemoryStream(arcData, writable: false);
+            using var rarc = new Rarc(stream);
+            using var stage = new Stage(rarc);
+            stage.Map.DisallowTingle = disallow;
+            if (stage.MapSingleplayer != null)
+            {
+                stage.MapSingleplayer.DisallowTingle = disallow;
+            }
+            return SerializeStage(stage);
+        }
+        catch (Exception ex)
+        {
+            Log($"SetStageDisallowTingle failed: {ex}");
+            return Array.Empty<byte>();
+        }
+    }
+
+    /// <summary>
     /// Deep-copies a room's layers and actors.
     /// </summary>
     /// <remarks>

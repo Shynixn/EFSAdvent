@@ -194,6 +194,16 @@ export class StageEditorService {
     }
     bytes = musicBytes;
 
+    // Tingle is always disallowed on save: the editor never surfaces the flag
+    // and every stage the user builds should be free of him. It shares the map
+    // CSV header with the music, hence another dedicated pass.
+    const tingleBytes = await this.fsaLib.setStageDisallowTingle(bytes, 1);
+    if (!tingleBytes) {
+      this.logger.error(`StageEditor: failed to serialize stage "${stageId}" (disallow Tingle).`);
+      return null;
+    }
+    bytes = tingleBytes;
+
     // Write back each edited room layer, chaining the re-serialized archive.
     for (const { roomIndex, layerIndex } of dirtyLayers) {
       const room = loaded.data.Rooms[roomIndex];
