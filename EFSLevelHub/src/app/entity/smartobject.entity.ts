@@ -22,6 +22,8 @@ import { PLAYER_START_DEFINITION } from './smartobject/player-start.entity';
 import type { ActivationLink } from './smartobject/activation.entity';
 import { GOAL_DEFINITION } from './smartobject/goal.entity';
 import { FORCE_GEM_DEFINITION } from './smartobject/force-gem.entity';
+import { withDoorLifecycle } from './contract/placeable-hooks.entity';
+import { SMART_OBJECT_DEFINITIONS as ALL_SMART_OBJECT_DEFINITIONS } from './smartobject.definition';
 import {
   SmartObjectDefinition,
   SmartObjectTileOffset,
@@ -105,6 +107,16 @@ registerActorSmartObjects([
   GOAL_DEFINITION,
   FORCE_GEM_DEFINITION,
 ]);
+
+// Install object-specific lifecycle behaviour (see `placeable-hooks.entity.ts`).
+// Runs once here because the door module imports this one, so the hooks cannot
+// be attached inside the definition catalog itself.
+for (const definition of ALL_SMART_OBJECT_DEFINITIONS) {
+  withDoorLifecycle(definition);
+}
+withDoorLifecycle(PLAYER_START_DEFINITION);
+withDoorLifecycle(GOAL_DEFINITION);
+withDoorLifecycle(FORCE_GEM_DEFINITION);
 
 /**
  * Returns the variant (rotation style) a definition uses for the given index,

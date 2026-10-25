@@ -94,6 +94,19 @@ export const FORCE_GEM_DEFINITION: GemTypeSmartObjectDefinition = {
   // Interaction Type 3 (`Does not Despawn`), Gem Type 0 (Small Green).
   actorVariable: 3 << 16,
   gemType: { defaultType: 0, types: FORCE_GEM_TYPES, label: 'Gem Type' },
+  // Describe the `Gem Type` field generically so the context menu renders it
+  // like any other variable-backed field (no gem-specific menu code needed).
+  placement: {
+    fields: [
+      {
+        id: 'gem-type',
+        label: 'Gem Type',
+        choices: FORCE_GEM_TYPES.map((entry) => ({ value: entry.value, label: entry.name })),
+        value: (placement) => decodeGemType(placement.actorVariable ?? 0),
+        withValue: (placement, value) => withForceGemType(placement, value),
+      },
+    ],
+  },
   set: [{ bottomLayerTiles: [], topLayerTiles: [] }],
 };
 

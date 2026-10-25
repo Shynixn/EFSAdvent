@@ -67,11 +67,7 @@ import {
   withActorProperties,
   WARP_ACTOR_ID,
 } from '../../entity/smartobject.entity';
-import {
-  detachConnections as detachDoorConnections,
-  reanchorConnections,
-  warpChildOf,
-} from '../../entity/smartobject/door.entity';
+import { expandPlaced, applyDelete, applyMove } from '../../entity/contract/placeable.entity';
 import { actorSmartObjects, enemyDefinitions, npcDefinitions } from '../../entity/actor.definition';
 import { TilesetTheme } from '../../entity/tileset.util';
 import { StageRenderer } from '../../service/render/stage-renderer';
@@ -725,7 +721,10 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
       this.stageRoom.markLayerDirty(this.roomIndex(), base);
       this.stageRoom.markLayerDirty(this.roomIndex(), base + 8);
     }
-    this.smartObjects.update((list) => [...list, placement]);
+    // Let the definition decide what a drop actually records (a Start expands
+    // into four coloured players, most objects are stored as dropped). The page
+    // stays generic: it never names a specific object id.
+    this.smartObjects.update((list) => [...list, expandPlaced(definition, placement)]);
   }
 
   /**
@@ -816,30 +815,24 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
       const base = event.to.baseLayerId;
       this.stageRoom.markLayerDirty(this.roomIndex(), base);
       this.stageRoom.markLayerDirty(this.roomIndex(), base + 8);
-      // A moved door carries its connecting `WARP` child actor along, so the
-      // actor list changed position too.
-      if (warpChildOf(event.to)) {
+      // A moved object may carry child actor placements (a door's connecting
+      // `WARP`, a Start's extra Links), so the actor list changed position too.
+      if (event.to.children?.length) {
         this.stageRoom.markActorsDirty(this.roomIndex());
       }
     }
-    // Re-derive both ends of any connection this door is part of (the moved door
-    // may be a source or a target) through the shared door module.
-    //
-    // IMPORTANT: `reanchorConnections` looks for warps pointing at the moved
-    // door's OLD anchor, so it must run against the PRE-move list — with the
-    // moved door swapped in as its new self, so its own child stays consistent.
+    // Let the definition react to the move (a door re-points the warps that
+    // aimed at its old tile). The page stays generic and never names an object.
     const others = this.smartObjects().map((entry) => (entry === event.from ? event.to : entry));
-    // The moved door's definition lets the re-pointed warps re-centre their
-    // destination on its footprint (destinations are stored in half-tiles).
-    const { references, repointed } = reanchorConnections(
+    const moveChanges = applyMove(
+      findSmartObjectDefinition(event.to.id),
       event.from,
       event.to,
       others,
-      findSmartObjectDefinition(event.to.id),
     );
     this.replacePlacement(event.from, event.to);
     let touched = false;
-    for (const change of [...references, ...repointed]) {
+    for (const change of moveChanges) {
       this.replacePlacement(change.from, change.to);
       touched = true;
     }
@@ -861,7 +854,7 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
     const base = event.to.baseLayerId;
     this.stageRoom.markLayerDirty(this.roomIndex(), base);
     this.stageRoom.markLayerDirty(this.roomIndex(), base + 8);
-    if (warpChildOf(event.to)) {
+    if (event.to.children?.length) {
       this.stageRoom.markActorsDirty(this.roomIndex());
     }
     this.replacePlacement(event.from, event.to);
@@ -980,7 +973,11 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
    * Returns how many other placements were changed (0 when it had no links).
    */
   private detachConnections(placement: SmartObjectPlacement): number {
-    const changes = detachDoorConnections(placement, this.smartObjects());
+    const changes = applyDelete(
+      findSmartObjectDefinition(placement.id),
+      placement,
+      this.smartObjects(),
+    );
     for (const change of changes) {
       this.replacePlacement(change.from, change.to);
     }

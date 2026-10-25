@@ -15,8 +15,9 @@
  * toolbox, canvas and context menu all agree on the bit layout.
  */
 
-import { SmartObjectPlacement } from '../smartobject.entity';
+import { SmartObjectPlacement, withChildren } from '../smartobject.entity';
 import { RotateableSmartObjectDefinition, nextRotation } from '../contract/rotateable.entity';
+import { IPlaceable } from '../contract/placeable.entity';
 
 /** The actor id of the player start marker. */
 export const PLAYER_START_ACTOR_ID = 'PLAS';
@@ -129,7 +130,9 @@ export function nextPlayerDirection(variable: number): number {
  * `applySmartObject` alone cannot rotate it. The canvas therefore delegates to
  * `rotatePlayerStart`, which repacks the variable and re-renders.
  */
-export const PLAYER_START_DEFINITION: RotateableSmartObjectDefinition = {
+export const PLAYER_START_DEFINITION: RotateableSmartObjectDefinition & {
+  placement?: IPlaceable;
+} = {
   id: PLAYER_START_ID,
   baking: 'actor',
   name: 'Start',
@@ -137,10 +140,110 @@ export const PLAYER_START_DEFINITION: RotateableSmartObjectDefinition = {
   actorId: PLAYER_START_ACTOR_ID,
   actorVariable: encodePlayerStart({ color: 0, direction: 0, state: 0 }),
   rotation: PLAYER_START_ROTATION,
+  // Placing one Start records all four Links in a row (see `expandPlayerStart`).
+  placement: {
+    onPlace: (placement) => expandPlayerStart(placement),
+    // The facing lives in the actor `Variable`, not in the variant list, so a
+    // plain `variantIndex` bump would not turn the player. The entity applies
+    // the rotation itself — AND to every child, or the four Links would end up
+    // facing different ways.
+    onRotate: (placement, nextVariant) => ({
+      ...placement,
+      variantIndex: nextVariant,
+      actorVariable: withPlayerDirection(
+        placement.actorVariable ?? 0,
+        PLAYER_ROTATION_DIRECTIONS[nextVariant] ?? 0,
+      ),
+      children: applyToPlayerChildren(placement.children, (variable) =>
+        withPlayerDirection(variable, PLAYER_ROTATION_DIRECTIONS[nextVariant] ?? 0),
+      ),
+    }),
+    fields: [
+      {
+        id: 'player-state',
+        label: 'Player State',
+        choices: PLAYER_STATES.map((entry) => ({ value: entry.value, label: entry.name })),
+        value: (placement) => decodePlayerStart(placement.actorVariable ?? 0).state,
+        // A Start stands for all four Links, so a state change must reach every
+        // child too — otherwise only the representative player would lie down.
+        withValue: (placement, value) => ({
+          ...placement,
+          actorVariable: withPlayerState(placement.actorVariable ?? 0, value as PlayerState),
+          children: applyToPlayerChildren(placement.children, (variable) =>
+            withPlayerState(variable, value as PlayerState),
+          ),
+        }),
+      },
+    ],
+  },
   // Actors bake no tiles — one empty variant keeps the shared geometry. The
   // facing comes from `rotation`, not from the variant list.
   set: [{ bottomLayerTiles: [], topLayerTiles: [] }],
 };
+
+/**
+ * Horizontal offset (in tiles) of each Link from the first column, left to
+ * right: Green · Red · Blue · Purple.
+ *
+ * The player drags ONE Start and gets the four-Link formation around the drop
+ * point, so a tile does not end up with four overlapping player actors.
+ */
+const PLAYER_FORMATION_COLUMNS: readonly number[] = [0, 1, 2, 3];
+
+/**
+ * Expands a dropped Start into the full four-player formation.
+ *
+ * The dropped placement becomes **Green** (`PLAYER_COLORS[0]`) at the leftmost
+ * column, and the other three colours ride along as children one tile to the
+ * right of each other. Children follow the parent when it is moved, are not
+ * individually selectable, and bake into the room's actor list like any other
+ * placement.
+ */
+export function expandPlayerStart(parent: SmartObjectPlacement): SmartObjectPlacement {
+  const { direction, state } = decodePlayerStart(parent.actorVariable ?? 0);
+  // The parent is always Green: the colour menu is gone, so a Start is defined
+  // as "all four players in formation" rather than one chosen colour.
+  const anchored: SmartObjectPlacement = {
+    ...parent,
+    actorVariable: encodePlayerStart({ color: 0, direction, state }),
+  };
+  const children = PLAYER_COLORS.slice(1).map((entry, index) => ({
+    id: PLAYER_START_ID,
+    variantIndex: parent.variantIndex ?? 0,
+    baseLayerId: parent.baseLayerId,
+    anchorRow: anchored.anchorRow,
+    anchorCol: anchored.anchorCol + PLAYER_FORMATION_COLUMNS[index + 1],
+    bottomLayerTiles: [],
+    topLayerTiles: [],
+    actorVariable: encodePlayerStart({ color: entry.value, direction, state }),
+  }));
+  return withChildren(anchored, children);
+}
+
+/**
+ * Rewrites the actor `Variable` of every child Link with `change`, keeping the
+ * list shape.
+ *
+ * A Start stands for all four players, and the child Links carry the same
+ * `Variable` layout as the parent — so a state or facing change must be applied
+ * to every one of them. Children keep their own colour bits because `change`
+ * only rewrites the field it targets (see {@link withPlayerState} /
+ * {@link withPlayerDirection}).
+ *
+ * @returns The updated child list, or `undefined` when there are none.
+ */
+function applyToPlayerChildren(
+  children: readonly SmartObjectPlacement[] | undefined,
+  change: (variable: number) => number,
+): SmartObjectPlacement[] | undefined {
+  if (!children || children.length === 0) {
+    return children ? [...children] : undefined;
+  }
+  return children.map((child) => ({
+    ...child,
+    actorVariable: change(child.actorVariable ?? 0),
+  }));
+}
 
 /**
  * Rotates a player start by one step and returns the updated placement.

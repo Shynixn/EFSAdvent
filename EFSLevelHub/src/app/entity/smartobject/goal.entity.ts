@@ -33,14 +33,18 @@ export const GOAL_ACTOR_ID = 'GOL2';
 /** Stable smart-object id for the goal. */
 export const GOAL_ID = 'goal';
 
-/** The selectable goal shapes (`GOL2` `Goal Shape`, bits 0-3). */
+/**
+ * The selectable goal shapes (`GOL2` `Goal Shape`, bits 0-3).
+ *
+ * `Maid` (value 5) is deliberately NOT offered: it is a leftover debug/quest
+ * shape that does not behave as an end-of-level goal.
+ */
 export const GOAL_SHAPES: ShapeChoice[] = [
   { value: 0, name: 'Square' },
   { value: 1, name: 'Diamond' },
   { value: 2, name: 'Horizontal Row' },
   { value: 3, name: 'Vertical Row' },
   { value: 4, name: 'Semicircle' },
-  { value: 5, name: 'Maid' },
 ];
 
 /**
@@ -57,6 +61,19 @@ export const GOAL_DEFINITION: ShapeableSmartObjectDefinition = {
   actorId: GOAL_ACTOR_ID,
   actorVariable: 2 << 24,
   shape: { defaultShape: 0, shapes: GOAL_SHAPES },
+  // Describe `Goal Shape` generically so the context menu renders it like any
+  // other variable-backed field, without goal-specific menu code.
+  placement: {
+    fields: [
+      {
+        id: 'shape',
+        label: 'Shape',
+        choices: GOAL_SHAPES.map((entry) => ({ value: entry.value, label: entry.name })),
+        value: (placement) => goalShape(placement),
+        withValue: (placement, value) => withGoalShape(placement, value),
+      },
+    ],
+  },
   // Actors bake no tiles — one empty variant keeps the shared geometry.
   set: [{ bottomLayerTiles: [], topLayerTiles: [] }],
 };

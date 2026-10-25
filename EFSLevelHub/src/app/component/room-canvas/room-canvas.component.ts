@@ -40,29 +40,20 @@ import {
   connectDoors,
   disconnectDoor,
   isConnected,
-  isDoorDefinition,
-  withRotatedWarpType,
 } from '../../entity/smartobject/door.entity';
 import { canRotate, nextRotation } from '../../entity/contract/rotateable.entity';
-import { shapeOf, decodeShape, encodeShape } from '../../entity/contract/shapeable.entity';
+import {
+  applyRotation,
+  fieldsOf,
+  isConnectableDefinition,
+} from '../../entity/contract/placeable.entity';
 import { isActivationSource, isActivationTarget } from '../../entity/contract/activatable.entity';
-import { decodeGemType, encodeGemType, gemTypeOf } from '../../entity/smartobject/force-gem.entity';
 import {
   ActivationLink,
   isLinkedTarget,
   placementKey,
   sourceTargets,
 } from '../../entity/smartobject/activation.entity';
-import {
-  isPlayerStart,
-  decodePlayerStart,
-  rotatePlayerStart,
-  withPlayerColor,
-  withPlayerState,
-  PLAYER_COLORS,
-  PLAYER_STATES,
-} from '../../entity/smartobject/player-start.entity';
-import type { PlayerColor, PlayerState } from '../../entity/smartobject/player-start.entity';
 import { SmartObjectDragService } from '../../service/smart-object-drag.service';
 import {
   DIMENSION,
@@ -694,7 +685,7 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
         continue;
       }
       const definition = findSmartObjectDefinition(placement.id);
-      if (!definition || !isDoorDefinition(definition)) {
+      if (!definition || !isConnectableDefinition(definition)) {
         continue;
       }
       const box = this.boxOf(placement, definition);
@@ -1098,15 +1089,15 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
   }
 
   /**
-   * Whether the context-menu target is a **door** (a tile-baked object in the
-   * `Doors` section), the only objects that can be connected.
+   * Whether the context-menu target is connectable (a door), the only objects
+   * that can be linked to another.
    */
   canConnectContextPlacement(): boolean {
     const placement = this.contextMenu()?.placement;
     if (!placement) {
       return false;
     }
-    return isDoorDefinition(findSmartObjectDefinition(placement.id));
+    return isConnectableDefinition(findSmartObjectDefinition(placement.id));
   }
 
   /**
@@ -1514,13 +1505,12 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
       return;
     }
 
-    // The rotation descriptor says HOW MANY orientations exist; the owning domain
-    // module knows how to apply one. A door restamps its next tile variant and
-    // advances its WARP type; the player start repacks its actor Variable.
+    // The rotation descriptor says HOW MANY orientations exist; the definition's
+    // own `onRotate` hook decides HOW one is applied (a door advances its WARP
+    // type, the player start repacks its actor `Variable`, plain objects bump
+    // `variantIndex`). The canvas never names an object.
     const nextVariant = nextRotation(definition, from.variantIndex ?? 0);
-    const rotated = isPlayerStart(from.id)
-      ? rotatePlayerStart(from)
-      : withRotatedWarpType({ ...from, variantIndex: nextVariant }, nextVariant, definition);
+    const rotated = applyRotation(definition, from, nextVariant);
 
     const list = this.smartObjects.map((placement) => (placement === from ? rotated : placement));
     // `stale: [from]` tears down the OLD footprint — essential for objects whose
@@ -1545,34 +1535,6 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
       return [];
     }
     return findSmartObjectDefinition(placement.id)?.subTypes ?? [];
-  }
-
-  /** Selectable player states for the context menu. */
-  readonly playerStates = PLAYER_STATES;
-  /** Selectable player colours for the context menu. */
-  readonly playerColors = PLAYER_COLORS;
-
-  /** The context-menu target's player state (0 standing, 1 lying). */
-  contextPlayerState(): number {
-    const placement = this.contextMenu()?.placement;
-    return placement ? decodePlayerStart(placement.actorVariable ?? 0).state : 0;
-  }
-
-  /** The context-menu target's player colour (0 green, 1 red, 2 blue, 3 purple). */
-  contextPlayerColor(): number {
-    const placement = this.contextMenu()?.placement;
-    return placement ? decodePlayerStart(placement.actorVariable ?? 0).color : 0;
-  }
-
-  /**
-   * Whether the context-menu target is a player start marker.
-   *
-   * Kept as a method (not a computed) because the menu renders through the
-   * shared component, which asks for the full action/group lists instead.
-   */
-  isContextPlayerStart(): boolean {
-    const placement = this.contextMenu()?.placement;
-    return !!placement && isPlayerStart(placement.id);
   }
 
   /**
@@ -1652,40 +1614,17 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
       });
     }
 
-    if (this.isContextPlayerStart()) {
+    // Variable-backed fields the definition declares (a player start's
+    // `Player State`, the gem's `Gem Type`, a goal's `Shape`). The canvas renders
+    // them all the same way and never decodes an object's bits itself.
+    const placement = this.contextMenu()?.placement;
+    const definition = placement ? findSmartObjectDefinition(placement.id) : undefined;
+    for (const field of fieldsOf(definition)) {
       groups.push({
-        id: 'player-state',
-        label: 'Player State',
-        choices: this.playerStates.map((state) => ({ value: state.value, label: state.name })),
-        selected: this.contextPlayerState(),
-      });
-      groups.push({
-        id: 'player-color',
-        label: 'Player Color',
-        choices: this.playerColors.map((color) => ({ value: color.value, label: color.name })),
-        selected: this.contextPlayerColor(),
-      });
-    }
-
-    // Shaped actor objects (the goal) list their `Shape` values.
-    const shape = shapeOf(findSmartObjectDefinition(this.contextMenu()?.placement?.id ?? ''));
-    if (shape) {
-      groups.push({
-        id: 'shape',
-        label: 'Shape',
-        choices: shape.shapes.map((entry) => ({ value: entry.value, label: entry.name })),
-        selected: decodeShape(this.contextMenu()?.placement?.actorVariable ?? 0),
-      });
-    }
-
-    // Force gems list their `Gem Type` (an 8-bit field, so NOT a `Shape`).
-    const gemType = gemTypeOf(this.contextMenu()?.placement);
-    if (gemType) {
-      groups.push({
-        id: 'gem-type',
-        label: gemType.label,
-        choices: gemType.types.map((entry) => ({ value: entry.value, label: entry.name })),
-        selected: decodeGemType(this.contextMenu()?.placement?.actorVariable ?? 0),
+        id: field.id,
+        label: field.label,
+        choices: field.choices.map((entry) => ({ value: entry.value, label: entry.label })),
+        selected: placement ? field.value(placement) : 0,
       });
     }
 
@@ -1760,70 +1699,46 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
 
   /** Dispatches a submenu choice from the shared context menu. */
   onContextChoice(event: { group: string; value: number }): void {
-    switch (event.group) {
-      case 'type':
-        this.selectContextSubType(event.value);
-        break;
-      case 'player-state':
-        this.selectContextPlayerState(event.value as PlayerState);
-        break;
-      case 'player-color':
-        this.selectContextPlayerColor(event.value as PlayerColor);
-        break;
-      case 'shape':
-        this.selectContextShape(event.value);
-        break;
-      case 'gem-type':
-        this.selectContextGemType(event.value);
-        break;
+    // "Type" is the generic sub-type list every definition may have; everything
+    // else is a variable-backed field the definition itself declared.
+    if (event.group === 'type') {
+      this.selectContextSubType(event.value);
+      return;
     }
+    this.applyContextField(event.group, event.value);
   }
 
   /**
-   * Applies a new `Shape` to the context-menu target.
+   * Applies a value to one of the context-menu target's declared fields.
    *
-   * The shape lives in the actor `Variable` (bits 0-3), so this repacks the
-   * variable and re-renders — the same path the player start uses for its own
-   * variable-backed fields.
+   * The definition supplies the setter (see {@link PlacementField.withValue}),
+   * so the canvas does not know which bits a field lives in.
    */
-  selectContextShape(shape: number): void {
-    this.updateContextPlayerVariable((variable) => encodeShape(variable, shape));
-  }
-
-  /**
-   * Applies a new `Gem Type` to the context-menu target.
-   *
-   * The gem type is an EIGHT-bit field (bits 0-7), so it uses its own encoder
-   * rather than {@link encodeShape}, which would mask it to 0-15.
-   */
-  selectContextGemType(gemType: number): void {
-    this.updateContextPlayerVariable((variable) => encodeGemType(variable, gemType));
-  }
-
-  /** Applies a new player state to the context-menu target. */
-  selectContextPlayerState(state: PlayerState): void {
-    this.updateContextPlayerVariable((variable) => withPlayerState(variable, state));
-  }
-
-  /** Applies a new player colour to the context-menu target. */
-  selectContextPlayerColor(color: PlayerColor): void {
-    this.updateContextPlayerVariable((variable) => withPlayerColor(variable, color));
-  }
-
-  /**
-   * Rewrites the context-menu target's actor `Variable` via `change`, then
-   * re-renders. Player start bakes no tiles, so nothing needs restamping — the
-   * redraw picks up the new render variant.
-   */
-  private updateContextPlayerVariable(change: (variable: number) => number): void {
+  applyContextField(fieldId: string, value: number): void {
     const from = this.contextMenu()?.placement;
     if (!from) {
       return;
     }
-    const to: SmartObjectPlacement = {
-      ...from,
-      actorVariable: change(from.actorVariable ?? 0),
-    };
+    const field = fieldsOf(findSmartObjectDefinition(from.id)).find(
+      (entry) => entry.id === fieldId,
+    );
+    if (!field) {
+      return;
+    }
+    this.updateContextPlacement(field.withValue(from, value));
+  }
+
+  /**
+   * Swaps the context-menu target for an updated copy and re-renders.
+   *
+   * Used by the variable-backed field setters; the definition supplied the new
+   * placement, so nothing here depends on which field it was.
+   */
+  private updateContextPlacement(to: SmartObjectPlacement): void {
+    const from = this.contextMenu()?.placement;
+    if (!from) {
+      return;
+    }
     const list = this.smartObjects.map((placement) => (placement === from ? to : placement));
     this.redrawSmartObjects({ list });
     this.contextMenu.set(null);

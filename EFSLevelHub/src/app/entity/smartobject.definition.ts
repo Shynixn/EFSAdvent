@@ -11,6 +11,7 @@
  */
 
 import { IRotateable } from './contract/rotateable.entity';
+import type { IPlaceable } from './contract/placeable.entity';
 
 /**
  * What a smart object bakes into when placed.
@@ -80,6 +81,15 @@ export interface SmartObjectDefinition {
   name: string;
   /** Toolbox section this definition is grouped under. */
   section: SmartObjectSection;
+  /**
+   * Placement lifecycle behaviour (`IPlaceable`), when placing this object needs
+   * to do more than drop it at the anchor.
+   *
+   * Lets the owning `.entity.ts` module supply the logic — e.g. a Start expands
+   * into four coloured player actors — so hosts such as the room page stay
+   * generic and never special-case an object id.
+   */
+  placement?: IPlaceable;
   /**
    * Rotation behaviour (`IRotateable`), when this object can be turned.
    *
