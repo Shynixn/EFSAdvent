@@ -45,9 +45,7 @@ const MIGRATED_ENEMY_BUILDERS: readonly MigratedEnemyBuilder[] = [
  * @param actors Actor catalog keyed by 4-character id (`GetActors` output).
  * @returns One definition per migrated enemy, actor id resolved.
  */
-export function migratedEnemies(
-  actors: Record<string, ActorDefinition>,
-): SmartObjectDefinition[] {
+export function migratedEnemies(actors: Record<string, ActorDefinition>): SmartObjectDefinition[] {
   return MIGRATED_ENEMY_BUILDERS.map((builder) => builder.build(actors[builder.actorId]));
 }
 

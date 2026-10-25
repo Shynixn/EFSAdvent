@@ -78,10 +78,7 @@ import {
 } from '../../entity/smartobject/migrated-enemies.entity';
 import { actorSmartObjects, enemyDefinitions, npcDefinitions } from '../../entity/actor.definition';
 import type { ActorDefinition } from '../../entity/actor-definition.entity';
-import {
-  FORCE_GEM_ACTOR_ID,
-  forceGemDefinition,
-} from '../../entity/smartobject/force-gem.entity';
+import { FORCE_GEM_ACTOR_ID, forceGemDefinition } from '../../entity/smartobject/force-gem.entity';
 import { TilesetTheme } from '../../entity/tileset.util';
 import { StageRenderer } from '../../service/render/stage-renderer';
 import { nextPaint } from '../../util/paint';

@@ -37,7 +37,9 @@ const ACTIVATION_VARIABLE_OFFSET = 27;
  * sub-type handler and silently do nothing.
  */
 function groupIdFor(field: ActorField): string {
-  const slug = field.Name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const slug = field.Name.toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
   return `actor:${slug}`;
 }
 
