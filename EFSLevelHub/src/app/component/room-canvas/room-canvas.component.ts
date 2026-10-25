@@ -1686,33 +1686,19 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
 
   /** Dispatches a submenu choice from the shared context menu. */
   onContextChoice(event: { group: string; value: number }): void {
-    // "Type" is the generic sub-type list every definition may have; everything
-    // else is a variable-backed field the definition itself declared.
+    // A definition MAY have both a sub-type list (group id `type`) and a
+    // variable-backed field also called `Type` (e.g. AMOS). Resolve by looking up
+    // the actual field first, so the field always wins when it exists.
+    const placement = this.contextMenu()?.placement;
+    const definition = placement ? findSmartObjectDefinition(placement.id) : undefined;
+    const field = fieldsOf(definition).find((entry) => entry.id === event.group);
+    if (field) {
+      this.updateContextPlacement(field.withValue(placement!, event.value));
+      return;
+    }
     if (event.group === 'type') {
       this.selectContextSubType(event.value);
-      return;
     }
-    this.applyContextField(event.group, event.value);
-  }
-
-  /**
-   * Applies a value to one of the context-menu target's declared fields.
-   *
-   * The definition supplies the setter (see {@link PlacementField.withValue}),
-   * so the canvas does not know which bits a field lives in.
-   */
-  applyContextField(fieldId: string, value: number): void {
-    const from = this.contextMenu()?.placement;
-    if (!from) {
-      return;
-    }
-    const field = fieldsOf(findSmartObjectDefinition(from.id)).find(
-      (entry) => entry.id === fieldId,
-    );
-    if (!field) {
-      return;
-    }
-    this.updateContextPlacement(field.withValue(from, value));
   }
 
   /**

@@ -72,7 +72,16 @@ import {
   TINGLE_BUSTER_LAYER,
   withTingleBuster,
 } from '../../entity/smartobject/tingle-buster.entity';
+import {
+  migratedActorIds,
+  migratedEnemies,
+} from '../../entity/smartobject/migrated-enemies.entity';
 import { actorSmartObjects, enemyDefinitions, npcDefinitions } from '../../entity/actor.definition';
+import type { ActorDefinition } from '../../entity/actor-definition.entity';
+import {
+  FORCE_GEM_ACTOR_ID,
+  forceGemDefinition,
+} from '../../entity/smartobject/force-gem.entity';
 import { TilesetTheme } from '../../entity/tileset.util';
 import { StageRenderer } from '../../service/render/stage-renderer';
 import { nextPaint } from '../../util/paint';
@@ -223,6 +232,18 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
 
   /** Placable enemies (actor-baked smart objects), shown in the toolbox. */
   readonly enemies = signal<SmartObjectDefinition[]>([]);
+
+  /**
+   * Enemies migrated to first-class smart objects with real context-menu
+   * fields (see `rawiso/entitymig.md`), shown above the legacy list.
+   */
+  readonly migratedEnemies = signal<SmartObjectDefinition[]>([]);
+
+  /**
+   * The loaded actor catalog, shared with the toolbox so entity definitions can
+   * derive their context menus from it instead of duplicating the data.
+   */
+  readonly actorCatalog = signal<Record<string, ActorDefinition> | null>(null);
 
   /** Placable NPCs (actor-baked smart objects), shown in the toolbox. */
   readonly npcs = signal<SmartObjectDefinition[]>([]);
@@ -1023,8 +1044,41 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
       // subset), so actors already present in a room — Objects, Properties,
       // NPCs, … — resolve by id for rendering, hover, move and delete.
       registerActorSmartObjects(actorSmartObjects(actors));
-      this.enemies.set(enemies);
+
+      // Share the catalog so entity definitions can build their menus from it.
+      this.actorCatalog.set(actors);
+
+      // Migrated enemies are first-class smart objects with real context-menu
+      // fields (see rawiso/entitymig.md). The registry owns the list, so this
+      // page never names an individual enemy entity. They are registered on top
+      // so their ids resolve, and their actor ids are removed from the legacy
+      // list so nothing appears twice.
+      const migrated = migratedEnemies(actors).filter((definition) =>
+        renderer
+          ? renderer.canRenderActor(
+              definition.actorId ?? definition.id,
+              definition.actorVariable ?? 0,
+              false,
+            ) ||
+            renderer.canRenderActor(
+              definition.actorId ?? definition.id,
+              definition.actorVariable ?? 0,
+              true,
+            )
+          : true,
+      );
+      const migratedIds = migratedActorIds();
+      registerActorSmartObjects(migrated);
+      this.migratedEnemies.set(migrated);
+      this.enemies.set(enemies.filter((enemy) => !migratedIds.has(enemy.id)));
       this.npcs.set(npcs);
+
+      // The stand-alone item objects (the force gem) are registered at module
+      // load WITHOUT catalog metadata, so their context-menu fields are empty.
+      // Re-register them from the catalog now that it is available, otherwise
+      // the canvas resolves the stale, field-less definition and the menu shows
+      // nothing but Delete.
+      registerActorSmartObjects([forceGemDefinition(actors[FORCE_GEM_ACTOR_ID])]);
     } catch (error) {
       this.logger.warn('RoomPage: failed to load enemy definitions', error);
     }

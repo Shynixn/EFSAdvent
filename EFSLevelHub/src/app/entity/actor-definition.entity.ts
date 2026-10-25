@@ -42,6 +42,38 @@ export interface ActorRenderKey {
   Variants: ActorRenderVariant[];
 }
 
+/** One selectable value of an actor field. */
+export interface ActorFieldValue {
+  /** Raw value stored in the field. */
+  Value: number;
+  /** Display name. */
+  Name: string;
+  Description: string;
+  /** True when FSALib marks the value unusable — hide it from the menu. */
+  Broken: boolean;
+}
+
+/**
+ * One field of an actor's `Variable`, mirroring FSALib's `VariableField`.
+ *
+ * The editor builds an actor's context menu from these, so every actor with
+ * proper catalog metadata needs no bespoke code — see `rawiso/entitymig.md`.
+ */
+export interface ActorField {
+  Name: string;
+  Description: string;
+  /** Bit position where the field starts within the variable. */
+  BitOffset: number;
+  /** How many bits the field occupies. */
+  BitSize: number;
+  /** `Integer`, `Enum` or `Boolean`. */
+  ValueType: string;
+  /** Integer mask for the field: `(1 << BitSize) - 1`. */
+  Mask: number;
+  /** Selectable values, ordered by raw value (empty for integers). */
+  Values: ActorFieldValue[];
+}
+
 /** A single actor type in the editor catalog. */
 export interface ActorDefinition {
   /** 4-character actor id (e.g. `AMOS`). */
@@ -62,6 +94,25 @@ export interface ActorDefinition {
    * that define no variants (the WASM JSON drops null/empty properties).
    */
   Rendering?: ActorRenderKey[];
+  /**
+   * Every editable field of the actor's `Variable`.
+   *
+   * Omitted when the catalog predates field export — treat a missing value as
+   * "no editable fields" rather than an error.
+   */
+  Fields?: ActorField[];
+}
+
+/** Reads a field's value out of an actor `Variable`. */
+export function decodeActorField(variable: number, field: ActorField): number {
+  return ((variable >>> field.BitOffset) & field.Mask) >>> 0;
+}
+
+/** Writes a field's value into an actor `Variable`, preserving all other bits. */
+export function encodeActorField(variable: number, field: ActorField, value: number): number {
+  const shifted = (field.Mask << field.BitOffset) >>> 0;
+  const cleared = (variable >>> 0) & ~shifted;
+  return (cleared | ((value & field.Mask) << field.BitOffset)) >>> 0;
 }
 
 /** Resolves the render variants a variable value selects (bit mask aware). */

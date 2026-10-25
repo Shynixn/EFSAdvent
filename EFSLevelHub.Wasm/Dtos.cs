@@ -198,4 +198,55 @@ public sealed class ActorDefinitionDto
 
     /// <summary>Render variants keyed by <c>Variable &amp; BitMask</c>.</summary>
     public List<ActorRenderKeyDto> Rendering { get; set; } = new();
+
+    /// <summary>
+    /// Every editable field of the actor's <c>Variable</c>, in catalog order.
+    /// Drives the editor's context menu; see <c>rawiso/entitymig.md</c>.
+    /// </summary>
+    public List<ActorFieldDto> Fields { get; set; } = new();
+}
+
+/// <summary>
+/// One field of an actor's <c>Variable</c>, mirroring FSALib's
+/// <c>VariableField</c> (bit layout + optional enum values).
+/// </summary>
+public sealed class ActorFieldDto
+{
+    public string Name { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+
+    /// <summary>Bit position where the field starts within the variable.</summary>
+    public int BitOffset { get; set; }
+
+    /// <summary>How many bits the field occupies.</summary>
+    public int BitSize { get; set; }
+
+    /// <summary>
+    /// Value kind: <c>Integer</c>, <c>Enum</c> or <c>Boolean</c>. Passed through
+    /// as a string so the editor does not depend on FSALib's enum ordinals.
+    /// </summary>
+    public string ValueType { get; set; } = string.Empty;
+
+    /// <summary>Integer mask for the field (<c>(1 &lt;&lt; BitSize) - 1</c>).</summary>
+    public int Mask { get; set; }
+
+    /// <summary>
+    /// Selectable values, ordered by raw value, when the field is an enum.
+    /// Empty for integers/booleans.
+    /// </summary>
+    public List<ActorFieldValueDto> Values { get; set; } = new();
+}
+
+/// <summary>One selectable value of an actor field.</summary>
+public sealed class ActorFieldValueDto
+{
+    public int Value { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+
+    /// <summary>
+    /// True when FSALib flags this value as broken, so the editor can hide it
+    /// instead of offering a value that does not work in-game.
+    /// </summary>
+    public bool Broken { get; set; }
 }

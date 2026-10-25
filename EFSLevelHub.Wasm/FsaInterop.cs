@@ -5,6 +5,7 @@ using AuroraLib.Compression;
 using AuroraLib.Core.Format.Identifier;
 using AuroraLib.Core.IO;
 using FSALib;
+using FSALib.AssetDefinitions;
 using FSALib.Structs;
 
 namespace EFSLevelHub.Wasm;
@@ -852,6 +853,36 @@ public static partial class FsaInterop
                     NoGBASprite = definition.NoGBASprite,
                     Resources = definition.Resources ?? new List<string>(),
                 };
+
+                // Variable fields, in catalog order. Exported so the editor can
+                // build a bit-accurate context menu without hard-coding each
+                // actor's layout (see rawiso/entitymig.md).
+                foreach (var field in definition.Fields ?? new List<VariableField>())
+                {
+                    var fieldDto = new ActorFieldDto
+                    {
+                        Name = field.Name,
+                        Description = field.Description,
+                        BitOffset = field.BitOffset,
+                        BitSize = field.BitSize,
+                        ValueType = field.ValueType.ToString(),
+                        Mask = field.Mask,
+                    };
+                    if (field.EnumValues != null)
+                    {
+                        foreach (var entry in field.EnumValues.OrderBy(e => e.Key))
+                        {
+                            fieldDto.Values.Add(new ActorFieldValueDto
+                            {
+                                Value = entry.Key,
+                                Name = entry.Value.Name,
+                                Description = entry.Value.Description,
+                                Broken = entry.Value.AssetState.HasFlag(AssetFlags.Broken),
+                            });
+                        }
+                    }
+                    dto.Fields.Add(fieldDto);
+                }
 
                 if (definition.Rendering != null)
                 {

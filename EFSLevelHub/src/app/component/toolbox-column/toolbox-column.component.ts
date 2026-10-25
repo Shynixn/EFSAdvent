@@ -34,7 +34,12 @@ import {
   PLAYER_START_DEFINITION,
 } from '../../entity/smartobject/player-start.entity';
 import { GOAL_DEFINITION } from '../../entity/smartobject/goal.entity';
-import { FORCE_GEM_DEFINITION } from '../../entity/smartobject/force-gem.entity';
+import { ActorDefinition } from '../../entity/actor-definition.entity';
+import {
+  FORCE_GEM_ACTOR_ID,
+  FORCE_GEM_DEFINITION,
+  forceGemDefinition,
+} from '../../entity/smartobject/force-gem.entity';
 import { EditorService } from '../../service/editor.service';
 import { ImageBuffer } from '../../service/render/gba-tile-renderer';
 
@@ -149,6 +154,18 @@ export class ToolboxColumnComponent implements AfterViewInit {
 
   /** Whether the Enemies section is expanded. */
   readonly enemiesOpen = signal(true);
+
+  /** Whether the legacy "Enemies (OLD)" section is expanded. */
+  readonly legacyEnemiesOpen = signal(true);
+
+  /**
+   * Enemies migrated to first-class smart objects.
+   *
+   * Each entry is a hand-written `.entity.ts` definition with its own
+   * variable-backed context-menu fields, so editing an enemy is bit-accurate
+   * rather than drag-and-drop only. See `rawiso/entitymig.md`.
+   */
+  @Input() migratedEnemies: SmartObjectDefinition[] = [];
 
   /** Whether the NPC section is expanded. */
   readonly npcsOpen = signal(true);
@@ -414,6 +431,7 @@ export class ToolboxColumnComponent implements AfterViewInit {
       for (const ref of enemyCanvases) {
         const id = ref.nativeElement.dataset['enemyId'];
         const enemy =
+          this.migratedEnemies.find((entry) => entry.id === id) ??
           this.enemies.find((entry) => entry.id === id) ??
           this.npcs.find((entry) => entry.id === id);
         const canvas = ref.nativeElement;
@@ -421,7 +439,10 @@ export class ToolboxColumnComponent implements AfterViewInit {
           continue;
         }
         const buffer = await renderer.renderActorPreview(
-          id ?? '',
+          // The renderer keys the actor catalog by ACTOR id (`AMOS`), while a
+          // migrated definition's id is the smart-object id (`armos-knight`).
+          // Using the placement id renders nothing for migrated enemies.
+          enemy.actorId ?? id ?? '',
           enemy.actorVariable ?? 0,
           32,
           32,
@@ -633,6 +654,11 @@ export class ToolboxColumnComponent implements AfterViewInit {
     this.enemiesOpen.update((open) => !open);
   }
 
+  /** Toggles the legacy "Enemies (OLD)" section. */
+  toggleLegacyEnemies(): void {
+    this.legacyEnemiesOpen.update((open) => !open);
+  }
+
   /** Toggles the NPC section. */
   toggleNpcs(): void {
     this.npcsOpen.update((open) => !open);
@@ -715,8 +741,24 @@ export class ToolboxColumnComponent implements AfterViewInit {
    * These are actor-baked smart objects with their own variable-backed fields
    * (the force gem's `Gem Type`), so they are listed separately from the flat
    * EFSAdvent actor presets in the Misc tab.
+   *
+   * The definitions are rebuilt from the actor catalog when it arrives, so the
+   * gem's `Gem Type` menu comes from FSALib instead of a hand-copied list.
    */
-  readonly itemObjects: SmartObjectDefinition[] = [FORCE_GEM_DEFINITION];
+  itemObjects: SmartObjectDefinition[] = [FORCE_GEM_DEFINITION];
+
+  /**
+   * Rebuilds the item definitions from the actor catalog.
+   *
+   * Called by the host once the catalog is loaded; until then the static
+   * definitions (no context-menu fields) are used.
+   */
+  @Input() set actorCatalog(actors: Record<string, ActorDefinition> | null) {
+    if (!actors) {
+      return;
+    }
+    this.itemObjects = [forceGemDefinition(actors[FORCE_GEM_ACTOR_ID])];
+  }
 
   /** The item preview canvases. */
   private readonly itemCanvases = viewChildren<ElementRef<HTMLCanvasElement>>('itemPreview');
