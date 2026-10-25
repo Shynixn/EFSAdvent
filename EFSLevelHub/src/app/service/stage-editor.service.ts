@@ -188,9 +188,7 @@ export class StageEditorService {
         tiles: loaded.data.Rooms[roomIndex]?.Layers[layerIndex]?.Tiles,
       }))
       .filter(
-        (
-          entry,
-        ): entry is { roomIndex: number; layerIndex: number; tiles: number[] } =>
+        (entry): entry is { roomIndex: number; layerIndex: number; tiles: number[] } =>
           !!entry.tiles,
       );
     for (const { roomIndex, layerIndex } of dirtyLayers) {
