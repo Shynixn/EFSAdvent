@@ -22,6 +22,7 @@ import { PLAYER_START_DEFINITION } from './smartobject/player-start.entity';
 import type { ActivationLink } from './smartobject/activation.entity';
 import { GOAL_DEFINITION } from './smartobject/goal.entity';
 import { FORCE_GEM_DEFINITION } from './smartobject/force-gem.entity';
+import { ITEM_DEFINITIONS } from './smartobject/items.entity';
 import { withDoorLifecycle } from './contract/placeable-hooks.entity';
 import { SMART_OBJECT_DEFINITIONS as ALL_SMART_OBJECT_DEFINITIONS } from './smartobject.definition';
 import {
@@ -106,6 +107,7 @@ registerActorSmartObjects([
   PLAYER_START_DEFINITION,
   GOAL_DEFINITION,
   FORCE_GEM_DEFINITION,
+  ...ITEM_DEFINITIONS,
 ]);
 
 // Install object-specific lifecycle behaviour (see `placeable-hooks.entity.ts`).

@@ -686,7 +686,8 @@ export const SMART_OBJECT_DEFINITIONS: SmartObjectDefinition[] = [
     id: 'hidden-staircase',
     baking: 'tile',
     name: 'Hidden Staircase',
-    section: 'Decorations',
+    // Lives in Doors: it is a door-like entrance rather than scenery.
+    section: 'Doors',
     set: [
       {
         bottomLayerTiles: [
@@ -719,7 +720,7 @@ export const SMART_OBJECT_DEFINITIONS: SmartObjectDefinition[] = [
   {
     id: 'house1',
     baking: 'tile',
-    name: 'House1',
+    name: 'House',
     section: 'Decorations',
     set: [
       {
@@ -884,6 +885,19 @@ export const SMART_OBJECT_DEFINITIONS: SmartObjectDefinition[] = [
           { dRow: -1, dCol: 2, tile: 498 },
           { dRow: -1, dCol: 3, tile: 499 },
         ],
+      },
+    ],
+  },
+  {
+    id: 'breakable-block',
+    baking: 'tile',
+    name: 'Breakable Block',
+    section: 'Decorations',
+    set: [
+      {
+        // A single breakable-block tile stamped on the base (ground) layer.
+        bottomLayerTiles: [{ dRow: 0, dCol: 0, tile: 1 }],
+        topLayerTiles: [],
       },
     ],
   },

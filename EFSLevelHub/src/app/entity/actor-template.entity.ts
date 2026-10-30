@@ -54,6 +54,19 @@ export const ACTOR_TEMPLATE_SECTIONS: readonly ActorTemplateSection[] = [
 ];
 
 /**
+ * Sections that are superseded by first-class smart objects.
+ *
+ * A preset in one of these sections is only shown as a legacy entry when the
+ * actor catalog cannot describe its actor — otherwise it is migrated into the
+ * matching modern section (see `smartobject/actor-template-migration.entity.ts`).
+ */
+export const LEGACY_SUPERSEDED_SECTIONS: readonly ActorTemplateSection[] = [
+  'Items',
+  'NPC',
+  'Special',
+];
+
+/**
  * Section → raw template lines, transcribed from EFSAdvent's `.txt` files.
  *
  * NOTE: the lines are kept as written in the source (including its typos). As in

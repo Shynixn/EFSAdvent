@@ -6,9 +6,9 @@
     Toolbox
   </h2>
 
-  <!-- Tabs: Common · Items & NPC · Misc -->
+  <!-- Tabs: Common · Items & NPC · Debug (Debug only when enabled in Settings) -->
   <div class="flex shrink-0 gap-1 border-b border-slate-800 px-2 py-2" role="tablist">
-    @for (tab of tabs; track tab) {
+    @for (tab of visibleTabs; track tab) {
       <button
         type="button"
         role="tab"
@@ -193,32 +193,6 @@
           </div>
         }
       </div>
-
-      <!-- Advanced (collapsible): manual tile drawing (reference only) -->
-      <div class="mt-3 rounded-lg border border-slate-800">
-        <button
-          type="button"
-          (click)="toggleAdvanced()"
-          class="flex w-full cursor-pointer items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400"
-        >
-          <span>Advanced</span>
-          <span class="text-slate-500">{{ advancedOpen() ? '▾' : '▸' }}</span>
-        </button>
-        @if (advancedOpen()) {
-          <div class="space-y-3 border-t border-slate-800 px-3 py-3">
-            <p class="text-[11px] text-slate-500">
-              For reference only — tiles can no longer be selected directly. Pick a ground above to
-              paint with the brush.
-            </p>
-            <app-tile-palette
-              [renderer]="renderer"
-              [gba]="gba"
-              [themeIndex]="themeIndex"
-              [tile]="brushTile"
-            />
-          </div>
-        }
-      </div>
     }
 
     @if (activeTab() === 'Items & NPC') {
@@ -235,8 +209,8 @@
         @if (itemsOpen()) {
           <div class="space-y-2 border-t border-slate-800 px-3 py-3">
             <p class="text-[11px] text-slate-500">
-              Drag an item onto the room canvas. Right-click a placed Force Gem to pick its gem
-              type.
+              Drag an item onto the room canvas (Force Gem, Key, Carrot, Force Fairy).
+              Right-click a placed item to change its options.
             </p>
             <div class="flex flex-wrap gap-2">
               @for (item of itemObjects; track item.id) {
@@ -365,9 +339,42 @@
       </div>
     }
 
-    @if (activeTab() === 'Misc') {
-      <!-- Doors (smart objects with rotation variants): drag onto the canvas -->
+    @if (activeTab() === 'Debug') {
+      <!--
+        Debug tab: only things that do NOT appear in a curated section above.
+        - Advanced: the raw tile palette (reference only).
+        - Doors have no dedicated section anywhere else.
+        - The raw EFSAdvent presets ("Non smart objects") are shown for reference.
+      -->
+
+      <!-- Advanced (collapsible): manual tile drawing (reference only) -->
       <div class="rounded-lg border border-slate-800">
+        <button
+          type="button"
+          (click)="toggleAdvanced()"
+          class="flex w-full cursor-pointer items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400"
+        >
+          <span>Advanced</span>
+          <span class="text-slate-500">{{ advancedOpen() ? '▾' : '▸' }}</span>
+        </button>
+        @if (advancedOpen()) {
+          <div class="space-y-3 border-t border-slate-800 px-3 py-3">
+            <p class="text-[11px] text-slate-500">
+              For reference only — tiles can no longer be selected directly. Pick a ground in the
+              Common tab to paint with the brush.
+            </p>
+            <app-tile-palette
+              [renderer]="renderer"
+              [gba]="gba"
+              [themeIndex]="themeIndex"
+              [tile]="brushTile"
+            />
+          </div>
+        }
+      </div>
+
+      <!-- Doors (smart objects with rotation variants): drag onto the canvas -->
+      <div class="mt-3 rounded-lg border border-slate-800">
         <button
           type="button"
           (click)="toggleMisc()"
@@ -409,40 +416,105 @@
         }
       </div>
 
-      <!-- Actor presets (EFSAdvent actortemplates) -->
-      <div class="mt-3 rounded-lg border border-slate-800">
-        <div class="border-b border-slate-800 px-3 py-2">
-          <p class="text-xs font-semibold uppercase tracking-wide text-slate-400">
-            {{ activeSection() }}
-          </p>
-          <p class="mt-1 text-[11px] text-slate-500">
-            Drag a preset onto the room canvas to place it. The preset already carries its actor
-            variable (e.g. which item a <code>KEY0</code> actor shows), so no extra setup is needed.
-          </p>
+      <!--
+        Migrated EFSAdvent presets: the actor catalog describes these, so they are
+        now full smart objects with context menus. Only the `Objects` and
+        `Switches` groups are shown — the Items/NPC/Special presets are covered
+        by the curated catalogs in the other tabs.
+      -->
+      @if (debugTemplates.length > 0) {
+        <div class="mt-3 rounded-lg border border-slate-800">
+          <div class="border-b border-slate-800 px-3 py-2">
+            <p class="text-xs font-semibold uppercase tracking-wide text-slate-400">
+              {{ activeSection() }} presets
+            </p>
+            <p class="mt-1 text-[11px] text-slate-500">
+              Migrated to smart objects — the preset's values are pre-filled, and right-clicking a
+              placed object edits every field the game exposes.
+            </p>
+          </div>
+          <div class="flex flex-wrap gap-1 border-b border-slate-800 px-2 py-2" role="tablist">
+            @for (section of migratedSections; track section) {
+              <button
+                type="button"
+                role="tab"
+                [attr.aria-selected]="activeSection() === section"
+                (click)="selectSection(section)"
+                class="cursor-pointer rounded-md px-2 py-1 text-[11px] font-medium transition"
+                [class.bg-indigo-500]="activeSection() === section"
+                [class.text-white]="activeSection() === section"
+                [class.text-slate-400]="activeSection() !== section"
+                [class.hover:bg-slate-800]="activeSection() !== section"
+                [class.hover:text-slate-200]="activeSection() !== section"
+              >
+                {{ section }}
+              </button>
+            }
+          </div>
+          <div class="flex flex-wrap gap-2 px-3 py-3">
+            @for (preset of debugTemplates; track preset.id) {
+              <button
+                type="button"
+                draggable="true"
+                (dragstart)="onDecorationDragStart($event, preset)"
+                (dragend)="onDecorationDragEnd()"
+                class="flex w-24 cursor-grab flex-col items-center gap-2 rounded-lg border border-slate-700 bg-slate-800/70 px-2 py-2 text-xs text-slate-200 transition hover:border-indigo-400 hover:bg-slate-700/60 active:cursor-grabbing"
+                [title]="preset.name + ' (' + (preset.actorId ?? preset.id) + ')'"
+              >
+                <span
+                  class="flex h-16 w-16 items-center justify-center overflow-hidden rounded border border-slate-700 bg-slate-950/60"
+                >
+                  <canvas
+                    #enemyPreview
+                    [attr.data-enemy-id]="preset.id"
+                    style="image-rendering: pixelated"
+                  ></canvas>
+                </span>
+                <span class="w-full text-center leading-tight break-words">{{ preset.name }}</span>
+              </button>
+            }
+          </div>
         </div>
-        <div
-          class="flex shrink-0 flex-wrap gap-1 border-b border-slate-800 px-2 py-2"
-          role="tablist"
-        >
-          @for (section of sections; track section) {
-            <button
-              type="button"
-              role="tab"
-              [attr.aria-selected]="activeSection() === section"
-              (click)="selectSection(section)"
-              class="cursor-pointer rounded-md px-2 py-1 text-[11px] font-medium transition"
-              [class.bg-indigo-500]="activeSection() === section"
-              [class.text-white]="activeSection() === section"
-              [class.text-slate-400]="activeSection() !== section"
-              [class.hover:bg-slate-800]="activeSection() !== section"
-              [class.hover:text-slate-200]="activeSection() !== section"
-            >
-              {{ section }}
-            </button>
-          }
-        </div>
-        <div class="space-y-2 px-3 py-3">
-          <div class="flex flex-wrap gap-2">
+      }
+
+      <!--
+        Non smart objects: the raw EFSAdvent presets exactly as they are defined
+        (`Name;ID, V:a,b,c,d`). They place a bare actor with no context menu, so
+        they are a debugging/reference aid. Presets the catalog can describe are
+        ALSO available as migrated smart objects above.
+      -->
+      @if (legacyTemplates.length > 0) {
+        <div class="mt-3 rounded-lg border border-amber-800/60">
+          <div class="border-b border-slate-800 px-3 py-2">
+            <p class="text-xs font-semibold uppercase tracking-wide text-amber-400">
+              Non smart objects
+            </p>
+            <p class="mt-1 text-[11px] text-slate-500">
+              Raw EFSAdvent presets — they place a bare actor with no context menu. Use these only
+              for reference; everything else is available as a smart object.
+            </p>
+          </div>
+          <div class="flex flex-wrap gap-1 border-b border-slate-800 px-2 py-2" role="tablist">
+            @for (section of sections; track section) {
+              @if (templatesForSection(section).length > 0) {
+                <button
+                  type="button"
+                  role="tab"
+                  [attr.aria-selected]="activeSection() === section"
+                  (click)="selectSection(section)"
+                  class="cursor-pointer rounded-md px-2 py-1 text-[11px] font-medium transition"
+                  [class.bg-indigo-500]="activeSection() === section"
+                  [class.text-white]="activeSection() === section"
+                  [class.text-slate-400]="activeSection() !== section"
+                  [class.hover:bg-slate-800]="activeSection() !== section"
+                  [class.hover:text-slate-200]="activeSection() !== section"
+                >
+                  {{ section }}
+                </button>
+              }
+            }
+          </div>
+          <div class="flex flex-wrap gap-2 px-3 py-3">
             @for (template of templates; track template.id) {
               <button
                 type="button"
@@ -468,7 +540,7 @@
             }
           </div>
         </div>
-      </div>
+      }
     }
   </div>
 </aside>

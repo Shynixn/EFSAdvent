@@ -20,10 +20,10 @@ import {
   renderSmartObjectPreview,
 } from '../../entity/smartobject.entity';
 import {
+  ACTOR_TEMPLATES,
   ACTOR_TEMPLATE_SECTIONS,
   ActorTemplate,
   ActorTemplateSection,
-  actorTemplatesFor,
 } from '../../entity/actor-template.entity';
 import { GROUND_DEFINITIONS, GroundDefinition } from '../../entity/ground.entity';
 import { SmartObjectDragService } from '../../service/smart-object-drag.service';
@@ -40,6 +40,8 @@ import {
   FORCE_GEM_DEFINITION,
   forceGemDefinition,
 } from '../../entity/smartobject/force-gem.entity';
+import { ITEM_DEFINITIONS, itemDefinitions } from '../../entity/smartobject/items.entity';
+import { migrateActorTemplates } from '../../entity/smartobject/actor-template-migration.entity';
 import { EditorService } from '../../service/editor.service';
 import { ImageBuffer } from '../../service/render/gba-tile-renderer';
 
@@ -130,6 +132,30 @@ export class ToolboxColumnComponent implements AfterViewInit {
 
   private readonly dragService = inject(SmartObjectDragService);
 
+  /**
+   * Whether the **Debug** tab is available.
+   *
+   * Mirrors the app's "Show debug information" setting: the Debug tab only
+   * exists while it is enabled. When it is turned off while active, the toolbox
+   * falls back to the first tab so the user is never stranded on a hidden tab.
+   */
+  private _showDebug = false;
+  @Input()
+  get showDebug(): boolean {
+    return this._showDebug;
+  }
+  set showDebug(value: boolean) {
+    this._showDebug = value ?? false;
+    if (!this._showDebug && this.activeTab() === 'Debug') {
+      this.activeTab.set('Common');
+    }
+  }
+
+  /** The tabs actually rendered (Debug is hidden unless enabled). */
+  get visibleTabs(): (typeof this.tabs)[number][] {
+    return this.tabs.filter((tab) => tab !== 'Debug' || this._showDebug);
+  }
+
   /** Icons generated from the game data at ISO-import time (lazy fallback). */
   private readonly actorSprites = inject(ActorSpriteService);
   private readonly editor = inject(EditorService);
@@ -177,11 +203,13 @@ export class ToolboxColumnComponent implements AfterViewInit {
    *
    * - **Common**: the tile-level pieces used in most rooms (ground, walls,
    *   decorations, advanced tile reference, start/end markers).
-   * - **Items+NPC**: actor-baked smart objects that are picked up or talked to
-   *   (collectibles and NPCs).
-   * - **Misc**: everything else — the EFSAdvent actor presets, plus the doors.
+   * - **Items & NPC**: actor-baked smart objects that are picked up or talked to
+   *   (collectibles, enemies and NPCs).
+   * - **Debug**: everything that does NOT belong to a curated section — doors,
+   *   and the remaining EFSAdvent actor presets that the actor catalog cannot
+   *   describe (so they could not be migrated into a modern section).
    */
-  readonly tabs = ['Common', 'Items & NPC', 'Misc'] as const;
+  readonly tabs = ['Common', 'Items & NPC', 'Debug'] as const;
 
   /** The tab currently selected. */
   readonly activeTab = signal<(typeof this.tabs)[number]>('Common');
@@ -194,12 +222,48 @@ export class ToolboxColumnComponent implements AfterViewInit {
   /** The actor-template tabs, in display order. */
   readonly sections = ACTOR_TEMPLATE_SECTIONS;
 
-  /** The tab currently selected (opens on the first one, Items). */
+  /** The tab currently selected (opens on the first one). */
   readonly activeSection = signal<ActorTemplateSection>(ACTOR_TEMPLATE_SECTIONS[0]);
 
-  /** Templates listed in the selected tab. */
+  /**
+   * Every legacy EFSAdvent preset of the selected section.
+   *
+   * These are the raw, hand-written `Name;ID, V:a,b,c,d` entries — they place a
+   * bare actor with no context menu, so they are a debugging/reference aid and
+   * live in the Debug tab under "Non smart objects". Presets the catalog CAN
+   * describe are ALSO migrated into full smart objects (see
+   * {@link migratedTemplates}); both representations are shown on purpose so the
+   * original entries stay inspectable.
+   */
   get templates(): ActorTemplate[] {
-    return actorTemplatesFor(this.activeSection());
+    return this.legacyTemplates.filter((template) => template.section === this.activeSection());
+  }
+
+  /**
+   * Presets migrated into first-class smart objects, grouped by the modern
+   * section they belong to.
+   *
+   * Only the `Objects` and `Switches` presets are surfaced: the Items / NPC /
+   * Special presets are already covered by the curated catalogs in the other
+   * tabs, so listing them again would duplicate every entry.
+   */
+  readonly migratedTemplates = signal<SmartObjectDefinition[]>([]);
+
+  /** All legacy presets (shown under "Non smart objects" in the Debug tab). */
+  readonly legacyTemplates: ActorTemplate[] = [...ACTOR_TEMPLATES];
+
+  /** Migrated presets that belong to one of the `Objects`/`Switches` sections. */
+  get debugTemplates(): SmartObjectDefinition[] {
+    const section = this.activeSection();
+    return this.migratedTemplates().filter((definition) => definition.section === section);
+  }
+
+  /** Sections that have migrated (modern) entries to show. */
+  readonly migratedSections: readonly ActorTemplateSection[] = ['Objects', 'Switches'];
+
+  /** Legacy presets belonging to a section (used to hide empty tabs). */
+  templatesForSection(section: ActorTemplateSection): ActorTemplate[] {
+    return this.legacyTemplates.filter((template) => template.section === section);
   }
 
   /** Available decoration (smart-object) definitions, shown in the toolbox. */
@@ -210,11 +274,24 @@ export class ToolboxColumnComponent implements AfterViewInit {
     (definition) => definition.section === 'Doors',
   );
 
+  /**
+   * Definitions offered in the toolbox's Decorations section.
+   *
+   * Only the two general-purpose props are listed. The catalog still CONTAINS
+   * the other decorations (cave entrance, fire house, statue, …) so that rooms
+   * saved with them keep resolving — they are simply not offered as new items.
+   */
+  private static readonly DECORATION_IDS: ReadonlySet<string> = new Set([
+    'house1',
+    'tree',
+    'breakable-block',
+  ]);
+
   /** Definitions in the "Decorations" section. */
   readonly otherDefinitions: SmartObjectDefinition[] = SMART_OBJECT_DEFINITIONS.filter(
-    (definition) => definition.section !== 'Doors',
+    (definition) =>
+      definition.section !== 'Doors' && ToolboxColumnComponent.DECORATION_IDS.has(definition.id),
   );
-
   /** Placable enemies (actor-baked smart objects), shown in the Enemies section. */
   private _enemies: SmartObjectDefinition[] = [];
   @Input()
@@ -425,11 +502,12 @@ export class ToolboxColumnComponent implements AfterViewInit {
       }
       for (const ref of enemyCanvases) {
         const id = ref.nativeElement.dataset['enemyId'];
-        // All three sections share the `enemyPreview` canvas reference; resolve
+        // All these sections share the `enemyPreview` canvas reference; resolve
         // the definition from whichever list actually contains the id.
         const enemy =
           this.enemies.find((entry) => entry.id === id) ??
-          this.npcs.find((entry) => entry.id === id);
+          this.npcs.find((entry) => entry.id === id) ??
+          this.migratedTemplates().find((entry) => entry.id === id);
         const canvas = ref.nativeElement;
         if (!enemy) {
           continue;
@@ -736,7 +814,7 @@ export class ToolboxColumnComponent implements AfterViewInit {
    * The definitions are rebuilt from the actor catalog when it arrives, so the
    * gem's `Gem Type` menu comes from FSALib instead of a hand-copied list.
    */
-  itemObjects: SmartObjectDefinition[] = [FORCE_GEM_DEFINITION];
+  itemObjects: SmartObjectDefinition[] = [FORCE_GEM_DEFINITION, ...ITEM_DEFINITIONS];
 
   /**
    * Rebuilds the item definitions from the actor catalog.
@@ -748,7 +826,21 @@ export class ToolboxColumnComponent implements AfterViewInit {
     if (!actors) {
       return;
     }
-    this.itemObjects = [forceGemDefinition(actors[FORCE_GEM_ACTOR_ID])];
+    this.itemObjects = [
+      forceGemDefinition(actors[FORCE_GEM_ACTOR_ID]),
+      ...itemDefinitions(actors),
+    ];
+    // Migrate the legacy EFSAdvent presets into real smart objects (their
+    // context menus come from the catalog). The raw presets stay visible under
+    // "Non smart objects" in the Debug tab regardless.
+    const migration = migrateActorTemplates(actors);
+    this.migratedTemplates.set(
+      migration.definitions.filter((definition) =>
+        this.migratedSections.includes(definition.section as ActorTemplateSection),
+      ),
+    );
+    // A new list changes the preview canvases; repaint them.
+    queueMicrotask(() => void this.drawPreviews());
   }
 
   /** The item preview canvases. */

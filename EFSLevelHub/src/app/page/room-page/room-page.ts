@@ -82,6 +82,8 @@ import {
 import { actorSmartObjects } from '../../entity/actor.definition';
 import type { ActorDefinition } from '../../entity/actor-definition.entity';
 import { FORCE_GEM_ACTOR_ID, forceGemDefinition } from '../../entity/smartobject/force-gem.entity';
+import { itemDefinitions } from '../../entity/smartobject/items.entity';
+import { migrateActorTemplates } from '../../entity/smartobject/actor-template-migration.entity';
 import { TilesetTheme } from '../../entity/tileset.util';
 import { StageRenderer } from '../../service/render/stage-renderer';
 import { nextPaint } from '../../util/paint';
@@ -1203,7 +1205,20 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
           : true;
 
       const generatedEnemies = generatedEnemyDefinitions(actors).filter(drawable);
-      const generatedNpcs = generatedNpcDefinitions(actors).filter(drawable);
+      const generatedNpcs = generatedNpcDefinitions(actors)
+        .filter(drawable)
+        // Only a curated handful of NPCs is offered in the toolbox. The catalog
+        // has many more (minigame hosts, shop props, invisible markers, …), but
+        // they are mostly room-specific and would bury the useful ones.
+        .filter((definition) => NPC_TOOLBOX_ACTOR_IDS.has(definition.actorId ?? definition.id))
+        // `JIJI` is the generic, fully configurable NPC actor, so it is labelled
+        // as such rather than "Old Man".
+        .map((definition) =>
+          (definition.actorId ?? definition.id) === GENERIC_NPC_ACTOR_ID
+            ? { ...definition, name: 'Generic NPC' }
+            : definition,
+        )
+        .sort((a, b) => a.name.localeCompare(b.name));
       registerActorSmartObjects(generatedEnemies);
       registerActorSmartObjects(generatedNpcs);
       this.enemies.set(generatedEnemies);
@@ -1212,7 +1227,13 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
       // The stand-alone item objects (the force gem) are registered at module
       // load WITHOUT catalog metadata, so their context-menu fields are empty.
       // Re-register them from the catalog now that it is available.
-      registerActorSmartObjects([forceGemDefinition(actors[FORCE_GEM_ACTOR_ID])]);
+      registerActorSmartObjects([
+        forceGemDefinition(actors[FORCE_GEM_ACTOR_ID]),
+        ...itemDefinitions(actors),
+      ]);
+      // Migrated EFSAdvent presets are draggable from the toolbox, so their ids
+      // (and their catalog-derived context menus) must resolve here too.
+      registerActorSmartObjects(migrateActorTemplates(actors).definitions);
     } catch (error) {
       this.logger.warn('RoomPage: failed to load enemy definitions', error);
     }
@@ -1876,6 +1897,29 @@ function sameActorList(a: readonly ActorData[] | undefined, b: readonly ActorDat
   }
   return true;
 }
+
+/**
+ * The NPC actors offered in the toolbox's NPC section.
+ *
+ * The FSALib catalog describes dozens of NPCs, most of them room-specific
+ * minigame hosts, shop props or invisible markers. Only this curated handful is
+ * generally useful when building a room from scratch.
+ */
+const NPC_TOOLBOX_ACTOR_IDS: ReadonlySet<string> = new Set([
+  'NIWA', // Cucco
+  'BFRY', // Great Fairy
+  'TZOK', // Thief
+  'JIJI', // Old Man — shown as "Generic NPC"
+]);
+
+/**
+ * The catch-all NPC actor.
+ *
+ * `JIJI` exposes a sprite selector plus a text id, so it is the generic
+ * "any NPC" actor. Its catalog name ("Old Man") is misleading, so the toolbox
+ * labels it "Generic NPC" instead.
+ */
+const GENERIC_NPC_ACTOR_ID = 'JIJI';
 
 /**
  * Splits the archive's actors into the ones the editor already knows about and
