@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, Output, signal } from '@angular/core';
+import { Component, ElementRef, EventEmitter, Input, Output, inject, signal } from '@angular/core';
 
 /** A plain action entry in a {@link CanvasContextMenuComponent}. */
 export interface ContextMenuAction {
@@ -81,15 +81,26 @@ export interface ContextMenuChoiceGroup {
 @Component({
   selector: 'app-canvas-context-menu',
   templateUrl: './canvas-context-menu.component.html',
-  host: { class: 'contents' },
-})
+  host: { class: 'contents' },})
 export class CanvasContextMenuComponent {
+  /** This component's host element (used to resolve the positioned wrapper). */
+  private readonly elementRef = inject(ElementRef<HTMLElement>);
+
   /** Whether the menu is shown. */
   @Input() open = false;
-  /** Left offset in pixels, relative to the positioned parent. */
+  /** Left offset in pixels, relative to the positioned parent (or viewport in {@link fixed}). */
   @Input() x = 0;
-  /** Top offset in pixels, relative to the positioned parent. */
+  /** Top offset in pixels, relative to the positioned parent (or viewport in {@link fixed}). */
   @Input() y = 0;
+  /**
+   * When true the menu is positioned in **viewport** coordinates instead of the
+   * positioned parent's.
+   *
+   * Used when the menu is opened from somewhere outside the canvas wrapper (the
+   * object list), where the click position is a `clientX`/`clientY` pair and the
+   * menu must appear under the pointer rather than on the canvas.
+   */
+  @Input() fixed = false;
   /** Plain action entries, rendered top to bottom. */
   @Input() actions: ContextMenuAction[] = [];
   /** Submenu groups, rendered below the actions. */
@@ -105,6 +116,40 @@ export class CanvasContextMenuComponent {
   /** Id of the submenu that is currently open, if any. */
   readonly openGroup = signal<string | null>(null);
 
+  /**
+   * Viewport X of the menu when {@link fixed} is false.
+   *
+   * Non-fixed callers pass coordinates relative to the canvas wrapper. The panel
+   * lives in a fixed viewport layer, so the wrapper's page offset is added to
+   * keep the same visual result.
+   */
+  get anchorX(): number {
+    return this.x + this.wrapperOffset().left;
+  }
+
+  /** Viewport Y of the menu when {@link fixed} is false (see {@link anchorX}). */
+  get anchorY(): number {
+    return this.y + this.wrapperOffset().top;
+  }
+
+  /**
+   * Viewport offset of the element the wrapper-relative coordinates belong to.
+   *
+   * The menu is rendered as a SIBLING of the canvas wrapper (it must not live
+   * inside that positioned element, or its backdrop gets clipped by the
+   * scrolling column). The wrapper is therefore the closest `.relative` element
+   * within the same component host — searched among siblings when the menu is
+   * not nested in it.
+   */
+  private wrapperOffset(): { left: number; top: number } {
+    const host = this.elementRef.nativeElement as HTMLElement;
+    const scope = host.parentElement;
+    const wrapper =
+      scope?.querySelector(':scope > .relative') ?? host.parentElement?.closest('.relative');
+    const rect = (wrapper as HTMLElement | null)?.getBoundingClientRect();
+    return { left: rect?.left ?? 0, top: rect?.top ?? 0 };
+  }
+
   /** Toggles a submenu open/closed. */
   toggleGroup(id: string): void {
     this.openGroup.update((current) => (current === id ? null : id));
@@ -115,8 +160,15 @@ export class CanvasContextMenuComponent {
     return this.openGroup() === id;
   }
 
-  /** Closes the menu and resets the submenu state. */
-  close(): void {
+  /**
+   * Closes the menu and resets the submenu state.
+   *
+   * When called from the backdrop the event is stopped from propagating: the
+   * click that dismisses the menu must not ALSO act on whatever is underneath it
+   * (a canvas hit-test, a list row, …), otherwise the menu would reopen or move.
+   */
+  close(event?: Event): void {
+    event?.stopPropagation();
     this.openGroup.set(null);
     this.closed.emit();
   }

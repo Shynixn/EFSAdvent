@@ -109,6 +109,30 @@ export class RoomLayersComponent implements AfterViewInit, OnDestroy {
   /** Actor placements that mark pre-existing (legacy) actors — red-bordered. */
   @Input() legacyActors: SmartObjectPlacement[] = [];
 
+  /** Keys of the objects hidden from the object column (not rendered). */
+  @Input() hiddenObjects: ReadonlySet<string> = new Set<string>();
+
+  /** Key of the object selected in the object column (highlighted). */
+  @Input() selectedObject: string | null = null;
+
+  /**
+   * Key of a placement the host wants the context menu opened for (right click
+   * in the object list). Only the canvas holding it reacts.
+   */
+  @Input() contextTargetKey: string | null = null;
+
+  /**
+   * Viewport position of the right click that requested the menu, so it opens
+   * over the object list instead of being anchored on the canvas.
+   */
+  @Input() contextTargetPointer: { clientX: number; clientY: number } | null = null;
+
+  /** Emits once a context-target key has been handled, so the host clears it. */
+  @Output() contextTargetConsumed = new EventEmitter<void>();
+
+  /** Emits when a canvas dismissed the context menu it owned. */
+  @Output() contextMenuClosed = new EventEmitter<void>();
+
   private _groundLayers: GroundLayer[] = [];
   /** Ground layers painted in this room (drawn under each base layer's tiles). */
   @Input()
@@ -169,6 +193,13 @@ export class RoomLayersComponent implements AfterViewInit, OnDestroy {
     from: SmartObjectPlacement;
     to: SmartObjectPlacement;
   }>();
+
+  /**
+   * Emits the placement a canvas "selected" (a click on the object on the
+   * canvas), so the host can highlight the matching row in the object column.
+   * Emits `null` when the click landed on empty space.
+   */
+  @Output() objectSelected = new EventEmitter<SmartObjectPlacement | null>();
 
   /** The overlay `<canvas>` for the cross-layer warp lines. */
   private readonly warpCanvas = viewChild<ElementRef<HTMLCanvasElement>>('warpOverlay');

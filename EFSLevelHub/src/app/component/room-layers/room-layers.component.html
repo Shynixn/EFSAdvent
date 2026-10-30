@@ -25,6 +25,12 @@
           [tool]="tool"
           [smartObjects]="smartObjects"
           [legacyActors]="legacyActors"
+          [hiddenObjects]="hiddenObjects"
+          [selectedObject]="selectedObject"
+          [contextTargetKey]="contextTargetKey"
+          [contextTargetPointer]="contextTargetPointer"
+          (contextTargetConsumed)="contextTargetConsumed.emit()"
+          (contextMenuClosed)="contextMenuClosed.emit()"
           [groundTiles]="groundFor(base)"
           [groundTile]="groundTile"
           [groundMode]="groundMode"
@@ -43,6 +49,7 @@
           [activationLinks]="activationLinks"
           (legacyDeleted)="legacyDeleted.emit($event)"
           (legacyMoved)="legacyMoved.emit($event)"
+          (objectSelected)="objectSelected.emit($event)"
         />
       </div>
     </section>

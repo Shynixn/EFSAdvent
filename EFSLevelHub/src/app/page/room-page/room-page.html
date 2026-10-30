@@ -71,6 +71,9 @@
         [musicId]="musicId()"
         [musicName]="musicName()"
         [tracksLoading]="musicTracksLoading()"
+        [objectRows]="objectRows()"
+        [hiddenObjects]="hiddenObjects()"
+        [selectedObject]="selectedObject()"
         [roomJson]="roomJson()"
         [roomJsonWithoutLegacy]="roomJsonWithoutLegacy()"
         [gba]="gba()"
@@ -83,6 +86,11 @@
         (roomAction)="onRoomAction($event)"
         (themeClicked)="openTheme()"
         (musicChange)="selectMusic($event)"
+        (objectVisibilityToggled)="toggleObjectVisibility($event)"
+        (objectAllVisibilitySet)="setAllObjectVisibility($event)"
+        (objectSelected)="selectObjectRow($event)"
+        (objectContextRequested)="openObjectContextMenu($event)"
+        (objectRenameRequested)="openRenameObject($event)"
         (gbaChange)="gba.set($event)"
         (topLayerChange)="topLayer.set($event)"
         (paintTopChange)="paintTop.set($event)"
@@ -170,6 +178,12 @@
             [groundLayers]="groundLayers()"
             [groundTile]="groundTile()"
             [groundMode]="groundMode()"
+            [hiddenObjects]="hiddenObjects()"
+            [selectedObject]="selectedObject()"
+            [contextTargetKey]="objectContextKey()"
+            [contextTargetPointer]="objectContextPointer()"
+            (contextTargetConsumed)="objectContextKey.set(null)"
+            (contextMenuClosed)="objectContextPointer.set(null)"
             [activationLinks]="activationLinks()"
             (tileChanged)="onTileChanged($event)"
             (groundChanged)="onGroundChanged($event)"
@@ -182,6 +196,7 @@
             (activationUnlinked)="onActivationUnlinked($event)"
             (legacyDeleted)="onLegacyDeleted($event)"
             (legacyMoved)="onLegacyMoved($event)"
+            (objectSelected)="onCanvasObjectSelected($event)"
           />
         </div>
       }
@@ -213,6 +228,14 @@
   [currentIndex]="themeIndex()"
   (closed)="closeTheme()"
   (themeSelected)="selectTheme($event)"
+/>
+
+<!-- Object rename dialog (double click a row in the object column) -->
+<app-object-rename-modal
+  [open]="renameOpen()"
+  [currentName]="renameName()"
+  (closed)="closeRenameObject()"
+  (nameSubmitted)="renameObject($event)"
 />
 
 <!-- Semi-transparent loading overlay -->

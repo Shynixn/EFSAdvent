@@ -21,6 +21,11 @@ import {
 } from '../../component/room-canvas/room-canvas.component';
 import { ThemePickerComponent } from '../../component/theme-picker/theme-picker.component';
 import { LoadingOverlayComponent } from '../../component/loading-overlay/loading-overlay.component';
+import {
+  ObjectRow,
+  buildObjectRows,
+} from '../../component/object-column/object-column.component';
+import { ObjectRenameModalComponent } from '../../component/object-column/object-rename-modal.component';
 import { StageService } from '../../service/stage.service';
 import { FSALibService } from '../../service/fsalib.service';
 import { StageTabsService } from '../../service/stage-tabs.service';
@@ -65,6 +70,7 @@ import {
   registerActorSmartObjects,
   smartObjectVariant,
   withActorProperties,
+  withName,
   WARP_ACTOR_ID,
 } from '../../entity/smartobject.entity';
 import { expandPlaced, applyDelete, applyMove } from '../../entity/contract/placeable.entity';
@@ -106,6 +112,7 @@ import { nextPaint } from '../../util/paint';
   imports: [
     ButtonComponent,
     LoadingOverlayComponent,
+    ObjectRenameModalComponent,
     SystemColumnComponent,
     ToolboxColumnComponent,
     RoomLayersComponent,
@@ -226,6 +233,48 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
 
   /** Persisted activation links for the open room. */
   readonly activationLinks = signal<ActivationLink[]>([]);
+
+  // --- Object column -------------------------------------------------------
+
+  /**
+   * Keys of the objects hidden from the room view (the object column's eye
+   * icons). Purely a viewing aid: nothing is deleted and nothing is persisted,
+   * so hiding is reset the next time the room is opened.
+   */
+  readonly hiddenObjects = signal<ReadonlySet<string>>(new Set<string>());
+
+  /** Key of the object selected in the object column (highlighted on the canvas). */
+  readonly selectedObject = signal<string | null>(null);
+
+  /**
+   * Key of the object whose row was right-clicked, so the canvas holding it can
+   * open its context menu (the menu and its edit actions belong to the canvas).
+   */
+  readonly objectContextKey = signal<string | null>(null);
+
+  /** Viewport position of that right click, so the menu opens over the list. */
+  readonly objectContextPointer = signal<{ clientX: number; clientY: number } | null>(null);
+
+  /** Whether the "Name object" dialog is open. */
+  readonly renameOpen = signal(false);
+  /** Current name shown in the rename dialog. */
+  readonly renameName = signal('');
+  /** Placement being renamed (null while the dialog is closed). */
+  private renameTarget: SmartObjectPlacement | null = null;
+
+  /**
+   * Every object of the room, newest/top-most last — editor placements first,
+   * then the legacy actors read from the archive. Backs the object column.
+   */
+  readonly objectRows = computed<ObjectRow[]>(() =>
+    buildObjectRows({
+      smartObjects: this.smartObjects(),
+      legacyActors: this.legacyActors(),
+      define: (id) => findSmartObjectDefinition(id),
+      displayName: (placement) => placement.name,
+      keyOf: (placement) => placementKey(placement),
+    }),
+  );
 
   /** Placable enemies, with context-menu fields derived from the catalog. */
   readonly enemies = signal<SmartObjectDefinition[]>([]);
@@ -489,6 +538,8 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
       this.selectedGround.set(null);
       // A different room's layers are about to be shown; forget what we baked.
       this.bakedGround.clear();
+      // Hidden objects / selection belong to the room being left.
+      this.resetObjectView();
     }
 
     this.isLoading.set(needsOverlay);
@@ -702,6 +753,125 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
   /** Switches to the hand tool when the user starts dragging a decoration. */
   onDecorationDragStarted(): void {
     this.tool.set('hand');
+  }
+
+  // --- Object column actions ----------------------------------------------
+
+  /**
+   * Shows/hides an object in the room view.
+   *
+   * Hiding never touches the placement: the canvas simply skips its tiles (and
+   * its actor sprite), so the object comes back exactly as it was, and the next
+   * save still writes it to the archive.
+   */
+  toggleObjectVisibility(key: string): void {
+    this.hiddenObjects.update((hidden) => {
+      const next = new Set(hidden);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }
+
+  /** Shows or hides every object of the room at once. */
+  setAllObjectVisibility(visible: boolean): void {
+    if (visible) {
+      this.hiddenObjects.set(new Set<string>());
+      return;
+    }
+    this.hiddenObjects.set(new Set(this.objectRows().map((row) => row.key)));
+  }
+
+  /** Selects an object from the list and reveals it (a hidden object is shown). */
+  selectObjectRow(row: ObjectRow): void {
+    this.selectedObject.set(row.key);
+    if (this.hiddenObjects().has(row.key)) {
+      this.toggleObjectVisibility(row.key);
+    }
+  }
+
+  /**
+   * Selects the object clicked on the canvas (or clears the selection when the
+   * click landed on empty space).
+   */
+  onCanvasObjectSelected(placement: SmartObjectPlacement | null): void {
+    this.selectedObject.set(placement ? placementKey(placement) : null);
+  }
+
+  /**
+   * Opens the context menu for an object picked in the list.
+   *
+   * The key is handed to the layer stack; the canvas owning that placement opens
+   * the menu, so every action (delete, rotate, connect, …) behaves exactly as if
+   * the object had been right-clicked directly. The pointer position travels
+   * along so the menu appears over the list, where the user actually clicked.
+   */
+  openObjectContextMenu(event: { row: ObjectRow; clientX: number; clientY: number }): void {
+    this.selectedObject.set(event.row.key);
+    this.objectContextPointer.set({ clientX: event.clientX, clientY: event.clientY });
+    // Re-set through a microtask so re-right-clicking the SAME row re-opens the
+    // menu (a setter only fires when the input value actually changes).
+    const key = event.row.key;
+    this.objectContextKey.set(null);
+    queueMicrotask(() => this.objectContextKey.set(key));
+  }
+
+  /**
+   * Opens the "Name object" dialog for a row (double click in the list).
+   *
+   * Legacy actors are refused: their names are never persisted (they are
+   * re-derived from the archive on every load), so a rename would be silently
+   * discarded on the next save/reload.
+   */
+  openRenameObject(row: ObjectRow): void {
+    if (row.kind === 'legacy') {
+      return;
+    }
+    this.renameTarget = row.placement;
+    this.renameName.set(row.placement.name ?? '');
+    this.renameOpen.set(true);
+  }
+
+  /** Closes the rename dialog without changes. */
+  closeRenameObject(): void {
+    this.renameOpen.set(false);
+    this.renameTarget = null;
+  }
+
+  /**
+   * Stores a custom name on the placement (empty clears it, falling back to the
+   * definition name). The name lives in the room's stage JSON, so it is saved
+   * with the room.
+   */
+  renameObject(name: string): void {
+    const target = this.renameTarget;
+    this.closeRenameObject();
+    if (!target) {
+      return;
+    }
+    const cleaned = name.trim();
+    const apply = (list: SmartObjectPlacement[]): SmartObjectPlacement[] =>
+      list.map((entry) =>
+        entry === target ? withName(entry, cleaned) : entry,
+      );
+    this.smartObjects.update(apply);
+    this.legacyActors.update(apply);
+    this.stageEditor.setDirty(this.stageId(), true);
+    // Actor names live on the placement, which the canvas emits back on move, so
+    // nothing else needs re-serializing here.
+  }
+
+  /** Emits when the user closes a room: forget the transient view state. */
+  private resetObjectView(): void {
+    this.hiddenObjects.set(new Set<string>());
+    this.selectedObject.set(null);
+    this.objectContextKey.set(null);
+    this.objectContextPointer.set(null);
+    this.renameOpen.set(false);
+    this.renameTarget = null;
   }
 
   /**

@@ -1,0 +1,141 @@
+<!-- Object list (inline section, e.g. in the System column): every object of the room. -->
+<div class="rounded-lg border border-slate-800">
+  <!-- Header (same collapsible style as the toolbox sections) -->
+  <div class="flex w-full items-center">
+    <button
+      type="button"
+      (click)="toggleOpen()"
+      class="flex w-full cursor-pointer items-center justify-between gap-2 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400"
+    >
+      <span class="flex items-center gap-1.5">
+        <span>Objects</span>
+        <span
+          class="rounded bg-slate-800 px-1.5 text-[10px] font-normal normal-case text-slate-400"
+        >
+          {{ rows.length }}
+        </span>
+      </span>
+      <span class="text-slate-500">{{ open() ? '▾' : '▸' }}</span>
+    </button>
+
+    <!-- Hide / show everything -->
+    <button
+      type="button"
+      (click)="toggleAll($event)"
+      class="mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded text-slate-400 transition hover:bg-slate-800 hover:text-slate-100"
+      [title]="allHidden() ? 'Show all objects' : 'Hide all objects'"
+    >
+      @if (allHidden()) {
+        <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+          <path
+            d="M3.28 2.22a.75.75 0 00-1.06 1.06l14.5 14.5a.75.75 0 101.06-1.06l-1.72-1.72A9.6 9.6 0 0019.6 10S16 4.5 10 4.5c-1.14 0-2.2.2-3.16.54L3.28 2.22zM7.6 6.53l1.6 1.6a2.5 2.5 0 003.27 3.27l1.6 1.6A6.9 6.9 0 0110 13.5c-4.5 0-7.5-3.5-7.5-3.5a12 12 0 012.4-2.46l2.7 2.7-.01-.71z"
+          />
+        </svg>
+      } @else {
+        <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+          <path
+            d="M10 4.5C4 4.5.5 10 .5 10S4 15.5 10 15.5 19.5 10 19.5 10 16 4.5 10 4.5zm0 8.5a3 3 0 110-6 3 3 0 010 6z"
+          />
+        </svg>
+      }
+    </button>
+  </div>
+
+  @if (open()) {
+    <div class="max-h-[32rem] space-y-1 overflow-y-auto border-t border-slate-800 px-2 py-2">
+      @if (rows.length === 0) {
+        <p class="px-1 py-2 text-[11px] leading-relaxed text-slate-500">
+          No objects in this room. Place a decoration or an enemy to see it here.
+        </p>
+      }
+      @for (group of groups(); track group.layer) {
+        <!-- Layer group (Main Layer / Dark World / Gameboy Layer N) -->
+        <div class="mb-1">
+          <p
+            class="px-1 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500"
+          >
+            {{ group.name }}
+          </p>
+          <ul class="space-y-0.5">
+            @for (row of group.rows; track row.key) {
+              <li
+                class="group flex cursor-pointer items-center gap-1 rounded-md border border-transparent px-1 py-1 transition hover:bg-slate-800/70"
+                [class.bg-indigo-500/20]="selected === row.key"
+                [class.border-indigo-500/60]="selected === row.key"
+                [class.opacity-50]="isHidden(row)"
+                [class.cursor-not-allowed]="!canRename(row)"
+                (click)="select(row)"
+                (dblclick)="rename(row)"
+                (contextmenu)="openContext(row, $event)"
+                [title]="rowTooltip(row)"
+              >
+                <!-- Eye (visibility) -->
+                <button
+                  type="button"
+                  (click)="toggleVisibility(row, $event)"
+                  class="flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded text-slate-400 hover:text-slate-100"
+                  [title]="isHidden(row) ? 'Show object' : 'Hide object'"
+                >
+                  @if (isHidden(row)) {
+                    <svg
+                      class="h-3.5 w-3.5 text-slate-600"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                      aria-hidden="true"
+                    >
+                      <path
+                        d="M3.28 2.22a.75.75 0 00-1.06 1.06l14.5 14.5a.75.75 0 101.06-1.06l-1.72-1.72A9.6 9.6 0 0019.6 10S16 4.5 10 4.5c-1.14 0-2.2.2-3.16.54L3.28 2.22zM7.6 6.53l1.6 1.6a2.5 2.5 0 003.27 3.27l1.6 1.6A6.9 6.9 0 0110 13.5c-4.5 0-7.5-3.5-7.5-3.5a12 12 0 012.4-2.46l2.7 2.7-.01-.71z"
+                      />
+                    </svg>
+                  } @else {
+                    <svg
+                      class="h-3.5 w-3.5"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                      aria-hidden="true"
+                    >
+                      <path
+                        d="M10 4.5C4 4.5.5 10 .5 10S4 15.5 10 15.5 19.5 10 19.5 10 16 4.5 10 4.5zm0 8.5a3 3 0 110-6 3 3 0 010 6z"
+                      />
+                    </svg>
+                  }
+                </button>
+
+                <!--
+                  Legacy actors come straight from the original room data (the
+                  editor never created them), so they get a warning icon —
+                  deleting/renaming them changes the original game content.
+                -->
+                @if (row.kind === 'legacy') {
+                  <span
+                    class="flex shrink-0 items-center"
+                    title="Warning: this is a legacy actor from the original room data"
+                  >
+                    <svg
+                      class="h-3.5 w-3.5 text-amber-400"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                      aria-hidden="true"
+                    >
+                      <path
+                        fill-rule="evenodd"
+                        d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 9a1 1 0 100-2 1 1 0 000 2z"
+                        clip-rule="evenodd"
+                      />
+                    </svg>
+                  </span>
+                }
+
+                <!-- Name + type -->
+                <span class="min-w-0 flex-1">
+                  <span class="block truncate text-xs text-slate-200">{{ row.name }}</span>
+                  <span class="block truncate text-[10px] text-slate-500">{{ caption(row) }}</span>
+                </span>
+              </li>
+            }
+          </ul>
+        </div>
+      }
+    </div>
+  }
+</div>

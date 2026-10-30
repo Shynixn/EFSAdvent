@@ -154,6 +154,12 @@ export interface SmartObjectPlacement {
   /** Definition id (see {@link SMART_OBJECT_DEFINITIONS}). */
   id: string;
   /**
+   * User-assigned name for this placement (the object column's rename action).
+   * Undefined until renamed; the object column then falls back to the
+   * definition's name. Persisted with the room record.
+   */
+  name?: string;
+  /**
    * Index of the variant (rotation style) within the definition's `set` that
    * was stamped. Defaults to 0 (the object's default rotation, e.g. north).
    */
@@ -645,6 +651,25 @@ function findActorTemplatePlacement(
     (definition) =>
       definition.actorId === actorId && (definition.actorVariable ?? 0) === variable >>> 0,
   );
+}
+
+/**
+ * Sets (or clears) a placement's user-assigned name, returning a copy.
+ *
+ * An empty/blank name removes the custom name so the object column falls back to
+ * the definition name — that keeps the persisted JSON clean instead of storing
+ * empty strings.
+ */
+export function withName(
+  placement: SmartObjectPlacement,
+  name: string | undefined,
+): SmartObjectPlacement {
+  const cleaned = (name ?? '').trim();
+  if (!cleaned) {
+    const { name: _drop, ...rest } = placement;
+    return { ...rest };
+  }
+  return { ...placement, name: cleaned };
 }
 
 /**

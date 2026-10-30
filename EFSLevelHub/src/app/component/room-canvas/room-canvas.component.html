@@ -1,4 +1,25 @@
 <div class="flex flex-col gap-3">
+  <!--
+    Shared right-click menu (actions + submenus for object-specific choices).
+
+    Declared OUTSIDE the canvas wrapper on purpose: the wrapper is a positioned
+    element inside scrolling columns, and keeping the menu inside it made the
+    menu's full-screen backdrop clipped/stacked inside that column — clicks
+    elsewhere on the page never reached it, so it could not be dismissed. The
+    component renders itself in a fixed viewport layer.
+  -->
+  <app-canvas-context-menu
+    [open]="!!contextMenu()"
+    [fixed]="menuIsFixed()"
+    [x]="contextMenu()?.x ?? 0"
+    [y]="contextMenu()?.y ?? 0"
+    [actions]="contextActions()"
+    [choiceGroups]="contextChoiceGroups()"
+    (closed)="closeContextMenu()"
+    (actionSelected)="onContextAction($event)"
+    (choiceSelected)="onContextChoice($event)"
+  />
+
   <!-- Room canvas (editable; accepts dragged decorations) -->
   <div
     class="relative inline-block w-fit rounded-lg border border-slate-700 bg-slate-900/60 p-1"
@@ -65,17 +86,5 @@
         </svg>
       </div>
     }
-
-    <!-- Shared right-click menu (actions + submenus for object-specific choices) -->
-    <app-canvas-context-menu
-      [open]="!!contextMenu()"
-      [x]="contextMenu()?.x ?? 0"
-      [y]="contextMenu()?.y ?? 0"
-      [actions]="contextActions()"
-      [choiceGroups]="contextChoiceGroups()"
-      (closed)="closeContextMenu()"
-      (actionSelected)="onContextAction($event)"
-      (choiceSelected)="onContextChoice($event)"
-    />
   </div>
 </div>

@@ -1,6 +1,7 @@
 import { Component, EventEmitter, Input, Output, signal } from '@angular/core';
 import { MapGridComponent, RoomGridAction } from '../map-grid/map-grid.component';
 import { DropdownComponent, DropdownOption } from '../dropdown/dropdown.component';
+import { ObjectColumnComponent, ObjectRow } from '../object-column/object-column.component';
 import { StageData } from '../../entity/fsalib.entity';
 import { BackgroundMusic } from '../../service/background-music.service';
 
@@ -37,7 +38,7 @@ import { BackgroundMusic } from '../../service/background-music.service';
  */
 @Component({
   selector: 'app-system-column',
-  imports: [MapGridComponent, DropdownComponent],
+  imports: [MapGridComponent, DropdownComponent, ObjectColumnComponent],
   templateUrl: './system-column.component.html',
   host: { class: 'block h-full w-full' },
 })
@@ -57,6 +58,28 @@ export class SystemColumnComponent {
   @Input() musicName = '';
   /** Whether the track list is still loading. */
   @Input() tracksLoading = false;
+
+  /** Every object of the room (smart objects + legacy actors), for the object list. */
+  @Input() objectRows: ObjectRow[] = [];
+  /** Keys of the objects hidden from the room view. */
+  @Input() hiddenObjects: ReadonlySet<string> = new Set<string>();
+  /** Key of the object selected in the list (highlighted on the canvas). */
+  @Input() selectedObject: string | null = null;
+
+  /** Emits the key of an object whose visibility should be toggled. */
+  @Output() objectVisibilityToggled = new EventEmitter<string>();
+  /** Emits whether every object should be shown (`true`) or hidden (`false`). */
+  @Output() objectAllVisibilitySet = new EventEmitter<boolean>();
+  /** Emits a row selected with a left click. */
+  @Output() objectSelected = new EventEmitter<ObjectRow>();
+  /** Emits a right-clicked row + the pointer position (the canvas opens its menu there). */
+  @Output() objectContextRequested = new EventEmitter<{
+    row: ObjectRow;
+    clientX: number;
+    clientY: number;
+  }>();
+  /** Emits a double-clicked row (the rename dialog opens). */
+  @Output() objectRenameRequested = new EventEmitter<ObjectRow>();
   /** Pretty-printed JSON of the room's current in-memory data (null while loading). */
   @Input() roomJson: string | null = null;
   /**

@@ -248,6 +248,172 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
     queueMicrotask(() => void this.redraw());
   }
 
+  private _hiddenObjects: ReadonlySet<string> = new Set<string>();
+  /**
+   * Keys of the objects hidden from the object column.
+   *
+   * Hidden objects are not drawn (tiles are skipped in the composite and their
+   * actors are left out) and are not hit-tested, so they cannot be grabbed by
+   * accident. They are NOT deleted: the placement data is untouched. A change
+   * repaints so hiding is immediate.
+   */
+  @Input()
+  get hiddenObjects(): ReadonlySet<string> {
+    return this._hiddenObjects;
+  }
+  set hiddenObjects(value: ReadonlySet<string>) {
+    this._hiddenObjects = value ?? new Set<string>();
+    queueMicrotask(() => void this.redraw());
+  }
+
+  private _selectedObject: string | null = null;
+  /**
+   * Key of the object selected in the object column, or null.
+   *
+   * Drawn with a permanent highlight outline (like the hovered one) so picking a
+   * row in the list points at the object on the canvas — the only reliable way
+   * to tell apart objects that share a tile.
+   */
+  @Input()
+  get selectedObject(): string | null {
+    return this._selectedObject;
+  }
+  set selectedObject(value: string | null) {
+    this._selectedObject = value ?? null;
+    queueMicrotask(() => this.drawHoverOutline());
+  }
+
+  /**
+   * Key of a placement the **host** asked to target with the context menu (a
+   * right click in the object column). Lives here because the menu and its edit
+   * actions are owned by this canvas.
+   */
+  private externalContextKey: string | null = null;
+  /**
+   * Key of the placement whose row was right-clicked in the object column, so a
+   * canvas on its layer can open the context menu for it.
+   *
+   * Each stacked canvas receives this value; only the one holding the placement
+   * reacts, so the menu appears exactly once.
+   */
+  @Input()
+  get contextTargetKey(): string | null {
+    return this.externalContextKey;
+  }
+  set contextTargetKey(value: string | null) {
+    this.externalContextKey = value ?? null;
+    queueMicrotask(() => this.applyContextTarget());
+  }
+
+  /**
+   * Viewport position to place the context menu at when it was requested from
+   * the object list (null = position it on the object itself).
+   *
+   * The host passes the pointer coordinates of the right click in the list, so
+   * the menu appears **above the list** exactly where the user clicked instead
+   * of jumping onto the canvas.
+   */
+  @Input() contextTargetPointer: { clientX: number; clientY: number } | null = null;
+
+  /**
+   * Emits when the context menu this canvas owns is dismissed.
+   *
+   * The host uses it to drop its `contextTargetPointer`, which otherwise stays
+   * set and makes the NEXT menu request (even a different object) reuse a stale
+   * position.
+   */
+  @Output() contextMenuClosed = new EventEmitter<void>();
+
+  /**
+   * Emits when a context-target key has been consumed, so the host can clear it.
+   *
+   * Without this the same key lingers on the input and any later re-render of
+   * the layer stack re-applies it, re-opening the menu the user just dismissed.
+   */
+  @Output() contextTargetConsumed = new EventEmitter<void>();
+
+  /**
+   * Opens the context menu for a placement of this canvas (used when the user
+   * right-clicks its row in the object list). Returns whether it was found.
+   *
+   * When the host supplies {@link contextTargetPointer} the menu is positioned
+   * at that viewport position (i.e. over the list), otherwise it is anchored on
+   * the object's own tile — converted from canvas backing-store pixels to the
+   * wrapper's CSS pixels, which is the coordinate space the menu positions
+   * itself in (see {@link onCanvasContextMenu}).
+   */
+  openContextFor(placement: SmartObjectPlacement): boolean {
+    const definition = findSmartObjectDefinition(placement.id);
+    const canvas = this.canvasRef()?.nativeElement;
+    if (!definition) {
+      return false;
+    }
+    const pointer = this.contextTargetPointer;
+    if (pointer) {
+      this.menuFixed = true;
+      this.menuPosition = { x: pointer.clientX + 2, y: pointer.clientY + 2 };
+    } else {
+      if (!canvas) {
+        return false;
+      }
+      const box = this.boxOf(placement, definition);
+      const scaleX = this.canvasStyleSize.width / (canvas.width || 1);
+      const scaleY = this.canvasStyleSize.height / (canvas.height || 1);
+      // The canvas sits 4px inside the wrapper (its `p-1` padding).
+      this.menuFixed = false;
+      this.menuPosition = { x: Math.round(box.x * scaleX) + 4, y: Math.round(box.y * scaleY) + 4 };
+    }
+    this.contextMenu.set({
+      placement,
+      x: this.menuPosition.x,
+      y: this.menuPosition.y,
+    });
+    this.menuIsFixed.set(this.menuFixed);
+    this.drawHoverOutline();
+    return true;
+  }
+
+  /**
+   * Opens the context menu for the host-requested key, if it is on this layer.
+   *
+   * CRITICAL: every stacked canvas receives the SAME `smartObjects` list, so
+   * "the list contains a placement with this key" is true on all 8 of them. The
+   * placement must therefore also belong to THIS canvas's base layer — otherwise
+   * all 8 open a menu, stack 8 full-screen backdrops and the user has to click
+   * 8 times to dismiss them.
+   *
+   * The key is cleared locally once handled, so a later repaint cannot reopen a
+   * menu the user already dismissed.
+   */
+  private applyContextTarget(): void {
+    const key = this.externalContextKey;
+    // A cleared key is just the host releasing the request — never reopen.
+    if (!key) {
+      return;
+    }
+    const placement = [...this.smartObjects, ...this._legacyActors].find(
+      (entry) => placementKey(entry) === key,
+    );
+    // Only the canvas whose layer owns the placement may open the menu.
+    if (!placement || !this.onThisLayer(placement)) {
+      return;
+    }
+    this.openContextFor(placement);
+    // Consumed: forget it here and tell the host to clear its own copy.
+    this.externalContextKey = null;
+    this.contextTargetConsumed.emit();
+  }
+
+  /**
+   * Whether an object is hidden in the object column.
+   *
+   * Keyed by {@link placementKey} (id + anchor) — the same key the object list
+   * uses, so hiding survives a rename (which only changes the display name).
+   */
+  private isHidden(placement: SmartObjectPlacement): boolean {
+    return this._hiddenObjects.has(placementKey(placement));
+  }
+
   private _legacyActors: SmartObjectPlacement[] = [];
   /**
    * Actor placements that represent **pre-existing (legacy) actors** — actors
@@ -280,7 +446,7 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
     const draggingSource = this.dragging?.source ?? null;
     const actors: ActorData[] = [];
     for (const placement of [...flattenPlacements(this._smartObjects), ...this._legacyActors]) {
-      if (placement === draggingSource) {
+      if (placement === draggingSource || this.isHidden(placement)) {
         continue;
       }
       const definition = findSmartObjectDefinition(placement.id);
@@ -304,8 +470,29 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
   private legacyActorsOnLayer(): SmartObjectPlacement[] {
     return this.legacyActors.filter((placement) => {
       const definition = findSmartObjectDefinition(placement.id);
-      return definition?.baking === 'actor' && (placement.baseLayerId ?? 0) === this.layerIndex;
+      return (
+        definition?.baking === 'actor' &&
+        (placement.baseLayerId ?? 0) === this.layerIndex &&
+        !this.isHidden(placement)
+      );
     });
+  }
+
+  /**
+   * Whether a placement belongs to the layer this canvas draws.
+   *
+   * Actor placements read from the archive ({@link actorToPlacement}) carry the
+   * actor's `Layer` as their base layer, exactly like editor placements, so the
+   * same test covers both.
+   *
+   * IMPORTANT for context menus: every stacked canvas receives the SAME
+   * `smartObjects` list, so this is the only thing that decides which canvas is
+   * allowed to act on a placement. Opening a menu on more than one canvas
+   * stacks multiple full-screen backdrops and requires one click per layer to
+   * dismiss them.
+   */
+  private onThisLayer(placement: SmartObjectPlacement): boolean {
+    return (placement.baseLayerId ?? 0) === this.layerIndex;
   }
 
   private _groundTiles: number[] | null = null; /**
@@ -376,6 +563,13 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
     from: SmartObjectPlacement;
     to: SmartObjectPlacement;
   }>();
+
+  /**
+   * Emits the placement clicked on the canvas (any tool), so the host can select
+   * the matching row in the object column. Emits `null` when the click landed on
+   * empty space.
+   */
+  @Output() objectSelected = new EventEmitter<SmartObjectPlacement | null>();
 
   /**
    * Emits `true` when a connect drag starts, and `false` when it ends (released,
@@ -504,6 +698,17 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
     x: number;
     y: number;
   } | null>(null);
+
+  /**
+   * Whether the open context menu is positioned in viewport coordinates (it was
+   * opened from the object list) rather than relative to the canvas wrapper.
+   */
+  readonly menuIsFixed = signal(false);
+
+  /** Position of the open context menu (see {@link menuIsFixed}). */
+  private menuPosition = { x: 0, y: 0 };
+  /** Backing field for {@link menuFixed} (set while opening the menu). */
+  private menuFixed = false;
 
   /**
    * Whether the context menu's "Type" submenu is expanded. The menu lives over a
@@ -668,7 +873,7 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
   doorAtTile(tile: { x: number; y: number }): SmartObjectPlacement | null {
     for (let i = this.smartObjects.length - 1; i >= 0; i--) {
       const placement = this.smartObjects[i];
-      if ((placement.baseLayerId ?? 0) !== this.layerIndex) {
+      if ((placement.baseLayerId ?? 0) !== this.layerIndex || this.isHidden(placement)) {
         continue;
       }
       const definition = findSmartObjectDefinition(placement.id);
@@ -762,7 +967,8 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
     // footprint tiles are skipped in the composite so the tiles underneath (and
     // any overlapped object) show instead of its old sprite. The room layers
     // themselves stay untouched, so a cancel/drop can never lose tiles.
-    const dragGhost = this.dragGhostSet();
+    // Objects hidden from the object column are skipped the same way.
+    const dragGhost = mergeSkip(this.dragGhostSet(), this.hiddenObjectSet(this.layerIndex));
     renderer.drawSingleLayer(
       buffer,
       this.index,
@@ -771,7 +977,10 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
       dragGhost.size > 0 ? mergeSkip(skip, dragGhost) : skip,
     );
     if (this.topLayer) {
-      const ghostTop = this.dragGhostSet(this.layerIndex + 8);
+      const ghostTop = mergeSkip(
+        this.dragGhostSet(this.layerIndex + 8),
+        this.hiddenObjectSet(this.layerIndex + 8),
+      );
       renderer.drawSingleLayer(
         buffer,
         this.index,
@@ -805,6 +1014,49 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
     // The overlay shares the canvas with the actor markers + hover outline, so
     // repaint it whenever the room is redrawn.
     this.drawHoverOutline();
+  }
+
+  /**
+   * Tile offsets (row*32+col) occupied on `layerIndex` by objects hidden in the
+   * object column, so their stamped tiles are skipped in the render.
+   *
+   * Actor-baked objects bake no tiles (they are excluded from {@link actors}),
+   * so only tile-baked footprints need hiding.
+   */
+  private hiddenObjectSet(layerIndex: number): Set<number> {
+    const hidden = new Set<number>();
+    if (this._hiddenObjects.size === 0) {
+      return hidden;
+    }
+    for (const placement of flattenPlacements(this._smartObjects)) {
+      if (!this.isHidden(placement)) {
+        continue;
+      }
+      const definition = findSmartObjectDefinition(placement.id);
+      if (!definition || definition.baking === 'actor') {
+        continue;
+      }
+      const variant = smartObjectVariant(
+        definition,
+        placement.variantIndex ?? 0,
+        placement.subTypeIndex ?? 0,
+      );
+      const offsets =
+        layerIndex === (placement.baseLayerId ?? 0) + 8
+          ? variant.topLayerTiles
+          : layerIndex === (placement.baseLayerId ?? 0)
+            ? variant.bottomLayerTiles
+            : [];
+      for (const offset of offsets) {
+        const row = placement.anchorRow + offset.dRow;
+        const col = placement.anchorCol + offset.dCol;
+        if (row < 0 || row >= DIMENSION || col < 0 || col >= DIMENSION) {
+          continue;
+        }
+        hidden.add(row * DIMENSION + col);
+      }
+    }
+    return hidden;
   }
 
   /**
@@ -888,7 +1140,7 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
     // rather than the recorded refs, which can drift after a rotate/move.
     const owned = new Set<number>();
     for (const placement of flattenPlacements(this.smartObjects)) {
-      if (placement.baseLayerId !== this.groundBaseLayerId) {
+      if (placement.baseLayerId !== this.groundBaseLayerId || this.isHidden(placement)) {
         continue;
       }
       const definition = findSmartObjectDefinition(placement.id);
@@ -928,7 +1180,19 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
     if (this.connectingFrom()) {
       return;
     }
+    // Interacting with the canvas dismisses any open context menu. The menu's
+    // backdrop normally handles this, but it is skipped when the menu was opened
+    // from the object list (the pointer never reached the backdrop).
+    if (this.contextMenu()) {
+      this.closeContextMenu();
+    }
     (event.target as HTMLElement).setPointerCapture(event.pointerId);
+
+    // Tell the host what was clicked so the object column can highlight it.
+    // Emitted before the grab/paint so the highlight is already in place when
+    // the object starts moving.
+    const clickedTile = this.tileAt(event);
+    this.objectSelected.emit(clickedTile ? this.findPlacementAt(clickedTile) : null);
 
     if (this.tool === 'hand') {
       this.grabSmartObject(event);
@@ -1021,14 +1285,25 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
     const y = rect ? event.clientY - rect.top : event.offsetY;
 
     const placement = tile ? this.findPlacementAt(tile) : null;
+    // A right click on the canvas always positions the menu inside the wrapper,
+    // even if it was previously opened from the object list.
+    this.menuIsFixed.set(false);
     this.contextMenu.set(placement ? { placement, x, y } : null);
     this.drawHoverOutline();
   }
 
   /** Closes the context menu. */
   closeContextMenu(): void {
+    const wasOpen = this.contextMenu() !== null;
+    this.menuIsFixed.set(false);
     this.contextMenu.set(null);
     this.drawHoverOutline();
+    // Tell the host to forget the pointer position it supplied for this menu,
+    // so a later menu (opened by right-clicking the canvas) is not positioned
+    // over the object list.
+    if (wasOpen) {
+      this.contextMenuClosed.emit();
+    }
   }
 
   /** Deletes the smart object targeted by the context menu. */
@@ -2215,15 +2490,17 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
   private findPlacementAt(tile: { x: number; y: number }): SmartObjectPlacement | null {
     // Legacy actors sit on top (they are drawn over the tiles) and are interactive
     // like any other actor, so they are hit-tested first.
+    // Hidden objects are not interactive: they are invisible on the canvas, so a
+    // click must reach whatever is under them instead.
     for (let i = this._legacyActors.length - 1; i >= 0; i--) {
       const placement = this._legacyActors[i];
-      if (this.hitTestPlacement(placement, tile)) {
+      if (!this.isHidden(placement) && this.hitTestPlacement(placement, tile)) {
         return placement;
       }
     }
     for (let i = this.smartObjects.length - 1; i >= 0; i--) {
       const placement = this.smartObjects[i];
-      if (this.hitTestPlacement(placement, tile)) {
+      if (!this.isHidden(placement) && this.hitTestPlacement(placement, tile)) {
         return placement;
       }
     }
@@ -2404,19 +2681,43 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
 
     // Black dotted outline for the hovered / selected placement.
     const placement = this.contextMenu()?.placement ?? this.hoveredPlacement;
-    if (!placement) {
-      return;
+    if (placement) {
+      this.strokeSelected(ctx, placement);
     }
+
+    // The object picked in the object column gets a permanent highlight, so
+    // objects sharing a tile can be told apart.
+    const selected = this.selectedPlacement();
+    if (selected && selected !== placement && !this.isHidden(selected)) {
+      this.strokeSelected(ctx, selected, { color: '#6366f1', dash: [4, 2] });
+    }
+  }
+
+  /** The placement selected in the object column, if it is on this layer. */
+  private selectedPlacement(): SmartObjectPlacement | null {
+    const key = this._selectedObject;
+    if (!key) {
+      return null;
+    }
+    const placement = [...this.smartObjects, ...this._legacyActors].find(
+      (entry) => placementKey(entry) === key,
+    );
+    return placement && this.onThisLayer(placement) ? placement : null;
+  }
+
+  /** Strokes the highlight outline of a placement (actor box or tile footprint). */
+  private strokeSelected(
+    ctx: CanvasRenderingContext2D,
+    placement: SmartObjectPlacement,
+    style: { color: string; dash: number[] } = { color: '#000', dash: [3, 3] },
+  ): void {
     const definition = findSmartObjectDefinition(placement.id);
     if (!definition) {
       return;
     }
     if (definition.baking === 'actor') {
       const box = this.actorBox(placement);
-      this.strokeOutline(ctx, box.x, box.y, box.width, box.height, {
-        color: '#000',
-        dash: [3, 3],
-      });
+      this.strokeOutline(ctx, box.x, box.y, box.width, box.height, style);
       return;
     }
     const bounds = smartObjectBounds(
@@ -2430,6 +2731,7 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
       (placement.anchorRow + bounds.minRow) * TILE_SIZE,
       bounds.cols * TILE_SIZE,
       bounds.rows * TILE_SIZE,
+      style,
     );
   }
 

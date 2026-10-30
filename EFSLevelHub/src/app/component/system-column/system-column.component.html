@@ -46,6 +46,18 @@
       (valueChange)="musicChange.emit($event)"
     />
 
+    <!-- Objects: every smart object + legacy actor of the room (hide / select / rename) -->
+    <app-object-column
+      [rows]="objectRows"
+      [hidden]="hiddenObjects"
+      [selected]="selectedObject"
+      (visibilityToggled)="objectVisibilityToggled.emit($event)"
+      (allVisibilitySet)="objectAllVisibilitySet.emit($event)"
+      (selectedRow)="objectSelected.emit($event)"
+      (contextRequested)="objectContextRequested.emit($event)"
+      (renameRequested)="objectRenameRequested.emit($event)"
+    />
+
     <!-- Debug (collapsible): layer options + the live room JSON. Hidden unless enabled in Settings. -->
     @if (showDebug) {
       <div class="rounded-lg border border-slate-800">

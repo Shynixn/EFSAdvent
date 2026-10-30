@@ -1,16 +1,26 @@
 @if (open) {
-  <!-- Backdrop: closes the menu on any outside interaction. -->
-  <div
-    class="fixed inset-0 z-10"
-    (pointerdown)="close()"
-    (contextmenu)="$event.preventDefault(); close()"
-  ></div>
+  <!--
+    The menu is rendered in a FIXED, viewport-sized layer (not inside the canvas
+    wrapper) so the backdrop always covers the whole screen and reliably catches
+    the dismissing clicks. When it lived inside the canvas wrapper it was clipped
+    by the scrolling column containers, which left parts of the screen
+    unclickable and made the menu appear unstoppable.
+  -->
+  <div class="fixed inset-0 z-[100]">
+    <!-- Backdrop: closes the menu on any outside interaction. -->
+    <div
+      class="absolute inset-0 z-10"
+      (pointerdown)="close($event)"
+      (contextmenu)="$event.preventDefault(); close($event)"
+    ></div>
 
-  <div
-    class="absolute z-20 min-w-32 overflow-hidden rounded-lg border border-slate-700 bg-slate-800 py-1 text-sm shadow-lg"
-    [style.left.px]="x"
-    [style.top.px]="y"
-  >
+    <div
+      class="absolute z-20 min-w-32 overflow-hidden rounded-lg border border-slate-700 bg-slate-800 py-1 text-sm shadow-lg"
+      [style.left.px]="fixed ? x : anchorX"
+      [style.top.px]="fixed ? y : anchorY"
+      (pointerdown)="$event.stopPropagation()"
+      (contextmenu)="$event.preventDefault(); $event.stopPropagation()"
+    >
     <!-- Plain actions -->
     @for (action of actions; track action.id) {
       <button
@@ -128,5 +138,6 @@
         }
       </div>
     }
+  </div>
   </div>
 }
