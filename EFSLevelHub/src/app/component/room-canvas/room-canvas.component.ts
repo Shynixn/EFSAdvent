@@ -2685,11 +2685,12 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
       this.strokeSelected(ctx, placement);
     }
 
-    // The object picked in the object column gets a permanent highlight, so
-    // objects sharing a tile can be told apart.
+    // The object picked in the object column gets the same permanent highlight
+    // as hovering it directly on the canvas, so both selections are visually
+    // identical (objects sharing a tile can still be told apart).
     const selected = this.selectedPlacement();
     if (selected && selected !== placement && !this.isHidden(selected)) {
-      this.strokeSelected(ctx, selected, { color: '#6366f1', dash: [4, 2] });
+      this.strokeSelected(ctx, selected);
     }
   }
 
