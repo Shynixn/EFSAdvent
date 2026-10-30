@@ -81,7 +81,8 @@ export interface ContextMenuChoiceGroup {
 @Component({
   selector: 'app-canvas-context-menu',
   templateUrl: './canvas-context-menu.component.html',
-  host: { class: 'contents' },})
+  host: { class: 'contents' },
+})
 export class CanvasContextMenuComponent {
   /** This component's host element (used to resolve the positioned wrapper). */
   private readonly elementRef = inject(ElementRef<HTMLElement>);

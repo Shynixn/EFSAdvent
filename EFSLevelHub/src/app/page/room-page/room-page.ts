@@ -21,10 +21,7 @@ import {
 } from '../../component/room-canvas/room-canvas.component';
 import { ThemePickerComponent } from '../../component/theme-picker/theme-picker.component';
 import { LoadingOverlayComponent } from '../../component/loading-overlay/loading-overlay.component';
-import {
-  ObjectRow,
-  buildObjectRows,
-} from '../../component/object-column/object-column.component';
+import { ObjectRow, buildObjectRows } from '../../component/object-column/object-column.component';
 import { ObjectRenameModalComponent } from '../../component/object-column/object-rename-modal.component';
 import { StageService } from '../../service/stage.service';
 import { FSALibService } from '../../service/fsalib.service';
@@ -854,9 +851,7 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
     }
     const cleaned = name.trim();
     const apply = (list: SmartObjectPlacement[]): SmartObjectPlacement[] =>
-      list.map((entry) =>
-        entry === target ? withName(entry, cleaned) : entry,
-      );
+      list.map((entry) => (entry === target ? withName(entry, cleaned) : entry));
     this.smartObjects.update(apply);
     this.legacyActors.update(apply);
     this.stageEditor.setDirty(this.stageId(), true);

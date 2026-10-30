@@ -123,7 +123,8 @@ export class ObjectColumnComponent {
 
   /** Whether every row is currently hidden (drives the "all" eye icon). */
   readonly allHidden = computed(
-    () => this.rowsSignal().length > 0 && this.rowsSignal().every((row) => this.hidden.has(row.key)),
+    () =>
+      this.rowsSignal().length > 0 && this.rowsSignal().every((row) => this.hidden.has(row.key)),
   );
 
   /** Toggles the panel body. */
