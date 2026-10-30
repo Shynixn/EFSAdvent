@@ -1044,11 +1044,22 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
   /**
    * Records a placement whose recorded data changed without moving it — used
    * when connecting/disconnecting two doors (which adds/removes a child `WARP`
-   * actor). The child is an actor, so the actor list needs re-serializing.
+   * actor) and when SCALING a decoration (which changes its tile footprint).
+   *
+   * Both cases can touch tiles, so the placement's layer pair is marked dirty as
+   * well; actor rooms are marked too, which is a no-op for tile-baked objects.
    */
   onPlacementUpdated(event: { from: SmartObjectPlacement; to: SmartObjectPlacement }): void {
     this.stageEditor.setDirty(this.stageId(), true);
     this.stageRoom.markActorsDirty(this.roomIndex());
+    const definition = findSmartObjectDefinition(event.to.id);
+    if (definition?.baking !== 'actor') {
+      // The footprint changed, so both the base and its paired top layer must be
+      // re-serialized — otherwise a grown/shrunk object keeps its old tiles.
+      const base = event.to.baseLayerId ?? 0;
+      this.stageRoom.markLayerDirty(this.roomIndex(), base);
+      this.stageRoom.markLayerDirty(this.roomIndex(), base + 8);
+    }
     this.replacePlacement(event.from, event.to);
   }
 
@@ -1585,7 +1596,12 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
         if (!definition) {
           continue;
         }
-        const variant = smartObjectVariant(definition, placement.variantIndex ?? 0);
+        const variant = smartObjectVariant(
+          definition,
+          placement.variantIndex ?? 0,
+          placement.subTypeIndex ?? 0,
+          placement.scale,
+        );
         for (const offset of variant.bottomLayerTiles) {
           const row = placement.anchorRow + offset.dRow;
           const col = placement.anchorCol + offset.dCol;

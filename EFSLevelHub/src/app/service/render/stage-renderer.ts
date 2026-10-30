@@ -15,6 +15,7 @@ import {
   actorVariants,
 } from '../../entity/actor-definition.entity';
 import { SmartObjectDefinition, renderSmartObjectPreview } from '../../entity/smartobject.entity';
+import type { SmartObjectScale } from '../../entity/contract/scalable.entity';
 import { BtiTexture, parseBti } from './bti-texture';
 import { decodeTexture } from './bti-image';
 import {
@@ -746,12 +747,14 @@ export class StageRenderer {
     gba = false,
     variantIndex = 0,
     subTypeIndex = 0,
+    scale?: SmartObjectScale,
   ): ImageBuffer {
     return renderSmartObjectPreview(
       definition,
       (target, px, py, tileId) => this.drawTilesetTile(target, px, py, tileId, gba),
       variantIndex,
       subTypeIndex,
+      scale,
     );
   }
 

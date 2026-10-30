@@ -11,6 +11,7 @@
  */
 
 import { IRotateable } from './contract/rotateable.entity';
+import type { IScalable } from './contract/scalable.entity';
 import type { IPlaceable } from './contract/placeable.entity';
 
 /**
@@ -98,6 +99,13 @@ export interface SmartObjectDefinition {
    * and the canvas hides the "Rotate" action.
    */
   rotation?: IRotateable;
+  /**
+   * Scaling behaviour (`IScalable`), when this object can be grown by repeating
+   * its edge tiles in a direction (context menu → **Scale**).
+   *
+   * Objects without it hide the Scale submenu.
+   */
+  scalable?: IScalable;
   /**
    * The variants (rotation styles) of this object. Single-entry for objects
    * that do not rotate (e.g. a tree); four entries for doors (one per facing).
@@ -893,6 +901,9 @@ export const SMART_OBJECT_DEFINITIONS: SmartObjectDefinition[] = [
     baking: 'tile',
     name: 'Breakable Block',
     section: 'Decorations',
+    // A single tile that can be GROWN in any direction from the context menu:
+    // the tile is repeated, so a whole wall is one smart object instead of many.
+    scalable: {},
     set: [
       {
         // A single breakable-block tile stamped on the base (ground) layer.

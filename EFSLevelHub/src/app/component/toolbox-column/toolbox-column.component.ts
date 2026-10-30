@@ -826,10 +826,7 @@ export class ToolboxColumnComponent implements AfterViewInit {
     if (!actors) {
       return;
     }
-    this.itemObjects = [
-      forceGemDefinition(actors[FORCE_GEM_ACTOR_ID]),
-      ...itemDefinitions(actors),
-    ];
+    this.itemObjects = [forceGemDefinition(actors[FORCE_GEM_ACTOR_ID]), ...itemDefinitions(actors)];
     // Migrate the legacy EFSAdvent presets into real smart objects (their
     // context menus come from the catalog). The raw presets stay visible under
     // "Non smart objects" in the Debug tab regardless.

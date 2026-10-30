@@ -44,12 +44,19 @@ export interface ContextMenuChoiceGroup {
    * - `flags` — `selected` is a BITFIELD; each entry toggles its own bit and the
    *   menu stays open so several can be switched on in a row.
    * - `number` — a `−`/`+` stepper between `min` and `max` over `selected`.
+   * - `steppers` — ONE `−`/`+` row per choice (for a set of independent counts,
+   *   e.g. the directions a scalable object can grow in).
    */
-  kind?: 'choice' | 'flags' | 'number';
+  kind?: 'choice' | 'flags' | 'number' | 'steppers';
   /** Lower bound for `kind: 'number'`. */
   min?: number;
   /** Upper bound for `kind: 'number'`. */
   max?: number;
+  /**
+   * Current count of each row for `kind: 'steppers'`, parallel to
+   * {@link choices}. Supplied by the host so the menu always shows live values.
+   */
+  values?: number[];
 }
 
 /**
@@ -211,5 +218,23 @@ export class CanvasContextMenuComponent {
     if (next !== group.selected) {
       this.choiceSelected.emit({ group: group.id, value: next });
     }
+  }
+
+  /**
+   * Steps ONE row of a `steppers` group and keeps the menu open.
+   *
+   * The emitted group id is `<group>:<rowIndex>`, so the host knows which row
+   * changed and can write the new count back into its own data.
+   */
+  stepChoice(group: ContextMenuChoiceGroup, choice: ContextMenuChoice, delta: number): void {
+    const index = group.choices.indexOf(choice);
+    const min = group.min ?? 0;
+    const max = group.max ?? 31;
+    const current = group.values?.[index] ?? 0;
+    const next = Math.min(max, Math.max(min, current + delta));
+    if (next === current) {
+      return;
+    }
+    this.choiceSelected.emit({ group: `${group.id}:${index}`, value: next });
   }
 }

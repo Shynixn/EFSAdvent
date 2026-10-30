@@ -24,6 +24,14 @@ import { GOAL_DEFINITION } from './smartobject/goal.entity';
 import { FORCE_GEM_DEFINITION } from './smartobject/force-gem.entity';
 import { ITEM_DEFINITIONS } from './smartobject/items.entity';
 import { withDoorLifecycle } from './contract/placeable-hooks.entity';
+import {
+  SmartObjectScale,
+  expandScaledTiles,
+  growScale,
+  isScaled,
+  scaleOf,
+  shrinkScale,
+} from './contract/scalable.entity';
 import { SMART_OBJECT_DEFINITIONS as ALL_SMART_OBJECT_DEFINITIONS } from './smartobject.definition';
 import {
   SmartObjectDefinition,
@@ -43,6 +51,23 @@ export {
 } from './smartobject.definition';
 export { ACTOR_TEMPLATE_SECTIONS, actorTemplatesFor } from './actor-template.entity';
 export type { ActorTemplate, ActorTemplateSection } from './actor-template.entity';
+export {
+  SCALE_DIRECTIONS,
+  SCALE_DIRECTION_LABELS,
+  canScale,
+  expandScaledTiles,
+  growScale,
+  isScaled,
+  resetScale,
+  scaleOf,
+  shrinkScale,
+} from './contract/scalable.entity';
+export type {
+  IScalable,
+  ScaleDirection,
+  ScalableSmartObjectDefinition,
+  SmartObjectScale,
+} from './contract/scalable.entity';
 export {
   PLAYER_START_ACTOR_ID,
   PLAYER_START_DEFINITION,
@@ -127,14 +152,28 @@ withDoorLifecycle(FORCE_GEM_DEFINITION);
  *
  * When the placement selects a sub-type (e.g. a door's closed/key style) the
  * sub-type's own variant list is used.
+ *
+ * When a `scale` is supplied the variant's tiles are EXPANDED by it (see
+ * {@link expandScaledTiles}), so a scaled object looks and bakes exactly like
+ * the repeated tiles it represents. Every consumer (rendering, previews,
+ * hit-testing, ground compositing, baking) goes through this function, so
+ * scaling needs no special case anywhere else.
  */
 export function smartObjectVariant(
   definition: SmartObjectDefinition,
   variantIndex = 0,
   subTypeIndex = 0,
+  scale?: SmartObjectScale,
 ): SmartObjectVariant {
   const set = variantsForSubType(definition, subTypeIndex);
-  return set[variantIndex] ?? set[0];
+  const variant = set[variantIndex] ?? set[0];
+  if (!isScaled(scale)) {
+    return variant;
+  }
+  return {
+    bottomLayerTiles: expandScaledTiles(variant.bottomLayerTiles, scale),
+    topLayerTiles: expandScaledTiles(variant.topLayerTiles, scale),
+  };
 }
 
 /** A tile coordinate recorded for a placed smart object (absolute, in-room). */
@@ -155,6 +194,14 @@ export interface SmartObjectTileRef {
 export interface SmartObjectPlacement {
   /** Definition id (see {@link SMART_OBJECT_DEFINITIONS}). */
   id: string;
+  /**
+   * Growth of a scalable object, per direction, in tiles.
+   *
+   * A scaled object stays ONE placement: the growth repeats its edge tiles.
+   * Undefined until the user picks a direction in the context menu's **Scale**
+   * submenu, so untouched objects keep a clean record.
+   */
+  scale?: SmartObjectScale;
   /**
    * User-assigned name for this placement (the object column's rename action).
    * Undefined until renamed; the object column then falls back to the
@@ -282,8 +329,9 @@ export function applySmartObject(
   variantIndex = 0,
   subTypeIndex = 0,
   actorVariable?: number,
+  scale?: SmartObjectScale,
 ): SmartObjectPlacement {
-  const variant = smartObjectVariant(definition, variantIndex, subTypeIndex);
+  const variant = smartObjectVariant(definition, variantIndex, subTypeIndex, scale);
   const placement: SmartObjectPlacement = {
     id: definition.id,
     variantIndex,
@@ -293,6 +341,9 @@ export function applySmartObject(
     anchorCol,
     bottomLayerTiles: [],
     topLayerTiles: [],
+    // Growth is only recorded when the object actually is scaled, so untouched
+    // placements keep a clean stage JSON.
+    ...(isScaled(scale) ? { scale: scaleOf(scale) } : {}),
     // Actor-baked objects record the variable used; tile-baked ones leave it off.
     ...(definition.baking === 'actor'
       ? { actorVariable: actorVariable ?? definition.actorVariable ?? 0 }
@@ -823,6 +874,7 @@ export function smartObjectBounds(
   definition: SmartObjectDefinition,
   variantIndex = 0,
   subTypeIndex = 0,
+  scale?: SmartObjectScale,
 ): {
   minRow: number;
   minCol: number;
@@ -831,7 +883,7 @@ export function smartObjectBounds(
   rows: number;
   cols: number;
 } {
-  const variant = smartObjectVariant(definition, variantIndex, subTypeIndex);
+  const variant = smartObjectVariant(definition, variantIndex, subTypeIndex, scale);
   const all = [...variant.bottomLayerTiles, ...variant.topLayerTiles];
   let minRow = 0;
   let minCol = 0;
@@ -865,9 +917,10 @@ export function renderSmartObjectPreview(
   drawTile: (target: ImageBuffer, px: number, py: number, tileId: number) => void,
   variantIndex = 0,
   subTypeIndex = 0,
+  scale?: SmartObjectScale,
 ): ImageBuffer {
-  const variant = smartObjectVariant(definition, variantIndex, subTypeIndex);
-  const bounds = smartObjectBounds(definition, variantIndex, subTypeIndex);
+  const variant = smartObjectVariant(definition, variantIndex, subTypeIndex, scale);
+  const bounds = smartObjectBounds(definition, variantIndex, subTypeIndex, scale);
   const width = bounds.cols * TILE_SIZE;
   const height = bounds.rows * TILE_SIZE;
   const buffer = new ImageBuffer(width, height);

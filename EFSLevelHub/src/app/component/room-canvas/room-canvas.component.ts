@@ -36,6 +36,13 @@ import {
   SmartObjectSubType,
   SmartObjectTileOffset,
 } from '../../entity/smartobject.entity';
+import {
+  SCALE_DIRECTIONS,
+  SCALE_DIRECTION_LABELS,
+  canScale,
+  scaleOf,
+  SmartObjectScale,
+} from '../../entity/contract/scalable.entity';
 import { connectDoors, disconnectDoor, isConnected } from '../../entity/smartobject/door.entity';
 import { canRotate, nextRotation } from '../../entity/contract/rotateable.entity';
 import {
@@ -88,6 +95,9 @@ function mergeSkip(a: Set<number> | undefined, b: Set<number>): Set<number> {
   }
   return new Set([...a, ...b]);
 }
+
+/** Context-menu group id of the scalable object "Scale" submenu. */
+const SCALE_GROUP_ID = 'scale';
 
 /**
  * RoomCanvasComponent
@@ -622,6 +632,8 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
     variantIndex: number;
     /** Active sub-type index within the definition's `subTypes` (0 when none). */
     subTypeIndex: number;
+    /** Growth of the object being moved (undefined when it is not scaled). */
+    scale?: SmartObjectScale;
     /** True while the pointer is over the canvas. */
     active: boolean;
   } | null = null;
@@ -1040,6 +1052,7 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
         definition,
         placement.variantIndex ?? 0,
         placement.subTypeIndex ?? 0,
+        placement.scale,
       );
       const offsets =
         layerIndex === (placement.baseLayerId ?? 0) + 8
@@ -1112,6 +1125,7 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
       definition,
       placement.variantIndex ?? 0,
       placement.subTypeIndex ?? 0,
+      placement.scale,
     );
     const baseLayerId = placement.baseLayerId ?? 0;
     if (layerIndex === baseLayerId + 8) {
@@ -1151,6 +1165,7 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
         definition,
         placement.variantIndex ?? 0,
         placement.subTypeIndex ?? 0,
+        placement.scale,
       );
       for (const offset of variant.bottomLayerTiles) {
         const row = placement.anchorRow + offset.dRow;
@@ -1787,6 +1802,34 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
   }
 
   /**
+   * Sets the growth of a scalable object in ONE direction and re-stamps it.
+   *
+   * The placement stays a single smart object: only its `scale` record changes,
+   * and the tiles are re-composited from the (expanded) variant. The menu stays
+   * open so several directions can be grown/shrunk in one go.
+   */
+  private scaleContextPlacement(directionIndex: number, value: number): void {
+    const from = this.contextMenu()?.placement;
+    if (!from || directionIndex < 0 || directionIndex >= SCALE_DIRECTIONS.length) {
+      return;
+    }
+    const direction = SCALE_DIRECTIONS[directionIndex];
+    const nextScale = { ...scaleOf(from.scale), [direction]: Math.max(0, value) };
+    const scaled: SmartObjectPlacement = { ...from, scale: nextScale };
+    // `stale: [from]` tears down the OLD footprint first, which is what makes
+    // SHRINKING remove the tiles that are no longer covered.
+    const list = this.smartObjects.map((placement) => (placement === from ? scaled : placement));
+    this.redrawSmartObjects({ list, skip: [from], stale: [from] });
+    // Keep the menu open and re-point it at the updated placement so the counts
+    // it shows stay in sync and the next step builds on this one.
+    this.contextMenu.update((menu) => (menu ? { ...menu, placement: scaled } : menu));
+    this.hoveredPlacement = scaled;
+    this.placementUpdated.emit({ from, to: scaled });
+    this.drawHoverOutline();
+    void this.redraw();
+  }
+
+  /**
    * The sub-types the context-menu target offers, or `[]` when it has none (so
    * the "Type" submenu stays hidden). Only definitions with `subTypes` (e.g. the
    * merged door) list anything.
@@ -1893,6 +1936,26 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
       });
     }
 
+    // "Scale": grow or shrink a scalable decoration one tile at a time in each
+    // direction. The object stays a SINGLE placement — its edge tiles are
+    // repeated — so a wall of breakable blocks is one object instead of dozens.
+    if (placement && canScale(definition)) {
+      const scale = scaleOf(placement.scale);
+      groups.push({
+        id: SCALE_GROUP_ID,
+        label: 'Scale',
+        icon: 'M3 3h5v2H5.914l9.086 9.086V11h2v6H3v-2h5.586L3 8.414V3zm14 0v6h-2V5.914l-4.5 4.5-1.414-1.414 4.5-4.5H11V3h6z',
+        kind: 'steppers',
+        choices: SCALE_DIRECTIONS.map((direction) => ({
+          value: SCALE_DIRECTIONS.indexOf(direction),
+          label: SCALE_DIRECTION_LABELS[direction],
+        })),
+        values: SCALE_DIRECTIONS.map((direction) => scale[direction]),
+        selected: null,
+        max: 31,
+      });
+    }
+
     return groups;
   }
 
@@ -1964,6 +2027,12 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
 
   /** Dispatches a submenu choice from the shared context menu. */
   onContextChoice(event: { group: string; value: number }): void {
+    // The Scale steppers report `<group>:<directionIndex>`, one row each.
+    if (event.group.startsWith(`${SCALE_GROUP_ID}:`)) {
+      const directionIndex = Number(event.group.slice(SCALE_GROUP_ID.length + 1));
+      this.scaleContextPlacement(directionIndex, event.value);
+      return;
+    }
     // A definition MAY have both a sub-type list (group id `type`) and a
     // variable-backed field also called `Type` (e.g. AMOS). Resolve by looking up
     // the actual field first, so the field always wins when it exists.
@@ -2100,6 +2169,7 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
         definition,
         placement.variantIndex ?? 0,
         placement.subTypeIndex ?? 0,
+        placement.scale,
       );
       const add = (layerIndex: number, offsets: SmartObjectTileOffset[]): void => {
         let set = claimed.get(layerIndex);
@@ -2133,6 +2203,7 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
         definition,
         placement.variantIndex ?? 0,
         placement.subTypeIndex ?? 0,
+        placement.scale,
       );
       const clear = (layerIndex: number, offsets: SmartObjectTileOffset[]): void => {
         const layer = room.Layers[layerIndex];
@@ -2172,6 +2243,7 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
         placement.subTypeIndex ?? 0,
         // Preserve user-edited actor fields (player start colour/state/facing).
         placement.actorVariable,
+        placement.scale,
       );
     }
   }
@@ -2361,6 +2433,7 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
       anchorCol: placement.anchorCol,
       variantIndex: placement.variantIndex ?? 0,
       subTypeIndex: placement.subTypeIndex ?? 0,
+      scale: placement.scale,
       active: true,
     };
     void this.redraw();
@@ -2411,6 +2484,7 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
         otherDefinition,
         placement.variantIndex ?? 0,
         placement.subTypeIndex ?? 0,
+        placement.scale,
       );
       const add = (layerIndex: number, offsets: SmartObjectTileOffset[]): void => {
         let set = claimed.get(layerIndex);
@@ -2434,7 +2508,7 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
     // Tear down the object's OLD footprint (the tiles actually on the layers —
     // derived from the placement's RECORDED anchor/variant, not the target) but
     // keep any tile another placement claims.
-    const oldVariant = smartObjectVariant(definition, variantIndex, subTypeIndex);
+    const oldVariant = smartObjectVariant(definition, variantIndex, subTypeIndex, source.scale);
     const clear = (layerIndex: number, offsets: SmartObjectTileOffset[]): void => {
       const layer = room.Layers[layerIndex];
       if (!layer) {
@@ -2471,6 +2545,7 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
         placement.subTypeIndex ?? 0,
         // Keep any user-edited actor fields (player start colour/state/facing).
         placement.actorVariable,
+        placement.scale,
       );
     }
     return applySmartObject(
@@ -2483,6 +2558,7 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
       subTypeIndex,
       // The moved object's own variable, not the definition default.
       source.actorVariable,
+      source.scale,
     );
   }
 
@@ -2537,6 +2613,7 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
       definition,
       placement.variantIndex ?? 0,
       placement.subTypeIndex ?? 0,
+      placement.scale,
     );
     return (
       tile.y >= placement.anchorRow + bounds.minRow &&
@@ -2725,6 +2802,7 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
       definition,
       placement.variantIndex ?? 0,
       placement.subTypeIndex ?? 0,
+      placement.scale,
     );
     this.strokeOutline(
       ctx,
@@ -2918,6 +2996,7 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
       dragging.definition,
       dragging.variantIndex,
       dragging.subTypeIndex,
+      dragging.scale,
     );
     const originX = (dragging.anchorCol + bounds.minCol) * TILE_SIZE;
     const originY = (dragging.anchorRow + bounds.minRow) * TILE_SIZE;
@@ -2928,6 +3007,7 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
       this.gba,
       dragging.variantIndex,
       dragging.subTypeIndex,
+      dragging.scale,
     );
     const image = new ImageData(new Uint8ClampedArray(buffer.pixels), buffer.width, buffer.height);
     ctx.globalAlpha = 0.5;

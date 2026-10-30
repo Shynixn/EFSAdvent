@@ -102,6 +102,38 @@
                     </button>
                   </div>
                 }
+                @case ('steppers') {
+                  <!--
+                    Independent −/+ rows, one per choice (e.g. Scale → North /
+                    South / West / East). The menu stays open, and the emitted
+                    value is the choice's own count.
+                  -->
+                  @for (choice of group.choices; track choice.value; let i = $index) {
+                    <div class="flex items-center gap-2 px-2 py-1">
+                      <span class="flex-1 truncate text-slate-200">{{ choice.label }}</span>
+                      <button
+                        type="button"
+                        (click)="stepChoice(group, choice, -1)"
+                        class="flex h-5 w-5 cursor-pointer items-center justify-center rounded border border-slate-600 text-slate-200 transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+                        [disabled]="(group.values?.[i] ?? 0) <= 0"
+                        [attr.aria-label]="'Decrease ' + choice.label"
+                      >
+                        −
+                      </button>
+                      <span class="min-w-6 text-center font-mono text-slate-100">{{
+                        group.values?.[i] ?? 0
+                      }}</span>
+                      <button
+                        type="button"
+                        (click)="stepChoice(group, choice, 1)"
+                        class="flex h-5 w-5 cursor-pointer items-center justify-center rounded border border-slate-600 text-slate-200 transition hover:bg-slate-700"
+                        [attr.aria-label]="'Increase ' + choice.label"
+                      >
+                        +
+                      </button>
+                    </div>
+                  }
+                }
                 @case ('flags') {
                   <!-- Bitfield: each entry toggles its own bit, menu stays open. -->
                   @for (choice of group.choices; track choice.value) {
