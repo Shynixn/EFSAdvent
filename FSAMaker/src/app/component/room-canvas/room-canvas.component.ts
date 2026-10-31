@@ -2902,7 +2902,20 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
     if (!definition) {
       return null;
     }
-    if (definition.baking === 'actor') {
+    // Objects that STAMP tiles are framed by those tiles, whatever their baking
+    // mode. `baking: 'actor'` means "also places an actor", not "has no tiles":
+    // the floor switch is actor-baked but draws itself with tile 18 and `SWTH`
+    // has no sprite at all, so an actor-sprite box would be the 16×16 fallback
+    // shifted half a tile up-left — misaligned with the drawn tile.
+    const variant = smartObjectVariant(
+      definition,
+      placement.variantIndex ?? 0,
+      placement.subTypeIndex ?? 0,
+      placement.scale,
+    );
+    const stampsTiles =
+      variant.bottomLayerTiles.length > 0 || variant.topLayerTiles.length > 0;
+    if (definition.baking === 'actor' && !stampsTiles) {
       return this.actorBox(placement);
     }
     const bounds = smartObjectBounds(
