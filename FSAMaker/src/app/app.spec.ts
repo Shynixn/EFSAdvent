@@ -31,7 +31,7 @@ describe('LevelExplorerPage', () => {
     const fixture = TestBed.createComponent(LevelExplorerPage);
     fixture.detectChanges();
     const compiled = fixture.nativeElement as HTMLElement;
-    expect(compiled.querySelector('h1')?.textContent).toContain('Level Explorer');
+    expect(compiled.querySelector('h1')?.textContent).toContain('FSA Maker');
   });
 
   it('should render example level cards', () => {

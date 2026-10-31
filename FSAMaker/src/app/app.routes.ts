@@ -7,13 +7,13 @@ export const routes: Routes = [
   {
     path: '',
     component: LevelExplorerPage,
-    title: 'Level Explorer',
+    title: 'FSA Maker',
     canActivate: [requiresGameFilesGuard],
   },
   {
     path: 'level-explorer',
     component: LevelExplorerPage,
-    title: 'Level Explorer',
+    title: 'FSA Maker',
     canActivate: [requiresGameFilesGuard],
   },
   {
