@@ -2922,7 +2922,7 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
     );
     const stampsTiles = variant.bottomLayerTiles.length > 0 || variant.topLayerTiles.length > 0;
     if (definition.baking === 'actor' && !stampsTiles) {
-      return this.actorBox(placement);
+      return this.withMinimumSelectionSize(this.actorBox(placement));
     }
     const bounds = smartObjectBounds(
       definition,
@@ -2930,12 +2930,55 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
       placement.subTypeIndex ?? 0,
       placement.scale,
     );
-    return {
+    return this.withMinimumSelectionSize({
       x: (placement.anchorCol + bounds.minCol) * TILE_SIZE,
       y: (placement.anchorRow + bounds.minRow) * TILE_SIZE,
       width: bounds.cols * TILE_SIZE,
       height: bounds.rows * TILE_SIZE,
-    };
+    });
+  }
+
+  /**
+   * Smallest selection box, in TILES. A tiny sprite (a rupee, a key) otherwise
+   * gets a border smaller than one tile, which is nearly impossible to
+   * right-click or to drag an activation line onto.
+   */
+  private static readonly MIN_SELECTION_TILES = 2;
+
+  /**
+   * Grows a selection box to at least
+   * {@link MIN_SELECTION_TILES}×{@link MIN_SELECTION_TILES} tiles, staying
+   * centred on its original rectangle and snapped to the tile grid.
+   *
+   * Snapping keeps the dotted border on tile boundaries, so the clickable area
+   * always lines up with whole cells instead of slicing tiles in half.
+   */
+  private withMinimumSelectionSize(box: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }): { x: number; y: number; width: number; height: number } {
+    const minPx = RoomCanvasComponent.MIN_SELECTION_TILES * TILE_SIZE;
+    if (box.width >= minPx && box.height >= minPx) {
+      return box;
+    }
+    // Work in whole tiles: expand around the original centre, then clamp so the
+    // box never shrinks back below the minimum after snapping.
+    const cols = Math.max(RoomCanvasComponent.MIN_SELECTION_TILES, Math.ceil(box.width / TILE_SIZE));
+    const rows = Math.max(
+      RoomCanvasComponent.MIN_SELECTION_TILES,
+      Math.ceil(box.height / TILE_SIZE),
+    );
+    const centreX = box.x + box.width / 2;
+    const centreY = box.y + box.height / 2;
+    let x = Math.round((centreX - (cols * TILE_SIZE) / 2) / TILE_SIZE) * TILE_SIZE;
+    let y = Math.round((centreY - (rows * TILE_SIZE) / 2) / TILE_SIZE) * TILE_SIZE;
+    // Keep the enlarged box inside the room, so it stays drawable/clickable.
+    const roomPx = DIMENSION * TILE_SIZE;
+    x = Math.max(0, Math.min(x, roomPx - cols * TILE_SIZE));
+    y = Math.max(0, Math.min(y, roomPx - rows * TILE_SIZE));
+    return { x, y, width: cols * TILE_SIZE, height: rows * TILE_SIZE };
   }
 
   /** Strokes the highlight outline of a placement using {@link selectionBox}. */
