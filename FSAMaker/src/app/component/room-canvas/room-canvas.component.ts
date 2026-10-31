@@ -1041,14 +1041,24 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
   }
 
   /**
-   * Draws the editor-only scenery an actor-baked placement carries in
-   * {@link SmartObjectVariant.previewTiles} (e.g. the `Item pedestal` tile under
-   * an Item Stand) onto `buffer`, before the actor sprites are composited.
+   * Draws the tiles an ACTOR-baked placement contributes to the canvas before
+   * the actor sprites are composited:
    *
-   * These tiles are never baked into the room: they exist only so a placed actor
-   * does not look like it is floating. Only placements on the canvas's own base
-   * layer are drawn, and hidden/dragged placements are skipped so hide and drag
-   * ghosting behave exactly as they do for tile-baked objects.
+   * - `previewTiles` — editor-only scenery (the item pedestal under an Item
+   *   Stand). Never written to the room.
+   * - `bottomLayerTiles` / `topLayerTiles` — the object's REAL baked tiles, for
+   *   definitions that are actor-baked yet draw themselves with tiles (the
+   *   floor switch: `SWTH` has no sprite, tile 18 is its graphics).
+   *
+   * The second case must be drawn HERE rather than relying on the room layer:
+   * the tiles are stamped when the object is placed, but the room layers are
+   * rebuilt from the archive on reload, so a recorded switch would otherwise be
+   * invisible until something re-stamped it (which is why clicking made it
+   * appear).
+   *
+   * Only placements on the canvas's own base layer are drawn, and hidden/dragged
+   * placements are skipped so hide and drag ghosting behave exactly as they do
+   * for tile-baked objects.
    */
   private drawActorPreviewTiles(buffer: ImageBuffer, renderer: StageRenderer): void {
     const draggingSource = this.dragging?.source ?? null;
@@ -1069,14 +1079,21 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
         placement.subTypeIndex ?? 0,
         placement.scale,
       );
-      for (const offset of variant.previewTiles ?? []) {
-        const x = (placement.anchorCol + offset.dCol) * TILE_SIZE;
-        const y = (placement.anchorRow + offset.dRow) * TILE_SIZE;
-        if (x < 0 || y < 0 || x >= buffer.width || y >= buffer.height) {
-          continue;
+      const draw = (offsets: readonly SmartObjectTileOffset[]): void => {
+        for (const offset of offsets) {
+          const x = (placement.anchorCol + offset.dCol) * TILE_SIZE;
+          const y = (placement.anchorRow + offset.dRow) * TILE_SIZE;
+          if (x < 0 || y < 0 || x >= buffer.width || y >= buffer.height) {
+            continue;
+          }
+          renderer.drawTilesetTile(buffer, x, y, offset.tile, this.gba);
         }
-        renderer.drawTilesetTile(buffer, x, y, offset.tile, this.gba);
-      }
+      };
+      // Bottom layer, then the object's own top-layer tiles, then editor-only
+      // scenery (which sits underneath the actor, not above it).
+      draw(variant.bottomLayerTiles);
+      draw(variant.topLayerTiles);
+      draw(variant.previewTiles ?? []);
     }
   }
 
@@ -2953,19 +2970,22 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
    * Snapping keeps the dotted border on tile boundaries, so the clickable area
    * always lines up with whole cells instead of slicing tiles in half.
    */
-  private withMinimumSelectionSize(box: {
+  private withMinimumSelectionSize(box: { x: number; y: number; width: number; height: number }): {
     x: number;
     y: number;
     width: number;
     height: number;
-  }): { x: number; y: number; width: number; height: number } {
+  } {
     const minPx = RoomCanvasComponent.MIN_SELECTION_TILES * TILE_SIZE;
     if (box.width >= minPx && box.height >= minPx) {
       return box;
     }
     // Work in whole tiles: expand around the original centre, then clamp so the
     // box never shrinks back below the minimum after snapping.
-    const cols = Math.max(RoomCanvasComponent.MIN_SELECTION_TILES, Math.ceil(box.width / TILE_SIZE));
+    const cols = Math.max(
+      RoomCanvasComponent.MIN_SELECTION_TILES,
+      Math.ceil(box.width / TILE_SIZE),
+    );
     const rows = Math.max(
       RoomCanvasComponent.MIN_SELECTION_TILES,
       Math.ceil(box.height / TILE_SIZE),

@@ -394,6 +394,58 @@ export function clearSmartObject(
 }
 
 /**
+ * Stamps every placement's OWN tiles back into a room's layers, without adding
+ * actors or touching placement bookkeeping.
+ *
+ * A room's layers are rebuilt from the archive on load, so a recorded placement
+ * whose definition bakes tiles (the floor switch draws itself with tile 18
+ * although it is actor-baked) would otherwise have no tile in the room at all —
+ * it only appeared after an interaction re-stamped it.
+ *
+ * Only definitions that actually carry tiles are touched; pure actor objects
+ * (enemies, pickups) are skipped. Editor-only `previewTiles` are never baked.
+ *
+ * @returns The number of placements that stamped at least one tile.
+ */
+export function restampSmartObjectTiles(
+  placements: readonly SmartObjectPlacement[],
+  layers: SmartObjectTargetLayer[],
+): number {
+  let stamped = 0;
+  for (const placement of placements) {
+    const definition = findSmartObjectDefinition(placement.id);
+    if (!definition) {
+      continue;
+    }
+    const variant = smartObjectVariant(
+      definition,
+      placement.variantIndex,
+      placement.subTypeIndex,
+      placement.scale,
+    );
+    const write = (offsets: SmartObjectTileOffset[], layerIndex: number): void => {
+      const layer = layers[layerIndex];
+      if (!layer?.Tiles) {
+        return;
+      }
+      for (const offset of offsets) {
+        const row = placement.anchorRow + offset.dRow;
+        const col = placement.anchorCol + offset.dCol;
+        if (row < 0 || row >= ROOM_DIMENSION || col < 0 || col >= ROOM_DIMENSION) {
+          continue;
+        }
+        layer.Tiles[row * ROOM_DIMENSION + col] = offset.tile;
+        stamped += 1;
+      }
+    };
+    const base = placement.baseLayerId ?? 0;
+    write(variant.bottomLayerTiles, base);
+    write(variant.topLayerTiles, base + 8);
+  }
+  return stamped;
+}
+
+/**
  * Converts an actor-baked placement into an {@link ActorData} room record.
  *
  * Actors are stored in HALF-TILE coordinates. The actor's coordinate is the

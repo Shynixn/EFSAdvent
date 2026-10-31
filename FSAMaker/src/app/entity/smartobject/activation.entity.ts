@@ -161,21 +161,31 @@ export function withActivationVariable(
       next = encodeSetVariable(next, own);
     }
   }
-  // Item actors (the Force Gem) only APPEAR once their variable is set when
-  // their `Interaction Type` says so; without this the target would be visible
-  // from the start and the link would look like it does nothing.
-  if (variable !== 0 && activatable?.activatedInteractionType !== undefined) {
-    next = encodeInteractionType(next, activatable.activatedInteractionType);
+  // Item actors only APPEAR once their variable is set:
+  // - `Interaction Type` actors (the Force Gem, value 26 = "Appears, activated
+  //   by variable") switch an enum field;
+  // - flag actors (the Key, `Activated by Variable` at bit 7) set one boolean.
+  if (variable !== 0) {
+    if (activatable?.activatedFlagBit !== undefined) {
+      next = (next | (1 << activatable.activatedFlagBit)) >>> 0;
+    }
+    if (activatable?.activatedInteractionType !== undefined) {
+      next = encodeInteractionType(next, activatable.activatedInteractionType);
+    }
   }
   // Clearing the link (`variable === 0`) restores the plain behaviour, so an
-  // unlinked gem is a normal collectible again rather than a permanently
-  // hidden one. `inactiveInteractionType` wins; otherwise fall back to the
-  // value the definition is placed with.
-  if (variable === 0 && activatable?.activatedInteractionType !== undefined) {
-    next = encodeInteractionType(
-      next,
-      activatable.inactiveInteractionType ?? definition?.actorVariable ?? 0,
-    );
+  // unlinked item is a normal collectible again rather than a permanently
+  // hidden one.
+  if (variable === 0) {
+    if (activatable?.activatedFlagBit !== undefined) {
+      next = (next & ~(1 << activatable.activatedFlagBit)) >>> 0;
+    }
+    if (activatable?.activatedInteractionType !== undefined) {
+      next = encodeInteractionType(
+        next,
+        activatable.inactiveInteractionType ?? definition?.actorVariable ?? 0,
+      );
+    }
   }
   return { ...placement, actorVariable: next };
 }

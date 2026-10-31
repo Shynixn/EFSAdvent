@@ -33,7 +33,7 @@
  */
 
 import { ActorDefinition } from '../actor-definition.entity';
-import { ActivatableSmartObjectDefinition } from '../contract/activatable.entity';
+import { ActivatableSmartObjectDefinition, IActivatable } from '../contract/activatable.entity';
 import { actorFieldMenus } from './actor-fields.entity';
 
 /** Actor id of the key. */
@@ -47,6 +47,24 @@ export const ITEM_STAND_ACTOR_ID = 'SWNP';
 
 /** Stable smart-object id for the key. */
 export const KEY_ID = 'key';
+
+/**
+ * `KEY0`'s `Activated by Variable` boolean — bit 7. Setting it makes the key
+ * appear only once its `Activation Variable` (bits 27-31) is set.
+ */
+export const KEY_ACTIVATED_BY_VARIABLE_BIT = 7;
+
+/**
+ * The Key can be an activation TARGET, so a switch can make it appear.
+ *
+ * Unlike the Force Gem (which uses an `Interaction Type` enum value), the Key
+ * exposes a dedicated boolean, so the flag is used instead of overwriting an
+ * enum field.
+ */
+export const KEY_ACTIVATABLE: IActivatable = {
+  isTarget: true,
+  activatedFlagBit: KEY_ACTIVATED_BY_VARIABLE_BIT,
+};
 /** Stable smart-object id for the carrot. */
 export const CARROT_ID = 'carrot';
 /** Stable smart-object id for the force fairy. */
@@ -71,6 +89,8 @@ function itemDefinition(options: {
   definition?: ActorDefinition;
   /** Restrict the generated context-menu groups to these actor field names. */
   only?: readonly string[];
+  /** Activation role, when the item can take part in activation links. */
+  activatable?: IActivatable;
 }): ItemSmartObjectDefinition {
   return {
     id: options.id,
@@ -80,6 +100,7 @@ function itemDefinition(options: {
     actorId: options.actorId,
     // Every field starts at its catalog default (all zero) unless overridden.
     actorVariable: options.actorVariable ?? 0,
+    ...(options.activatable ? { activatable: options.activatable } : {}),
     placement: {
       fields: actorFieldMenus(options.definition, {
         skipActivation: true,
@@ -107,6 +128,11 @@ export function itemDefinitions(
       name: 'Key',
       actorId: KEY_ACTOR_ID,
       definition: actors?.[KEY_ACTOR_ID],
+      // Only `Item Type` is exposed: the Key's other catalog fields
+      // (`Appearance Type`, `Unknown Variable`) are engine plumbing, and
+      // `Activated by Variable` is driven by the activation link system below.
+      only: ['Item Type'],
+      activatable: KEY_ACTIVATABLE,
     }),
     itemDefinition({
       id: CARROT_ID,
@@ -129,6 +155,8 @@ export const KEY_DEFINITION: ItemSmartObjectDefinition = itemDefinition({
   id: KEY_ID,
   name: 'Key',
   actorId: KEY_ACTOR_ID,
+  only: ['Item Type'],
+  activatable: KEY_ACTIVATABLE,
 });
 
 /** The Carrot definition without catalog metadata. */

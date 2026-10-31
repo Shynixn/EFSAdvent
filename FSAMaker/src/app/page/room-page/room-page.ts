@@ -66,6 +66,7 @@ import {
   flattenPlacements,
   placementToActor,
   registerActorSmartObjects,
+  restampSmartObjectTiles,
   smartObjectVariant,
   withActorProperties,
   withName,
@@ -642,6 +643,20 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
       this.legacyActors.set([]);
       this.smartObjects.set([...tilePlacements, ...recordedActors]);
       this.groundLayers.set((record?.ground ?? []).map((layer) => ({ ...layer })));
+
+      // Write each recorded object's OWN tiles back into the room layers.
+      //
+      // The layers were just re-read from the archive, which only contains the
+      // tiles that were baked at the time of the last save. An actor-baked
+      // object that draws itself with tiles (the floor switch: `SWTH` has no
+      // sprite, tile 18 is its graphics) is recorded as a placement, not as a
+      // layer tile, so without this it would be invisible on load and only
+      // reappear once an interaction re-stamped it.
+      const restamped = restampSmartObjectTiles(this.smartObjects(), room.Layers);
+      if (restamped > 0) {
+        this.stageRoom.markLayerDirty(roomIndex, 0);
+        this.stageRoom.markActorsDirty(roomIndex);
+      }
 
       // Load the sprite sheets/thumbnails first, then the placable enemy catalog
       // (actor category `Enemy`), so the toolbox is fully populated — and can

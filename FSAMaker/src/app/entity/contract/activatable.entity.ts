@@ -83,6 +83,16 @@ export interface IActivatable {
    * Omit to keep the standard 22-26 location.
    */
   readonly setVariableBitOffset?: number;
+  /**
+   * Bit that must be SET for the actor to appear only when its
+   * `Activation Variable` is set.
+   *
+   * Some item actors use a dedicated boolean instead of an
+   * `Interaction Type` enum: the Key (`KEY0`) has `Activated by Variable` at
+   * **bit 7**. Prefer this over {@link activatedInteractionType} when the actor
+   * exposes such a flag, because a boolean cannot clobber neighbouring fields.
+   */
+  readonly activatedFlagBit?: number;
 }
 
 /** A definition that participates in activation links. */
