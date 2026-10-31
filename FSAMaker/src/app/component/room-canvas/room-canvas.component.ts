@@ -2913,8 +2913,7 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
       placement.subTypeIndex ?? 0,
       placement.scale,
     );
-    const stampsTiles =
-      variant.bottomLayerTiles.length > 0 || variant.topLayerTiles.length > 0;
+    const stampsTiles = variant.bottomLayerTiles.length > 0 || variant.topLayerTiles.length > 0;
     if (definition.baking === 'actor' && !stampsTiles) {
       return this.actorBox(placement);
     }
