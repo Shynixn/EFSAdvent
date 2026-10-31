@@ -71,9 +71,7 @@ export type SwitchSmartObjectDefinition = ActivatableSmartObjectDefinition;
  *   menus; without it the object still places a working `SWTH` actor, it just
  *   has no context-menu fields.
  */
-export function floorSwitchDefinition(
-  definition?: ActorDefinition,
-): SwitchSmartObjectDefinition {
+export function floorSwitchDefinition(definition?: ActorDefinition): SwitchSmartObjectDefinition {
   return {
     id: FLOOR_SWITCH_ID,
     baking: 'actor',

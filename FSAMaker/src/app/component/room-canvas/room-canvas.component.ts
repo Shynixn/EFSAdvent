@@ -2627,7 +2627,10 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
 
   /** Returns the top-most placement covering a tile, or null. */
   private findPlacementAt(tile: { x: number; y: number }): SmartObjectPlacement | null {
-    return this.findPlacementAtPoint({ x: (tile.x + 0.5) * TILE_SIZE, y: (tile.y + 0.5) * TILE_SIZE });
+    return this.findPlacementAtPoint({
+      x: (tile.x + 0.5) * TILE_SIZE,
+      y: (tile.y + 0.5) * TILE_SIZE,
+    });
   }
 
   /**
@@ -2639,10 +2642,7 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
    * appear on a corner tile and vanish one tile later while still inside the
    * border.
    */
-  private findPlacementAtPoint(point: {
-    x: number;
-    y: number;
-  }): SmartObjectPlacement | null {
+  private findPlacementAtPoint(point: { x: number; y: number }): SmartObjectPlacement | null {
     // Legacy actors sit on top (they are drawn over the tiles) and are interactive
     // like any other actor, so they are hit-tested first.
     // Hidden objects are not interactive: they are invisible on the canvas, so a
