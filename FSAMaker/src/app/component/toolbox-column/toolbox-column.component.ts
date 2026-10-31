@@ -41,6 +41,11 @@ import {
   forceGemDefinition,
 } from '../../entity/smartobject/force-gem.entity';
 import { ITEM_DEFINITIONS, itemDefinitions } from '../../entity/smartobject/items.entity';
+import {
+  FLOOR_SWITCH_ACTOR_ID,
+  FLOOR_SWITCH_DEFINITION,
+  floorSwitchDefinition,
+} from '../../entity/smartobject/switch.entity';
 import { migrateActorTemplates } from '../../entity/smartobject/actor-template-migration.entity';
 import { EditorService } from '../../service/editor.service';
 import { ImageBuffer, TILE_SIZE } from '../../service/render/gba-tile-renderer';
@@ -194,6 +199,9 @@ export class ToolboxColumnComponent implements AfterViewInit {
   /** Whether the Items section is expanded. */
   readonly itemsOpen = signal(true);
 
+  /** Whether the Other → Switches section is expanded. */
+  readonly switchesOpen = signal(true);
+
   /** Whether the Misc (actor template) section is expanded. */
   readonly miscOpen = signal(true);
 
@@ -205,11 +213,13 @@ export class ToolboxColumnComponent implements AfterViewInit {
    *   decorations, advanced tile reference, start/end markers).
    * - **Items & NPC**: actor-baked smart objects that are picked up or talked to
    *   (collectibles, enemies and NPCs).
+   * - **Other**: hand-authored smart objects that do not fit the catalog-driven
+   *   sections (currently the floor switch).
    * - **Debug**: everything that does NOT belong to a curated section — doors,
    *   and the remaining EFSAdvent actor presets that the actor catalog cannot
    *   describe (so they could not be migrated into a modern section).
    */
-  readonly tabs = ['Common', 'Items & NPC', 'Debug'] as const;
+  readonly tabs = ['Common', 'Items & NPC', 'Other', 'Debug'] as const;
 
   /** The tab currently selected. */
   readonly activeTab = signal<(typeof this.tabs)[number]>('Common');
@@ -669,6 +679,67 @@ export class ToolboxColumnComponent implements AfterViewInit {
         );
       }
     }
+
+    // Other → Switches. `SWTH` has no rendering block (the game draws the
+    // switch with tiles), so the card shows the object's own baked tile(s)
+    // rather than an actor sprite. Falls back to the generated actor icon, then
+    // to a blank card.
+    const switchCanvases = this.switchCanvases();
+    if (switchCanvases.length > 0) {
+      for (const ref of switchCanvases) {
+        const id = ref.nativeElement.dataset['switchId'];
+        const definition = id ? this.switchObjects.find((entry) => entry.id === id) : undefined;
+        const canvas = ref.nativeElement;
+        if (!definition) {
+          continue;
+        }
+        const variant = definition.set[0];
+        // The switch's graphics ARE its baked tiles, so use those first; fall
+        // back to any editor-only preview tiles for actor-baked objects.
+        const cardTiles = [...(variant?.bottomLayerTiles ?? []), ...(variant?.previewTiles ?? [])];
+        if (cardTiles.length === 0) {
+          await this.drawIconFallback(canvas, definition.actorId ?? definition.id);
+          continue;
+        }
+        const previewTiles = cardTiles;
+        // Size the card to the preview tiles' footprint, one tile each.
+        const cols = previewTiles.map((offset) => offset.dCol);
+        const rows = previewTiles.map((offset) => offset.dRow);
+        const minCol = Math.min(0, ...cols);
+        const minRow = Math.min(0, ...rows);
+        const width = (Math.max(0, ...cols) - minCol + 1) * TILE_SIZE;
+        const height = (Math.max(0, ...rows) - minRow + 1) * TILE_SIZE;
+
+        const buffer = new ImageBuffer(width, height);
+        buffer.fill(0, 0, 0, 0);
+        for (const offset of previewTiles) {
+          renderer.drawTilesetTile(
+            buffer,
+            (offset.dCol - minCol) * TILE_SIZE,
+            (offset.dRow - minRow) * TILE_SIZE,
+            offset.tile,
+            this._gba,
+          );
+        }
+
+        canvas.width = buffer.width;
+        canvas.height = buffer.height;
+        const canvasScale = Math.min(64 / buffer.width, 64 / buffer.height);
+        canvas.style.width = `${Math.round(buffer.width * canvasScale)}px`;
+        canvas.style.height = `${Math.round(buffer.height * canvasScale)}px`;
+
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          continue;
+        }
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.putImageData(
+          new ImageData(new Uint8ClampedArray(buffer.pixels), buffer.width, buffer.height),
+          0,
+          0,
+        );
+      }
+    }
   }
 
   /** Selects an actor-template tab. */
@@ -774,6 +845,11 @@ export class ToolboxColumnComponent implements AfterViewInit {
     this.itemsOpen.update((open) => !open);
   }
 
+  /** Toggles the Other → Switches section. */
+  toggleSwitches(): void {
+    this.switchesOpen.update((open) => !open);
+  }
+
   /** Toggles the Misc (actor template) section. */
   toggleMisc(): void {
     this.miscOpen.update((open) => !open);
@@ -853,6 +929,15 @@ export class ToolboxColumnComponent implements AfterViewInit {
   itemObjects: SmartObjectDefinition[] = [FORCE_GEM_DEFINITION, ...ITEM_DEFINITIONS];
 
   /**
+   * Other-tab smart objects: hand-authored definitions that the catalog-driven
+   * sections do not cover. Currently the floor switch.
+   *
+   * Rebuilt from the actor catalog when it arrives so the switch's field menus
+   * (`Switch Behavior`, trigger areas, …) come from FSALib.
+   */
+  switchObjects: SmartObjectDefinition[] = [FLOOR_SWITCH_DEFINITION];
+
+  /**
    * Rebuilds the item definitions from the actor catalog.
    *
    * Called by the host once the catalog is loaded; until then the static
@@ -863,6 +948,7 @@ export class ToolboxColumnComponent implements AfterViewInit {
       return;
     }
     this.itemObjects = [forceGemDefinition(actors[FORCE_GEM_ACTOR_ID]), ...itemDefinitions(actors)];
+    this.switchObjects = [floorSwitchDefinition(actors[FLOOR_SWITCH_ACTOR_ID])];
     // Migrate the legacy EFSAdvent presets into real smart objects (their
     // context menus come from the catalog). The raw presets stay visible under
     // "Non smart objects" in the Debug tab regardless.
@@ -878,6 +964,9 @@ export class ToolboxColumnComponent implements AfterViewInit {
 
   /** The item preview canvases. */
   private readonly itemCanvases = viewChildren<ElementRef<HTMLCanvasElement>>('itemPreview');
+
+  /** The Other → Switches preview canvases. */
+  private readonly switchCanvases = viewChildren<ElementRef<HTMLCanvasElement>>('switchPreview');
 
   /** Starts a native drag for an item actor object. */
   onItemDragStart(event: DragEvent, definition: SmartObjectDefinition): void {

@@ -68,6 +68,7 @@ export const GROUND_DEFINITIONS: GroundDefinition[] = [
   { id: 'rock-ground-460', tile: 460 },
   { id: 'rock-ground-461', tile: 461 },
   { id: 'tall-grass', tile: 116 },
+  { id: 'deep-water', tile: 7 },
 ];
 
 /** Looks up a ground definition by id. */

@@ -822,7 +822,12 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
     placement: SmartObjectPlacement,
     definition: SmartObjectDefinition,
   ): { x: number; y: number; width: number; height: number } {
-    if (definition.baking === 'actor') {
+    // Objects that stamp tiles use their tile bounds, whichever mode baked them
+    // (the floor switch is actor-baked but bakes tile 18 and has no sprite).
+    const stampsTiles = definition.set.some(
+      (variant) => variant.bottomLayerTiles.length > 0 || variant.topLayerTiles.length > 0,
+    );
+    if (definition.baking === 'actor' && !stampsTiles) {
       return this.actorBox(placement);
     }
     const bounds = smartObjectBounds(
@@ -1079,8 +1084,9 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
    * Tile offsets (row*32+col) occupied on `layerIndex` by objects hidden in the
    * object column, so their stamped tiles are skipped in the render.
    *
-   * Actor-baked objects bake no tiles (they are excluded from {@link actors}),
-   * so only tile-baked footprints need hiding.
+   * Keyed on the variant's own tiles rather than `baking`: an actor-baked object
+   * may ALSO bake tiles (the floor switch bakes tile 18 because `SWTH` has no
+   * sprite), so "has no tiles" is the real test.
    */
   private hiddenObjectSet(layerIndex: number): Set<number> {
     const hidden = new Set<number>();
@@ -1092,7 +1098,7 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
         continue;
       }
       const definition = findSmartObjectDefinition(placement.id);
-      if (!definition || definition.baking === 'actor') {
+      if (!definition) {
         continue;
       }
       const variant = smartObjectVariant(
@@ -1135,8 +1141,14 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
     if (!dragging) {
       return ghost;
     }
-    // Actor-baked objects bake no tiles (the sprite is excluded from `actors`).
-    if (dragging.definition.baking === 'actor') {
+    // Objects with no stamped tiles (most actor-baked objects) only hide their
+    // sprite, which `actors` already does — nothing to skip in the tile pass.
+    // The floor switch is actor-baked AND bakes a tile, so test the variant's
+    // offsets instead of the `baking` mode.
+    const hasTiles = this.footprintOffsets(dragging.source, layerIndex).some(
+      (offsets) => offsets.length > 0,
+    );
+    if (!hasTiles) {
       return ghost;
     }
     for (const offsets of this.footprintOffsets(dragging.source, layerIndex)) {
@@ -2435,10 +2447,14 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
   private grabSmartObject(event: PointerEvent): void {
     const room = this.room;
     const tile = this.tileAt(event);
-    if (!room || !tile) {
+    const point = this.pixelAt(event);
+    if (!room || !tile || !point) {
       return;
     }
-    const placement = this.findPlacementAt(tile);
+    // Use the SAME pixel-precise test as the hover hand cursor, so whatever the
+    // user can hover is exactly what they can grab. A tile lookup here made the
+    // hand appear but the grab silently fail on the sprite's corner tiles.
+    const placement = this.findPlacementAtPoint(point);
     const definition = placement ? findSmartObjectDefinition(placement.id) : null;
     if (!placement || !definition) {
       return;
@@ -2611,63 +2627,95 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
 
   /** Returns the top-most placement covering a tile, or null. */
   private findPlacementAt(tile: { x: number; y: number }): SmartObjectPlacement | null {
+    return this.findPlacementAtPoint({ x: (tile.x + 0.5) * TILE_SIZE, y: (tile.y + 0.5) * TILE_SIZE });
+  }
+
+  /**
+   * Returns the top-most placement whose drawn border contains a canvas pixel,
+   * or null.
+   *
+   * Prefer this over {@link findPlacementAt} for hover: the dotted selection
+   * border is pixel-precise, so testing the tile centre made the hand cursor
+   * appear on a corner tile and vanish one tile later while still inside the
+   * border.
+   */
+  private findPlacementAtPoint(point: {
+    x: number;
+    y: number;
+  }): SmartObjectPlacement | null {
     // Legacy actors sit on top (they are drawn over the tiles) and are interactive
     // like any other actor, so they are hit-tested first.
     // Hidden objects are not interactive: they are invisible on the canvas, so a
     // click must reach whatever is under them instead.
     for (let i = this._legacyActors.length - 1; i >= 0; i--) {
       const placement = this._legacyActors[i];
-      if (!this.isHidden(placement) && this.hitTestPlacement(placement, tile)) {
+      if (!this.isHidden(placement) && this.hitTestPlacement(placement, point)) {
         return placement;
       }
     }
     for (let i = this.smartObjects.length - 1; i >= 0; i--) {
       const placement = this.smartObjects[i];
-      if (!this.isHidden(placement) && this.hitTestPlacement(placement, tile)) {
+      if (!this.isHidden(placement) && this.hitTestPlacement(placement, point)) {
         return placement;
       }
     }
     return null;
   }
 
-  /** Whether a placement's footprint (layer + sprite/tile bounds) covers a tile. */
+  /** The pointer position in canvas pixels, or null when outside the canvas. */
+  private pixelAt(event: MouseEvent): { x: number; y: number } | null {
+    const canvas = this.canvasRef()?.nativeElement;
+    if (!canvas) {
+      return null;
+    }
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: ((event.clientX - rect.left) / rect.width) * canvas.width,
+      y: ((event.clientY - rect.top) / rect.height) * canvas.height,
+    };
+  }
+
+  /**
+   * Whether a pixel rectangle contains the pointer.
+   *
+   * Hover and grabbing use this rather than tile cells: the dotted border is
+   * pixel-precise, so a tile-granular test made the hand cursor appear on a
+   * corner tile and then vanish as soon as the pointer moved one tile away —
+   * even though it was still inside the drawn border.
+   */
+  private boxContains(
+    box: { x: number; y: number; width: number; height: number } | null,
+    point: { x: number; y: number } | null,
+  ): boolean {
+    if (!box || !point) {
+      return false;
+    }
+    return (
+      point.x >= box.x &&
+      point.x <= box.x + box.width &&
+      point.y >= box.y &&
+      point.y <= box.y + box.height
+    );
+  }
+
+  /**
+   * Whether a placement's black dotted border encloses a canvas pixel.
+   *
+   * Uses {@link selectionBox} — the exact rectangle `strokeSelected` draws — so
+   * hovering anywhere inside the border shows the hand cursor and clicking there
+   * grabs the object. No sprite/tile measurement is involved here beyond what
+   * the border itself uses.
+   */
   private hitTestPlacement(
     placement: SmartObjectPlacement,
-    tile: { x: number; y: number },
+    point: { x: number; y: number },
   ): boolean {
     // Only objects on the active base layer are interactive; the paired top
     // layer belongs to the same base layer, so a single check covers both.
     if ((placement.baseLayerId ?? 0) !== this.layerIndex) {
       return false;
     }
-    const definition = findSmartObjectDefinition(placement.id);
-    if (!definition) {
-      return false;
-    }
-    // Actor-baked objects bake no tiles: hit-test the sprite's REAL footprint
-    // (variant offsets + sprite size), so large actors are grabbed where they
-    // are actually drawn rather than in a fixed 2×2 cell around the anchor.
-    if (definition.baking === 'actor') {
-      const box = this.actorBox(placement);
-      return (
-        tile.x >= Math.floor(box.x / TILE_SIZE) &&
-        tile.x <= Math.floor((box.x + box.width - 1) / TILE_SIZE) &&
-        tile.y >= Math.floor(box.y / TILE_SIZE) &&
-        tile.y <= Math.floor((box.y + box.height - 1) / TILE_SIZE)
-      );
-    }
-    const bounds = smartObjectBounds(
-      definition,
-      placement.variantIndex ?? 0,
-      placement.subTypeIndex ?? 0,
-      placement.scale,
-    );
-    return (
-      tile.y >= placement.anchorRow + bounds.minRow &&
-      tile.y <= placement.anchorRow + bounds.maxRow &&
-      tile.x >= placement.anchorCol + bounds.minCol &&
-      tile.x <= placement.anchorCol + bounds.maxCol
-    );
+    return this.boxContains(this.selectionBox(placement), point);
   }
 
   /** Moves a grabbed smart object to follow the pointer. */
@@ -2755,8 +2803,11 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
     if (this.dragging) {
       return;
     }
-    const tile = this.tileAt(event);
-    this.hoveredPlacement = tile ? this.findPlacementAt(tile) : null;
+    // Test the exact pointer pixel, not the tile cell: the dotted border is
+    // pixel-precise, so a tile-granular test dropped the hover as soon as the
+    // pointer moved one tile while still inside the border.
+    const point = this.pixelAt(event);
+    this.hoveredPlacement = point ? this.findPlacementAtPoint(point) : null;
     this.drawHoverOutline();
   }
 
@@ -2830,20 +2881,29 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
     return placement && this.onThisLayer(placement) ? placement : null;
   }
 
-  /** Strokes the highlight outline of a placement (actor box or tile footprint). */
-  private strokeSelected(
-    ctx: CanvasRenderingContext2D,
+  /**
+   * Strokes the highlight outline of a placement (actor box or tile footprint).
+   *
+   * This black dotted border is ALSO the object's grab region: hit-testing uses
+   * the same box, so anything the border encloses can be clicked.
+   */
+  /**
+   * The pixel rectangle the black dotted selection border is drawn with.
+   *
+   * SINGLE SOURCE OF TRUTH: `strokeSelected` strokes exactly this rectangle and
+   * `hitTestPlacement` grabs exactly this rectangle, so the hand cursor appears
+   * over precisely the area the border encloses — border and hit area cannot
+   * drift apart.
+   */
+  private selectionBox(
     placement: SmartObjectPlacement,
-    style: { color: string; dash: number[] } = { color: '#000', dash: [3, 3] },
-  ): void {
+  ): { x: number; y: number; width: number; height: number } | null {
     const definition = findSmartObjectDefinition(placement.id);
     if (!definition) {
-      return;
+      return null;
     }
     if (definition.baking === 'actor') {
-      const box = this.actorBox(placement);
-      this.strokeOutline(ctx, box.x, box.y, box.width, box.height, style);
-      return;
+      return this.actorBox(placement);
     }
     const bounds = smartObjectBounds(
       definition,
@@ -2851,14 +2911,25 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
       placement.subTypeIndex ?? 0,
       placement.scale,
     );
-    this.strokeOutline(
-      ctx,
-      (placement.anchorCol + bounds.minCol) * TILE_SIZE,
-      (placement.anchorRow + bounds.minRow) * TILE_SIZE,
-      bounds.cols * TILE_SIZE,
-      bounds.rows * TILE_SIZE,
-      style,
-    );
+    return {
+      x: (placement.anchorCol + bounds.minCol) * TILE_SIZE,
+      y: (placement.anchorRow + bounds.minRow) * TILE_SIZE,
+      width: bounds.cols * TILE_SIZE,
+      height: bounds.rows * TILE_SIZE,
+    };
+  }
+
+  /** Strokes the highlight outline of a placement using {@link selectionBox}. */
+  private strokeSelected(
+    ctx: CanvasRenderingContext2D,
+    placement: SmartObjectPlacement,
+    style: { color: string; dash: number[] } = { color: '#000', dash: [3, 3] },
+  ): void {
+    const box = this.selectionBox(placement);
+    if (!box) {
+      return;
+    }
+    this.strokeOutline(ctx, box.x, box.y, box.width, box.height, style);
   }
 
   /**
@@ -3011,8 +3082,17 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
       }
     }
 
-    // Actor-baked objects draw their actor sprite instead of tiles.
-    if (dragging.definition.baking === 'actor') {
+    // Actor-baked objects draw their actor sprite instead of tiles — unless they
+    // also bake tiles (the floor switch: `SWTH` has no sprite, so tile 18 IS its
+    // look). Then the tile ghost below is the accurate preview.
+    const dragVariant = smartObjectVariant(
+      dragging.definition,
+      dragging.variantIndex ?? 0,
+      dragging.subTypeIndex ?? 0,
+    );
+    const dragStampsTiles =
+      dragVariant.bottomLayerTiles.length > 0 || dragVariant.topLayerTiles.length > 0;
+    if (dragging.definition.baking === 'actor' && !dragStampsTiles) {
       // Build the exact actor record the drop would create and draw it through
       // the same renderer path — so the ghost lines up pixel-for-pixel with the
       // placed result (sprites are bottom-centre anchored and may use offsets).

@@ -183,11 +183,13 @@ export function itemStandDefinition(definition?: ActorDefinition): ItemSmartObje
   // is normal scenery the user paints, so plating the object must not stamp it.
   return {
     ...stand,
-    set: [{
-      bottomLayerTiles: [],
-      topLayerTiles: [],
-      previewTiles: [{ dRow: 0, dCol: 0, tile: ITEM_PEDESTAL_TILE }],
-    }],
+    set: [
+      {
+        bottomLayerTiles: [],
+        topLayerTiles: [],
+        previewTiles: [{ dRow: 0, dCol: 0, tile: ITEM_PEDESTAL_TILE }],
+      },
+    ],
   };
 }
 

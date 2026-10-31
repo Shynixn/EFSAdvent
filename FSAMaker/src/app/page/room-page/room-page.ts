@@ -83,6 +83,10 @@ import { actorSmartObjects } from '../../entity/actor.definition';
 import type { ActorDefinition } from '../../entity/actor-definition.entity';
 import { FORCE_GEM_ACTOR_ID, forceGemDefinition } from '../../entity/smartobject/force-gem.entity';
 import { itemDefinitions } from '../../entity/smartobject/items.entity';
+import {
+  FLOOR_SWITCH_ACTOR_ID,
+  floorSwitchDefinition,
+} from '../../entity/smartobject/switch.entity';
 import { migrateActorTemplates } from '../../entity/smartobject/actor-template-migration.entity';
 import { TilesetTheme } from '../../entity/tileset.util';
 import { StageRenderer } from '../../service/render/stage-renderer';
@@ -1241,6 +1245,7 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
       registerActorSmartObjects([
         forceGemDefinition(actors[FORCE_GEM_ACTOR_ID]),
         ...itemDefinitions(actors),
+        floorSwitchDefinition(actors[FLOOR_SWITCH_ACTOR_ID]),
       ]);
       // Migrated EFSAdvent presets are draggable from the toolbox, so their ids
       // (and their catalog-derived context menus) must resolve here too.

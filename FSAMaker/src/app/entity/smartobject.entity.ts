@@ -23,6 +23,7 @@ import type { ActivationLink } from './smartobject/activation.entity';
 import { GOAL_DEFINITION } from './smartobject/goal.entity';
 import { FORCE_GEM_DEFINITION } from './smartobject/force-gem.entity';
 import { ITEM_DEFINITIONS } from './smartobject/items.entity';
+import { FLOOR_SWITCH_DEFINITION } from './smartobject/switch.entity';
 import { withDoorLifecycle } from './contract/placeable-hooks.entity';
 import {
   SmartObjectScale,
@@ -133,6 +134,7 @@ registerActorSmartObjects([
   GOAL_DEFINITION,
   FORCE_GEM_DEFINITION,
   ...ITEM_DEFINITIONS,
+  FLOOR_SWITCH_DEFINITION,
 ]);
 
 // Install object-specific lifecycle behaviour (see `placeable-hooks.entity.ts`).
