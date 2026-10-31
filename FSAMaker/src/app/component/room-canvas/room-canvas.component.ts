@@ -1573,7 +1573,12 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
       if (!isActivationTarget(definition)) {
         continue;
       }
-      const box = this.boxOf(placement, definition!);
+      // Same rectangle as the dotted border / grab hit-test, so a target can be
+      // picked exactly where it is drawn.
+      const box = this.selectionBox(placement);
+      if (!box) {
+        continue;
+      }
       const px = tile.x * TILE_SIZE;
       const py = tile.y * TILE_SIZE;
       if (px >= box.x && px < box.x + box.width && py >= box.y && py < box.y + box.height) {
@@ -1655,11 +1660,13 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
    */
   private paintActivationLines(ctx: CanvasRenderingContext2D): void {
     const centre = (placement: SmartObjectPlacement): { x: number; y: number } | null => {
-      const definition = findSmartObjectDefinition(placement.id);
-      if (!definition) {
+      // Same rectangle as the dotted selection border, so a line starts at the
+      // centre of what the user sees — including tile-drawn actors such as the
+      // floor switch, whose "sprite" is really a baked tile.
+      const bounds = this.selectionBox(placement);
+      if (!bounds) {
         return null;
       }
-      const bounds = this.actorBox(placement);
       return { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
     };
 

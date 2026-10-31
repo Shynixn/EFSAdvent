@@ -39,8 +39,11 @@ import {
   activatableOf,
   decodeActivationVariable,
   decodeSetVariable,
+  decodeSetVariableAt,
   encodeActivationVariable,
+  encodeInteractionType,
   encodeSetVariable,
+  encodeSetVariableAt,
   findFreeLocalVariable,
 } from '../contract/activatable.entity';
 import { findSmartObjectDefinition } from '../smartobject.definition';
@@ -92,8 +95,9 @@ export function allocateVariable(
   if (existing) {
     return existing.variable;
   }
-  // Prefer a variable the actor already carries (e.g. authored by hand).
-  const current = decodeSetVariable(source.actorVariable ?? 0);
+  // Prefer a variable the actor already carries (e.g. authored by hand), read
+  // from the field this actor actually uses (27-31 for the floor switch).
+  const current = sourceVariable(source);
   if (
     current >= LOCAL_VARIABLE_MIN &&
     current <= LOCAL_VARIABLE_MAX &&
@@ -109,7 +113,22 @@ export function withSetVariable(
   placement: SmartObjectPlacement,
   variable: number,
 ): SmartObjectPlacement {
-  return { ...placement, actorVariable: encodeSetVariable(placement.actorVariable ?? 0, variable) };
+  const bitOffset = sourceVariableBitOffset(placement);
+  return {
+    ...placement,
+    actorVariable: encodeSetVariableAt(placement.actorVariable ?? 0, variable, bitOffset),
+  };
+}
+
+/**
+ * Bit offset of the field a SOURCE writes its triggered variable into.
+ *
+ * Defaults to bits 22-26. The floor switch (`SWTH`) declares that variable at
+ * bits 27-31 instead, so the default would overwrite its trigger area and the
+ * switch would never set anything.
+ */
+export function sourceVariableBitOffset(placement: SmartObjectPlacement): number {
+  return activatableOf(findSmartObjectDefinition(placement.id))?.setVariableBitOffset ?? 22;
 }
 
 /**
@@ -130,8 +149,9 @@ export function withActivationVariable(
   reserved: readonly number[] = [],
 ): SmartObjectPlacement {
   let next = encodeActivationVariable(placement.actorVariable ?? 0, variable);
-  const usesVariable = activatableOf(findSmartObjectDefinition(placement.id))?.usesVariable;
-  if (usesVariable) {
+  const definition = findSmartObjectDefinition(placement.id);
+  const activatable = activatableOf(definition);
+  if (activatable?.usesVariable) {
     // The `Type` field is bits 0-7 with bit 0 = `Uses Variable`.
     next = (next | 0x01) >>> 0;
     // The target also WRITES a variable of its own; the engine needs it
@@ -141,17 +161,193 @@ export function withActivationVariable(
       next = encodeSetVariable(next, own);
     }
   }
+  // Item actors (the Force Gem) only APPEAR once their variable is set when
+  // their `Interaction Type` says so; without this the target would be visible
+  // from the start and the link would look like it does nothing.
+  if (variable !== 0 && activatable?.activatedInteractionType !== undefined) {
+    next = encodeInteractionType(next, activatable.activatedInteractionType);
+  }
+  // Clearing the link (`variable === 0`) restores the plain behaviour, so an
+  // unlinked gem is a normal collectible again rather than a permanently
+  // hidden one. `inactiveInteractionType` wins; otherwise fall back to the
+  // value the definition is placed with.
+  if (variable === 0 && activatable?.activatedInteractionType !== undefined) {
+    next = encodeInteractionType(
+      next,
+      activatable.inactiveInteractionType ?? definition?.actorVariable ?? 0,
+    );
+  }
   return { ...placement, actorVariable: next };
 }
 
 /** The variable a source writes, or 0 when it has none. */
 export function sourceVariable(placement: SmartObjectPlacement): number {
-  return decodeSetVariable(placement.actorVariable ?? 0);
+  return decodeSetVariableAt(placement.actorVariable ?? 0, sourceVariableBitOffset(placement));
 }
 
 /** The variable a target waits on, or 0 when it has none. */
 export function targetVariable(placement: SmartObjectPlacement): number {
   return decodeActivationVariable(placement.actorVariable ?? 0);
+}
+
+/**
+ * Renumbers every activation link in a room, assigning variable ids **1..n in
+ * link order**, and re-encodes the affected placements.
+ *
+ * This is the authoritative allocation: ids are derived from the room's links
+ * at save/bake time, so they are always contiguous and stable, no matter how the
+ * links were drawn. Each activator gets its own id, and every target connected
+ * to it receives that same id.
+ *
+ * Actors read straight out of the archive are NOT rewritten: their `Variable`
+ * was authored by the game, and silently renumbering it would change level
+ * behaviour. Pass only editor-placed smart objects in `placements`.
+ *
+ * @param placements The room's editable smart-object placements.
+ * @param links      The room's activation links.
+ * @returns The renumbered links and the placements whose `Variable` changed.
+ */
+export function allocateActivationVariables(
+  placements: readonly SmartObjectPlacement[],
+  links: readonly ActivationLink[],
+): { links: ActivationLink[]; placements: SmartObjectPlacement[] } {
+  const byKey = new Map(placements.map((p) => [placementKey(p), p] as const));
+  const updated = new Map<string, SmartObjectPlacement>();
+  const nextLinks: ActivationLink[] = [];
+
+  // Ids are allocated per ACTIVATOR (one link record per source), starting at 1.
+  let nextVariable = 1;
+  for (const link of links) {
+    const variable = nextVariable;
+    nextVariable += 1;
+    // Out of ids: keep the link with its existing number rather than losing it.
+    const id = variable <= LOCAL_VARIABLE_MAX ? variable : link.variable;
+    nextLinks.push({ ...link, variable: id });
+
+    const source = byKey.get(link.from);
+    if (source) {
+      updated.set(link.from, withSetVariable(source, id));
+    }
+    for (const targetKey of link.to) {
+      const target = byKey.get(targetKey);
+      if (target) {
+        updated.set(targetKey, withActivationVariable(target, id));
+      }
+    }
+  }
+
+  return { links: nextLinks, placements: [...updated.values()] };
+}
+
+/**
+ * Records a source's ROLE: the room-local variable it writes.
+ *
+ * Used when a placement is recorded for baking. Every activation entity gets its
+ * own variable, numbered from 1 upwards in placement order — see
+ * {@link assignActivationVariables}.
+ */
+export function withSourceVariable(
+  placement: SmartObjectPlacement,
+  variable: number,
+): SmartObjectPlacement {
+  return withSetVariable(placement, variable);
+}
+
+/**
+ * Assigns activation variable IDs across a room's placements.
+ *
+ * Every activation **source** (activator) that does not already own a variable
+ * gets the next free number starting at 1, in list order; every activation
+ * **target** then adopts the variable of the source that drives it, so the two
+ * sides agree without the user having to draw an explicit link.
+ *
+ * This is what makes baking work: `placementToActor` writes
+ * `placement.actorVariable`, so the IDs must be assigned BEFORE the actor list is
+ * baked — otherwise every switch and every gem bakes `0` and nothing activates.
+ *
+ * Existing numbers are preserved (so a reloaded or hand-authored room is not
+ * renumbered), and targets keep any already-valid variable of their own.
+ *
+ * @param placements Room placements in display order (ids are assigned by this
+ *   order, so new placements get the next number).
+ * @param links      Links already recorded for the room; a linked pair always
+ *   shares the link's variable.
+ * @returns The placements with their activation variables filled in.
+ */
+export function assignActivationVariables(
+  placements: readonly SmartObjectPlacement[],
+  links: readonly ActivationLink[] = [],
+): SmartObjectPlacement[] {
+  const used = new Set<number>();
+
+  // A source's variable is fixed by an existing link, or by its own Set Variable
+  // when that is already a valid number.
+  const variableByKey = new Map<string, number>();
+  for (const link of links) {
+    variableByKey.set(link.from, link.variable);
+    used.add(link.variable);
+  }
+  for (const placement of placements) {
+    const definition = findSmartObjectDefinition(placement.id);
+    if (!activatableOf(definition) || activatableOf(definition)?.isTarget) {
+      continue;
+    }
+    const key = placementKey(placement);
+    if (variableByKey.has(key)) {
+      continue;
+    }
+    const current = decodeSetVariable(placement.actorVariable ?? 0);
+    if (current >= LOCAL_VARIABLE_MIN && current <= LOCAL_VARIABLE_MAX && !used.has(current)) {
+      variableByKey.set(key, current);
+      used.add(current);
+    }
+  }
+
+  // Hand out the remaining numbers in placement order.
+  const assigned: number[] = [];
+  for (const placement of placements) {
+    const definition = findSmartObjectDefinition(placement.id);
+    const activatable = activatableOf(definition);
+    if (!activatable || activatable.isTarget) {
+      continue;
+    }
+    const key = placementKey(placement);
+    if (variableByKey.has(key)) {
+      continue;
+    }
+    const free = findFreeLocalVariable([...used, ...assigned]);
+    if (free !== null) {
+      variableByKey.set(key, free);
+      assigned.push(free);
+    }
+  }
+
+  // Rewrite: sources get their Set Variable, targets the matching Activation
+  // Variable (a target adopts the variable of the link that drives it, else the
+  // first source's, so an unlinked gem still appears once the switch fires).
+  const firstVariable = [...variableByKey.values()].sort((a, b) => a - b)[0];
+  return placements.map((placement) => {
+    const definition = findSmartObjectDefinition(placement.id);
+    const activatable = activatableOf(definition);
+    if (!activatable) {
+      return placement;
+    }
+    const key = placementKey(placement);
+    if (activatable.isTarget) {
+      const link = links.find((entry) => entry.to.includes(key));
+      const variable = link?.variable ?? targetVariable(placement) ?? firstVariable;
+      const effective = link?.variable ?? (targetVariable(placement) || firstVariable);
+      if (effective === undefined) {
+        return placement;
+      }
+      return withActivationVariable(placement, effective);
+    }
+    const variable = variableByKey.get(key);
+    if (variable === undefined) {
+      return placement;
+    }
+    return withSourceVariable(placement, variable);
+  });
 }
 
 /** Whether two placements are already linked (either direction). */

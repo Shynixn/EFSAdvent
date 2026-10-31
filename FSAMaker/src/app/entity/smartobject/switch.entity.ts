@@ -80,6 +80,13 @@ export function floorSwitchDefinition(definition?: ActorDefinition): SwitchSmart
     actorId: FLOOR_SWITCH_ACTOR_ID,
     // Switch Behavior 0 (`Default`), no trigger area, no triggered variable.
     actorVariable: 0,
+    // The switch is an ACTIVATOR: stepping on it SETS a room-local variable,
+    // which linked targets wait on. It never waits on one itself.
+    //
+    // `SWTH` puts that variable at bits 27-31 (`Triggered Local Variable`), not
+    // the usual 22-26 — writing the default location would overwrite its
+    // `Vertical Trigger Area` and the switch would never fire.
+    activatable: { isTarget: false, setVariableBitOffset: 27 },
     placement: {
       fields: actorFieldMenus(definition, { skipActivation: true }),
     },

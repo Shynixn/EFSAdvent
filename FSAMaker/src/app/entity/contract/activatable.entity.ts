@@ -50,6 +50,39 @@ export interface IActivatable {
    * something else (e.g. `GOL2`'s `Goal Shape`) corrupts that field.
    */
   readonly usesVariable?: boolean;
+  /**
+   * `Interaction Type` value (bits 16-23) that makes this actor appear only
+   * once its `Activation Variable` is set.
+   *
+   * For the Force Gem (`RUPY`) that is `26` — *"Appears, activated by
+   * variable"*. Applying it turns a plain collectible into an activation
+   * TARGET, and clearing it restores the plain behaviour.
+   *
+   * Undefined when the actor has no interaction-type driven target mode; such a
+   * definition is a target purely through its `Activation Variable` bits.
+   */
+  readonly activatedInteractionType?: number;
+  /**
+   * `Interaction Type` value to restore when the object stops being a target.
+   *
+   * Defaults to the value the definition is placed with, so unlinking returns
+   * the actor to the state the user originally placed.
+   */
+  readonly inactiveInteractionType?: number;
+  /**
+   * Bit offset of the `Set Variable` field **for actors whose layout differs
+   * from the usual bits 22-26**.
+   *
+   * Most sources (e.g. `GOL2`) write a variable in bits 22-26, which is the
+   * default. The floor switch (`SWTH`) is different: its catalog calls the field
+   * `Triggered Local Variable` and puts it at bits **27-31** — the same bits
+   * almost every other actor uses for `Activation Variable`. Writing 22-26 on a
+   * switch scribbles over `Vertical Trigger Area`, so the switch sets nothing
+   * and linked targets never appear.
+   *
+   * Omit to keep the standard 22-26 location.
+   */
+  readonly setVariableBitOffset?: number;
 }
 
 /** A definition that participates in activation links. */
@@ -70,6 +103,9 @@ export function isActivationSource(definition: SmartObjectDefinition | undefined
   const activatable = activatableOf(definition);
   return !!activatable && !activatable.isTarget;
 }
+
+/** Alias for {@link isActivationSource}: a source *activates* other objects. */
+export const isActivator = isActivationSource;
 
 /** Whether a definition is an activation **target**. */
 export function isActivationTarget(definition: SmartObjectDefinition | undefined): boolean {
@@ -96,6 +132,10 @@ const ACTIVATION_VARIABLE_SHIFT = 27;
 export const SET_VARIABLE_MASK = 0x1f;
 const SET_VARIABLE_SHIFT = 22;
 
+/** Bits 16-23: `Interaction Type` (how an item actor appears/behaves). */
+export const INTERACTION_TYPE_MASK = 0xff;
+const INTERACTION_TYPE_SHIFT = 16;
+
 /** Valid room-local variable numbers (0 = none/always-active). */
 export const LOCAL_VARIABLE_MIN = 1;
 export const LOCAL_VARIABLE_MAX = 31;
@@ -120,6 +160,33 @@ export function decodeSetVariable(variable: number): number {
 export function encodeSetVariable(variable: number, value: number): number {
   const cleared = (variable >>> 0) & ~(SET_VARIABLE_MASK << SET_VARIABLE_SHIFT);
   return (cleared | ((value & SET_VARIABLE_MASK) << SET_VARIABLE_SHIFT)) >>> 0;
+}
+
+/**
+ * Like {@link encodeSetVariable}, but writes at an arbitrary bit offset.
+ *
+ * Needed for actors whose "variable I trigger" field is NOT bits 22-26 — the
+ * floor switch (`SWTH`) keeps it at bits 27-31.
+ */
+export function encodeSetVariableAt(variable: number, value: number, bitOffset: number): number {
+  const cleared = (variable >>> 0) & ~(SET_VARIABLE_MASK << bitOffset);
+  return (cleared | ((value & SET_VARIABLE_MASK) << bitOffset)) >>> 0;
+}
+
+/** Reads the triggered variable from an arbitrary bit offset. */
+export function decodeSetVariableAt(variable: number, bitOffset: number): number {
+  return ((variable >>> bitOffset) & SET_VARIABLE_MASK) >>> 0;
+}
+
+/** Reads the `Interaction Type` (bits 16-23) out of an actor `Variable`. */
+export function decodeInteractionType(variable: number): number {
+  return ((variable >>> INTERACTION_TYPE_SHIFT) & INTERACTION_TYPE_MASK) >>> 0;
+}
+
+/** Writes the `Interaction Type` (bits 16-23), keeping every other field. */
+export function encodeInteractionType(variable: number, value: number): number {
+  const cleared = (variable >>> 0) & ~(INTERACTION_TYPE_MASK << INTERACTION_TYPE_SHIFT);
+  return (cleared | ((value & INTERACTION_TYPE_MASK) << INTERACTION_TYPE_SHIFT)) >>> 0;
 }
 
 /**

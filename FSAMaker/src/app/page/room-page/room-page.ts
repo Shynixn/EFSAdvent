@@ -47,6 +47,7 @@ import { RoomClipboardService } from '../../service/room-clipboard.service';
 import {
   ActivationLink,
   addActivationLink,
+  allocateActivationVariables,
   detachActivationLinks,
   placementKey,
   rekeyLinks,
@@ -1284,6 +1285,23 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
       (layer) =>
         layer.bottomLayerTiles.some((t) => t !== 0) || layer.topLayerTiles.some((t) => t !== 0),
     );
+    // Derive the activation variable ids authoritatively from the room's links:
+    // 1, 2, 3, … in link order, with every target attached to an activator
+    // sharing that activator's id. Doing it here (rather than while drawing a
+    // link) keeps ids contiguous and stable across edits.
+    //
+    // Only editor placements are passed: legacy actors from the archive keep the
+    // `Variable` the game authored.
+    const allocation = allocateActivationVariables(this.smartObjects(), this.activationLinks());
+    if (allocation.placements.length > 0) {
+      const byKey = new Map(
+        allocation.placements.map((entry) => [placementKey(entry), entry] as const),
+      );
+      this.smartObjects.update((list) =>
+        list.map((entry) => byKey.get(placementKey(entry)) ?? entry),
+      );
+      this.activationLinks.set(allocation.links);
+    }
     // Only the editor's own placements are persisted. Legacy actors are
     // deliberately left out — they belong to the original game data and are
     // re-derived from the archive on the next load.

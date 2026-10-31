@@ -34,6 +34,18 @@ export const FORCE_GEM_ACTOR_ID = 'RUPY';
 /** Stable smart-object id for the force gem. */
 export const FORCE_GEM_ID = 'force-gem';
 
+/**
+ * `Interaction Type` (bits 16-23) used while the gem is an activation target:
+ * *"Appears, activated by variable"*.
+ */
+export const GEM_ACTIVATED_INTERACTION_TYPE = 26;
+
+/**
+ * `Interaction Type` of a plain, always-visible collectible gem (`Does not
+ * Despawn`). Restored when the gem stops being a target.
+ */
+export const GEM_DEFAULT_INTERACTION_TYPE = 3;
+
 /** A smart-object definition that carries the gem's catalog-derived menus. */
 export type GemTypeSmartObjectDefinition = ActivatableSmartObjectDefinition;
 
@@ -61,6 +73,14 @@ export function forceGemDefinition(definition?: ActorDefinition): GemTypeSmartOb
     section: 'Items',
     actorId: FORCE_GEM_ACTOR_ID,
     actorVariable: 3 << 16,
+    // The gem can be an activation TARGET: an activator (e.g. the floor switch)
+    // sets a room-local variable and the gem appears when that variable is set.
+    // `RUPY`'s `Interaction Type` 26 is "Appears, activated by variable".
+    activatable: {
+      isTarget: true,
+      activatedInteractionType: GEM_ACTIVATED_INTERACTION_TYPE,
+      inactiveInteractionType: GEM_DEFAULT_INTERACTION_TYPE,
+    },
     placement: {
       fields: actorFieldMenus(definition, { only: ['Gem Type'], skipActivation: true }),
     },
