@@ -1,4 +1,4 @@
-namespace EFSLevelHub.Wasm;
+namespace FSAMaker.Wasm;
 
 /// <summary>
 /// Entry point for the browser-wasm host. Actual work is exposed through the

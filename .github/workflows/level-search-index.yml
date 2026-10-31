@@ -23,15 +23,15 @@ jobs:
           node-version: 22
 
       - name: Install dependencies
-        working-directory: EFSLevelHub
+        working-directory: FSAMaker
         run: npm ci
 
       - name: Build the level search index
-        working-directory: EFSLevelHub
+        working-directory: FSAMaker
         run: npm run build:level-index
 
       - name: Validate the generated index
-        working-directory: EFSLevelHub
+        working-directory: FSAMaker
         run: |
           test -f public/level/searchindex.json
           node -e "
@@ -49,4 +49,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: level-search-index
-          path: EFSLevelHub/public/level/searchindex.json
+          path: FSAMaker/public/level/searchindex.json

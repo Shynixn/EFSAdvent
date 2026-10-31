@@ -1,9 +1,9 @@
 <#
 .SYNOPSIS
-    Builds the EFSLevelHub.Wasm browser-wasm module and stages it for Angular.
+    Builds the FSAMaker.Wasm browser-wasm module and stages it for Angular.
 
 .DESCRIPTION
-    Publishes the EFSLevelHub.Wasm project (which references FSALib and contains
+    Publishes the FSAMaker.Wasm project (which references FSALib and contains
     the JSON DTOs + [JSExport] interop) for browser-wasm, then copies the runtime
     into the Angular app's public/fsalib folder.
 
@@ -13,7 +13,7 @@
     FSALib, so instead we drop a temporary Directory.Build.props next to FSALib to
     restrict just that project to net8.0, then remove it.
 
-    Run via `npm run build:wasm` from the EFSLevelHub folder.
+    Run via `npm run build:wasm` from the FSAMaker folder.
 
 .NOTES
     Requires: .NET 8 SDK and the `wasm-tools` workload.
@@ -28,21 +28,21 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 # --- Paths -----------------------------------------------------------------
-$appDir     = Split-Path -Parent $MyInvocation.MyCommand.Path   # EFSLevelHub
+$appDir     = Split-Path -Parent $MyInvocation.MyCommand.Path   # FSAMaker
 $repoDir    = Split-Path -Parent $appDir                        # repo root
-$wasmProj   = Join-Path $repoDir 'EFSLevelHub.Wasm/EFSLevelHub.Wasm.csproj'
+$wasmProj   = Join-Path $repoDir 'FSAMaker.Wasm/FSAMaker.Wasm.csproj'
 $publicDir  = Join-Path $appDir 'public/fsalib'
 # Temporary props that restrict FSALib to net8.0 during this build only.
 # Directory.Build.targets is imported AFTER the project body, so it wins over
 # FSALib.csproj's own <TargetFrameworks> list.
 $tempTargets = Join-Path $repoDir 'FSALib/Directory.Build.targets'
 
-Write-Host 'EFSLevelHub WASM build' -ForegroundColor Cyan
+Write-Host 'FSAMaker WASM build' -ForegroundColor Cyan
 Write-Host "  project: $wasmProj"
 Write-Host "  output:  $publicDir"
 
 if (-not (Test-Path $wasmProj)) {
-    throw "EFSLevelHub.Wasm.csproj not found at $wasmProj"
+    throw "FSAMaker.Wasm.csproj not found at $wasmProj"
 }
 
 # --- Restrict FSALib to net8.0 for this build ------------------------------
@@ -59,7 +59,7 @@ $hadTargets = Test-Path $tempTargets
 try {
     Set-Content -Path $tempTargets -Value $targetsContent -Encoding UTF8
 
-    Write-Host "Publishing EFSLevelHub.Wasm for $RuntimeIdentifier ($Configuration)…" -ForegroundColor Cyan
+    Write-Host "Publishing FSAMaker.Wasm for $RuntimeIdentifier ($Configuration)…" -ForegroundColor Cyan
     dotnet publish $wasmProj -c $Configuration -r $RuntimeIdentifier
     if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed with exit code $LASTEXITCODE" }
 }
@@ -90,4 +90,4 @@ Get-ChildItem -Path $frameworkDir -Recurse -File | ForEach-Object {
 
 $count = (Get-ChildItem -Path $publicDir -Recurse -File).Count
 Write-Host "Copied $count file(s) to $publicDir" -ForegroundColor Green
-Write-Host 'EFSLevelHub WASM build complete.' -ForegroundColor Green
+Write-Host 'FSAMaker WASM build complete.' -ForegroundColor Green

@@ -1,4 +1,4 @@
-namespace EFSLevelHub.Wasm;
+namespace FSAMaker.Wasm;
 
 /// <summary>
 /// JSON-serializable projection of a FSALib <c>Stage</c>.

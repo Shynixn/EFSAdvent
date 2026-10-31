@@ -1,7 +1,7 @@
 /**
- * Entity types returned from the EFSLevelHub.Wasm module.
+ * Entity types returned from the FSAMaker.Wasm module.
  *
- * These mirror the C# DTO classes in `EFSLevelHub.Wasm/Dtos.cs`, which project
+ * These mirror the C# DTO classes in `FSAMaker.Wasm/Dtos.cs`, which project
  * the FSALib entities (the FSALib entities themselves can't be JSON-serialized
  * because they expose Span<T> and Stream members).
  *

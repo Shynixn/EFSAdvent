@@ -8,7 +8,7 @@ using FSALib;
 using FSALib.AssetDefinitions;
 using FSALib.Structs;
 
-namespace EFSLevelHub.Wasm;
+namespace FSAMaker.Wasm;
 
 /// <summary>
 /// JS interop surface. Parses FSA stage archives with FSALib and returns the

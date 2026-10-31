@@ -50,7 +50,7 @@ import {
 
 /** Shape of the .NET JSExport host created by dotnet.js. */
 interface DotnetExports {
-  EFSLevelHub: {
+  FSAMaker: {
     Wasm: {
       FsaInterop: {
         ParseStage(arcData: Uint8Array): string;
@@ -193,7 +193,7 @@ export class FSALibService {
   /** Base path (under the dev server) where the wasm runtime files are served. */
   private static readonly WASM_BASE = 'fsalib/';
   /** Assembly that carries the [JSExport] interop. */
-  private static readonly ASSEMBLY = 'EFSLevelHub.Wasm';
+  private static readonly ASSEMBLY = 'FSAMaker.Wasm';
   /** Archive holding the game's shared tileset/sprite/palette resources. */
   private static readonly DATA_ARC_PATH = 'GC4swords/data.arc';
   /** Key `data.arc` is cached under inside the wasm module. */
@@ -265,7 +265,7 @@ export class FSALibService {
     // Intentionally no runMain(): this module exposes functionality purely
     // through [JSExport] and has no meaningful entry point to execute.
     const exports = (await runtime.getAssemblyExports(FSALibService.ASSEMBLY)) as DotnetExports;
-    const fsa = exports.EFSLevelHub.Wasm.FsaInterop;
+    const fsa = exports.FSAMaker.Wasm.FsaInterop;
     this.version = fsa.GetVersion();
     this.logger.info(`FSALib: wasm module loaded (version ${this.version})`);
     return exports;
@@ -613,9 +613,9 @@ export class FSALibService {
   }
 
   /** Fetches the `FsaInterop` export surface, loading the module on first use. */
-  private async getFsa(): Promise<DotnetExports['EFSLevelHub']['Wasm']['FsaInterop']> {
+  private async getFsa(): Promise<DotnetExports['FSAMaker']['Wasm']['FsaInterop']> {
     const exports = await this.getExports();
-    return exports.EFSLevelHub.Wasm.FsaInterop;
+    return exports.FSAMaker.Wasm.FsaInterop;
   }
 
   /**

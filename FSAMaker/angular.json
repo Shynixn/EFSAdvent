@@ -7,7 +7,7 @@
   },
   "newProjectRoot": "projects",
   "projects": {
-    "EFSLevelHub": {
+    "FSAMaker": {
       "projectType": "application",
       "schematics": {},
       "root": "",
@@ -62,10 +62,10 @@
           "builder": "@angular/build:dev-server",
           "configurations": {
             "production": {
-              "buildTarget": "EFSLevelHub:build:production"
+              "buildTarget": "FSAMaker:build:production"
             },
             "development": {
-              "buildTarget": "EFSLevelHub:build:development"
+              "buildTarget": "FSAMaker:build:development"
             }
           },
           "defaultConfiguration": "development"

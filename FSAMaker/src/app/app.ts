@@ -13,7 +13,7 @@ export class App implements OnInit {
   private readonly router = inject(Router);
   private readonly gameState = inject(GameStateService);
 
-  protected readonly title = 'EFSLevelHub';
+  protected readonly title = 'FSAMaker';
 
   async ngOnInit(): Promise<void> {
     // On startup, verify the game's disc assets are present. If not, route the

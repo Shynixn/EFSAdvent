@@ -1,7 +1,7 @@
 import { Injectable, signal } from '@angular/core';
 
 /** `localStorage` key holding the persisted JSON settings object. */
-const STORAGE_KEY = 'efslevelhub.settings';
+const STORAGE_KEY = 'fsamaker.settings';
 
 /**
  * Persisted application settings.

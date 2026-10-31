@@ -53,7 +53,7 @@ export class LogTimer {
  * LoggingService
  * --------------
  * Central application logger. Wraps the browser console with a consistent
- * `[EFSLevelHub]` prefix and a wall-clock timestamp (`HH:MM:SS.mmm`), so log
+ * `[FSAMaker]` prefix and a wall-clock timestamp (`HH:MM:SS.mmm`), so log
  * output can be filtered in devtools and the ordering/duration of work can be
  * read straight off the console.
  *
@@ -63,7 +63,7 @@ export class LogTimer {
  */
 @Injectable({ providedIn: 'root' })
 export class LoggingService {
-  private readonly prefix = '[EFSLevelHub]';
+  private readonly prefix = '[FSAMaker]';
 
   /** Prefixes a message with the current wall-clock time. */
   private stamp(message: string): string {
