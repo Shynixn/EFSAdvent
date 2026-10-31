@@ -48,6 +48,18 @@ export interface SmartObjectVariant {
   bottomLayerTiles: SmartObjectTileOffset[];
   /** Tiles stamped onto the paired top layer (index + 8). */
   topLayerTiles: SmartObjectTileOffset[];
+  /**
+   * Tiles drawn **under the actor in the editor only** — never stamped into the
+   * room and never recorded on the placement.
+   *
+   * Actor-baked objects sit on top of ordinary scenery that the game expects to
+   * already be painted, so leaving it out makes the placed actor float in the
+   * air. The item stand is the motivating case: tile 23 is the `Item pedestal`
+   * the item rests on, but it is a normal base-layer tile the user paints, not
+   * part of the object. Showing it here makes the editor preview match the game
+   * without silently baking tiles the user did not ask for.
+   */
+  previewTiles?: SmartObjectTileOffset[];
 }
 
 /** Toolbox section a definition belongs to. */

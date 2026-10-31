@@ -1002,7 +1002,14 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
       );
     }
 
-    // Actors (enemies) on the active layer, drawn over the tiles.
+    // Editor-only scenery for actor-baked objects (e.g. the item pedestal tile
+    // beneath an Item Stand). Drawn BEFORE the actors so the sprite sits on top
+    // of it. These tiles are never baked into the room, so this is the only
+    // place they appear.
+    this.drawActorPreviewTiles(buffer, renderer);
+
+    // Actors (enemies) on the active layer, drawn over the tiles and over the
+    // editor-only scenery above.
     if (this.actors.length > 0) {
       await renderer.prepareActors();
       for (const actor of this.actors) {
@@ -1026,6 +1033,46 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
     // The overlay shares the canvas with the actor markers + hover outline, so
     // repaint it whenever the room is redrawn.
     this.drawHoverOutline();
+  }
+
+  /**
+   * Draws the editor-only scenery an actor-baked placement carries in
+   * {@link SmartObjectVariant.previewTiles} (e.g. the `Item pedestal` tile under
+   * an Item Stand) onto `buffer`, before the actor sprites are composited.
+   *
+   * These tiles are never baked into the room: they exist only so a placed actor
+   * does not look like it is floating. Only placements on the canvas's own base
+   * layer are drawn, and hidden/dragged placements are skipped so hide and drag
+   * ghosting behave exactly as they do for tile-baked objects.
+   */
+  private drawActorPreviewTiles(buffer: ImageBuffer, renderer: StageRenderer): void {
+    const draggingSource = this.dragging?.source ?? null;
+    for (const placement of flattenPlacements(this._smartObjects)) {
+      if (placement === draggingSource || this.isHidden(placement)) {
+        continue;
+      }
+      if ((placement.baseLayerId ?? 0) !== this.layerIndex) {
+        continue;
+      }
+      const definition = findSmartObjectDefinition(placement.id);
+      if (definition?.baking !== 'actor') {
+        continue;
+      }
+      const variant = smartObjectVariant(
+        definition,
+        placement.variantIndex ?? 0,
+        placement.subTypeIndex ?? 0,
+        placement.scale,
+      );
+      for (const offset of variant.previewTiles ?? []) {
+        const x = (placement.anchorCol + offset.dCol) * TILE_SIZE;
+        const y = (placement.anchorRow + offset.dRow) * TILE_SIZE;
+        if (x < 0 || y < 0 || x >= buffer.width || y >= buffer.height) {
+          continue;
+        }
+        renderer.drawTilesetTile(buffer, x, y, offset.tile, this.gba);
+      }
+    }
   }
 
   /**

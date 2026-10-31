@@ -76,6 +76,20 @@ export interface TilesetInfo {
 export type ResourceReader = (path: string) => Promise<Uint8Array>;
 
 /**
+ * A rendered actor thumbnail plus where the actor's origin (its tile anchor)
+ * sits inside the buffer, in pixels from the buffer's top-left.
+ *
+ * See {@link StageRenderer.renderActorPreviewWithAnchor}.
+ */
+export interface ActorPreview {
+  buffer: ImageBuffer;
+  /** Buffer x of the actor's tile anchor. */
+  anchorX: number;
+  /** Buffer y of the actor's tile anchor. */
+  anchorY: number;
+}
+
+/**
  * The bare file name of a resource reference: strips any directory part.
  *
  * Actor definitions reference textures by bare name (`lift_00.bti`) while the
@@ -679,13 +693,6 @@ export class StageRenderer {
    * @param height   Buffer height in pixels.
    * @param gba      Use the GBA sprite sheet.
    */
-  renderActorPreview(
-    id: string,
-    variable?: number,
-    width?: number,
-    height?: number,
-    gba?: boolean,
-  ): Promise<ImageBuffer | null>;
   async renderActorPreview(
     id: string,
     variable = 0,
@@ -693,6 +700,27 @@ export class StageRenderer {
     height = 32,
     gba = false,
   ): Promise<ImageBuffer | null> {
+    const preview = await this.renderActorPreviewWithAnchor(id, variable, width, height, gba);
+    return preview?.buffer ?? null;
+  }
+
+  /**
+   * Like {@link renderActorPreview}, but also reports where the actor's origin
+   * (its tile anchor) landed inside the returned buffer.
+   *
+   * Callers that draw scenery **under** an actor need this: the buffer is sized
+   * to the sprite's measured bounds, so the anchor is only centred when the
+   * sprite happens to be symmetric about it. Without the reported position a
+   * tile drawn at the buffer's centre drifts away from the sprite (the item
+   * pedestal under an Item Stand is the motivating case).
+   */
+  async renderActorPreviewWithAnchor(
+    id: string,
+    variable = 0,
+    width = 32,
+    height = 32,
+    gba = false,
+  ): Promise<ActorPreview | null> {
     const variants = this.resolveVariants(id, variable);
     if (variants.length === 0) {
       return null;
@@ -735,7 +763,8 @@ export class StageRenderer {
       deltaX,
       deltaY,
     );
-    return buffer;
+    // The actor's origin (its tile anchor) is (0,0) shifted by the same delta.
+    return { buffer, anchorX: deltaX, anchorY: deltaY };
   }
 
   /**

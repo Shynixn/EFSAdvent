@@ -12,6 +12,15 @@
  * | `key`           | `KEY0`| Key          | Item     |
  * | `carrot`        | `NNJN`| Carrot       | Item     |
  * | `force-fairy`   | `FARY`| Fairy        | Item     |
+ * | `item-stand`    | `SWNP`| Item Stand   | TileObject |
+ *
+ * **Item Stand** is a *tile object*, not a loose pickup: it places an `SWNP`
+ * actor whose `Item Stand Configuration` field (bits 14-17) selects which of the
+ * ten inventory items (Pegasus Boots, Lantern, Boomerang, Bow, Hammer, Fire Rod,
+ * Roc's Feather, Bombs, Shovel, Slingshot) sits on the stand. It also carries a
+ * `Interaction Type` field, which must stay at `2` (`Item Stand`) or the actor
+ * stops behaving as a stand, so only `Item Stand Configuration` is exposed and
+ * the remaining bits are pinned to their defaults.
  *
  * The context menus are generated from each actor's catalog fields
  * ({@link actorFieldMenus}), so the bit offsets, widths and enums come from the
@@ -33,6 +42,8 @@ export const KEY_ACTOR_ID = 'KEY0';
 export const CARROT_ACTOR_ID = 'NNJN';
 /** Actor id of the fairy. */
 export const FORCE_FAIRY_ACTOR_ID = 'FARY';
+/** Actor id of the item stand (Switch-Related NPC). */
+export const ITEM_STAND_ACTOR_ID = 'SWNP';
 
 /** Stable smart-object id for the key. */
 export const KEY_ID = 'key';
@@ -40,6 +51,8 @@ export const KEY_ID = 'key';
 export const CARROT_ID = 'carrot';
 /** Stable smart-object id for the force fairy. */
 export const FORCE_FAIRY_ID = 'force-fairy';
+/** Stable smart-object id for the item stand. */
+export const ITEM_STAND_ID = 'item-stand';
 
 /** A user-facing item definition: an actor-baked object with catalog menus. */
 export type ItemSmartObjectDefinition = ActivatableSmartObjectDefinition;
@@ -56,6 +69,8 @@ function itemDefinition(options: {
   actorId: string;
   actorVariable?: number;
   definition?: ActorDefinition;
+  /** Restrict the generated context-menu groups to these actor field names. */
+  only?: readonly string[];
 }): ItemSmartObjectDefinition {
   return {
     id: options.id,
@@ -66,7 +81,10 @@ function itemDefinition(options: {
     // Every field starts at its catalog default (all zero) unless overridden.
     actorVariable: options.actorVariable ?? 0,
     placement: {
-      fields: actorFieldMenus(options.definition, { skipActivation: true }),
+      fields: actorFieldMenus(options.definition, {
+        skipActivation: true,
+        ...(options.only ? { only: options.only } : {}),
+      }),
     },
     // Actors bake no tiles — one empty variant keeps the shared geometry.
     set: [{ bottomLayerTiles: [], topLayerTiles: [] }],
@@ -102,6 +120,7 @@ export function itemDefinitions(
       actorId: FORCE_FAIRY_ACTOR_ID,
       definition: actors?.[FORCE_FAIRY_ACTOR_ID],
     }),
+    itemStandDefinition(actors?.[ITEM_STAND_ACTOR_ID]),
   ];
 }
 
@@ -126,9 +145,59 @@ export const FORCE_FAIRY_DEFINITION: ItemSmartObjectDefinition = itemDefinition(
   actorId: FORCE_FAIRY_ACTOR_ID,
 });
 
+/**
+ * Variable bits 0-3 (`Interaction Type`) must stay at `2` for the actor to act
+ * as an item stand.
+ */
+const ITEM_STAND_INTERACTION_ITEM_STAND = 2;
+
+/**
+ * Tileset id of the `Item pedestal` (tileproperties.json #23: "Can hold an item
+ * on the top layer."). It is ordinary scenery the user paints, so it is only
+ * PREVIEWED under the stand and never baked.
+ */
+export const ITEM_PEDESTAL_TILE = 23;
+
+/**
+ * Builds the Item Stand (`SWNP`) definition.
+ *
+ * Only `Item Stand Configuration` (bits 14-17) is exposed as a menu, because the
+ * `Interaction Type` bits must remain `Item Stand` (2) for the actor to behave
+ * correctly. The default variable therefore pins those bits, so the placed actor
+ * works out of the box (Pegasus Boots on an item stand).
+ *
+ * @param definition The `SWNP` catalog entry, when loaded. Supplies the ten-item
+ *   enum from `Item Stand Configuration`.
+ */
+export function itemStandDefinition(definition?: ActorDefinition): ItemSmartObjectDefinition {
+  const stand = itemDefinition({
+    id: ITEM_STAND_ID,
+    name: 'Item Stand',
+    actorId: ITEM_STAND_ACTOR_ID,
+    actorVariable: ITEM_STAND_INTERACTION_ITEM_STAND,
+    definition,
+    only: ['Item Stand Configuration'],
+  });
+  // The pedestal is drawn UNDER the actor in the editor so the stand does not
+  // appear to float. It stays out of `bottomLayerTiles` on purpose: the pedestal
+  // is normal scenery the user paints, so plating the object must not stamp it.
+  return {
+    ...stand,
+    set: [{
+      bottomLayerTiles: [],
+      topLayerTiles: [],
+      previewTiles: [{ dRow: 0, dCol: 0, tile: ITEM_PEDESTAL_TILE }],
+    }],
+  };
+}
+
+/** The Item Stand definition without catalog metadata (no item menu). */
+export const ITEM_STAND_DEFINITION: ItemSmartObjectDefinition = itemStandDefinition();
+
 /** Static item definitions, used before the actor catalog is loaded. */
 export const ITEM_DEFINITIONS: readonly ItemSmartObjectDefinition[] = [
   KEY_DEFINITION,
   CARROT_DEFINITION,
   FORCE_FAIRY_DEFINITION,
+  ITEM_STAND_DEFINITION,
 ];

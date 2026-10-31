@@ -43,7 +43,7 @@ import {
 import { ITEM_DEFINITIONS, itemDefinitions } from '../../entity/smartobject/items.entity';
 import { migrateActorTemplates } from '../../entity/smartobject/actor-template-migration.entity';
 import { EditorService } from '../../service/editor.service';
-import { ImageBuffer } from '../../service/render/gba-tile-renderer';
+import { ImageBuffer, TILE_SIZE } from '../../service/render/gba-tile-renderer';
 
 /**
  * ToolboxColumnComponent
@@ -605,21 +605,57 @@ export class ToolboxColumnComponent implements AfterViewInit {
         if (!definition) {
           continue;
         }
-        const buffer = await renderer.renderActorPreview(
+        const preview = await renderer.renderActorPreviewWithAnchor(
           definition.actorId ?? '',
           definition.actorVariable ?? 0,
           64,
           64,
           this._gba,
         );
-        if (!buffer) {
+        if (!preview) {
+          // No sprite sheet / render definition for this actor in the current
+          // stage (e.g. the item stand's `SWNP` on a boss archive). Fall back to
+          // the import-time generated icon so the card is never blank.
+          await this.drawIconFallback(canvas, definition.actorId ?? '');
           continue;
         }
-        canvas.width = buffer.width;
-        canvas.height = buffer.height;
-        const scale = Math.min(64 / buffer.width, 64 / buffer.height);
-        canvas.style.width = `${Math.round(buffer.width * scale)}px`;
-        canvas.style.height = `${Math.round(buffer.height * scale)}px`;
+        const buffer = preview.buffer;
+        // Editor-only scenery UNDER the actor (e.g. the item pedestal tile under
+        // an Item Stand): draw the tiles first, then composite the actor on top,
+        // so the sprite is never covered. The tile is anchored to the actor's
+        // ORIGIN, which `renderActorPreviewWithAnchor` reports — using the
+        // buffer centre instead is what made the pedestal sit off the sprite.
+        const previewTiles = definition.set[0]?.previewTiles ?? [];
+        let composed = buffer;
+        if (previewTiles.length > 0) {
+          composed = new ImageBuffer(buffer.width, buffer.height);
+          composed.fill(0, 0, 0, 0);
+          for (const offset of previewTiles) {
+            renderer.drawTilesetTile(
+              composed,
+              preview.anchorX + offset.dCol * TILE_SIZE,
+              preview.anchorY + offset.dRow * TILE_SIZE,
+              offset.tile,
+              this._gba,
+            );
+          }
+          // Alpha-composite the actor over the scenery.
+          for (let i = 0; i < buffer.pixels.length; i += 4) {
+            const alpha = buffer.pixels[i + 3];
+            if (alpha === 0) {
+              continue;
+            }
+            composed.pixels[i] = buffer.pixels[i];
+            composed.pixels[i + 1] = buffer.pixels[i + 1];
+            composed.pixels[i + 2] = buffer.pixels[i + 2];
+            composed.pixels[i + 3] = alpha;
+          }
+        }
+        canvas.width = composed.width;
+        canvas.height = composed.height;
+        const scale = Math.min(64 / composed.width, 64 / composed.height);
+        canvas.style.width = `${Math.round(composed.width * scale)}px`;
+        canvas.style.height = `${Math.round(composed.height * scale)}px`;
 
         const ctx = canvas.getContext('2d');
         if (!ctx) {
@@ -627,7 +663,7 @@ export class ToolboxColumnComponent implements AfterViewInit {
         }
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.putImageData(
-          new ImageData(new Uint8ClampedArray(buffer.pixels), buffer.width, buffer.height),
+          new ImageData(new Uint8ClampedArray(composed.pixels), composed.width, composed.height),
           0,
           0,
         );
