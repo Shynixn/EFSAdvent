@@ -190,7 +190,4 @@ export function bigBlockDefinition(definition?: ActorDefinition): SmartObjectDef
 export const BIG_BLOCK_DEFINITION: SmartObjectDefinition = bigBlockDefinition();
 
 /** Every Misc block object: the tile-based Block plus the actor Big Block. */
-export const BLOCK_DEFINITIONS: SmartObjectDefinition[] = [
-  BLOCK_DEFINITION,
-  BIG_BLOCK_DEFINITION,
-];
+export const BLOCK_DEFINITIONS: SmartObjectDefinition[] = [BLOCK_DEFINITION, BIG_BLOCK_DEFINITION];
