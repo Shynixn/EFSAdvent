@@ -46,7 +46,12 @@ import {
   FLOOR_SWITCH_DEFINITION,
   floorSwitchDefinition,
 } from '../../entity/smartobject/switch.entity';
-import { BLOCK_DEFINITION } from '../../entity/smartobject/block.entity';
+import {
+  BLOCK_DEFINITION,
+  BIG_BLOCK_ACTOR_ID,
+  BIG_BLOCK_DEFINITION,
+  bigBlockDefinition,
+} from '../../entity/smartobject/block.entity';
 import { migrateActorTemplates } from '../../entity/smartobject/actor-template-migration.entity';
 import { EditorService } from '../../service/editor.service';
 import { ImageBuffer, TILE_SIZE } from '../../service/render/gba-tile-renderer';
@@ -1119,7 +1124,7 @@ export class ToolboxColumnComponent implements AfterViewInit {
    * menu) and the Block Color (`BCK2`, with `Movement Direction` + `Block
    * Type`). Both are actor-baked and rebuilt from the catalog.
    */
-  miscObjects: SmartObjectDefinition[] = [BLOCK_DEFINITION];
+  miscObjects: SmartObjectDefinition[] = [BLOCK_DEFINITION, BIG_BLOCK_DEFINITION];
 
   /**
    * Rebuilds the item definitions from the actor catalog.
@@ -1133,7 +1138,10 @@ export class ToolboxColumnComponent implements AfterViewInit {
     }
     this.itemObjects = [forceGemDefinition(actors[FORCE_GEM_ACTOR_ID]), ...itemDefinitions(actors)];
     this.switchObjects = [floorSwitchDefinition(actors[FLOOR_SWITCH_ACTOR_ID])];
-    this.miscObjects = [BLOCK_DEFINITION];
+    this.miscObjects = [
+      BLOCK_DEFINITION,
+      bigBlockDefinition(actors[BIG_BLOCK_ACTOR_ID]),
+    ];
     // Migrate the legacy EFSAdvent presets into real smart objects (their
     // context menus come from the catalog). The raw presets stay visible under
     // "Non smart objects" in the Debug tab regardless.

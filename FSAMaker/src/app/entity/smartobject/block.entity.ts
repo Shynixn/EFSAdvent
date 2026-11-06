@@ -22,6 +22,8 @@
  * menu, so one placement can be switched between every block version.
  */
 
+import { ActorDefinition } from '../actor-definition.entity';
+import { actorFieldMenus } from './actor-fields.entity';
 import { SmartObjectDefinition, SmartObjectSubType } from '../smartobject.definition';
 
 /** Stable smart-object id. */
@@ -83,5 +85,112 @@ export const BLOCK_DEFINITION: SmartObjectDefinition = {
   set: [tileVariant(BLOCK_TILE)],
 };
 
-/** Every Misc block object (just the one). */
-export const BLOCK_DEFINITIONS: SmartObjectDefinition[] = [BLOCK_DEFINITION];
+/**
+ * Big Block (`BLCK`) smart object (Other → Misc).
+ * ----------------------------------------------
+ * A multi-tile movable stone block. Unlike the plain {@link BLOCK_DEFINITION} —
+ * which is a pure tile — the big block is an **actor**: the game draws and moves
+ * it from `BLCK`, and the actor's `Variable` selects its size.
+ *
+ * Catalog fields (`assets/actors/BLCK.json`):
+ *
+ * | Bits  | Field               | Notes                                       |
+ * |-------|---------------------|---------------------------------------------|
+ * | 0-1   | Block Size          | 0 = 1×1, 1 = 2×2, 2 = 3×3, 3 = 4×4          |
+ * | 2-3   | Unknown (Flags)     | bit 3 (`0x8`) is set by every shipped block |
+ * | 8-11  | Special             | bit 0 = "Endlessly Movable"                 |
+ * | 27-31 | Activation Variable | room-local variable set after moving        |
+ *
+ * The original EFSAdvent editor places it exactly like this
+ * (`data/actortemplates/Objects.txt`):
+ *
+ * | Template          | `BLCK` Variable (`V:a,b,c,d`) |
+ * |-------------------|-------------------------------|
+ * | Movable 2x2 Block | `0,0,0,9`  (size 1 \| `0x8`)  |
+ * | Movable 3x3 Block | `0,0,0,10` (size 2 \| `0x8`)  |
+ * | Movable 4x4 Block | `0,0,0,11` (size 3 \| `0x8`)  |
+ *
+ * Those templates start at **2×2** — a 1×1 `BLCK` is possible by the catalog but
+ * was never shipped, so the default here is 2×2 and the menu offers all four
+ * sizes. `BLCK` has a `rendering` block, so the game draws the block itself; no
+ * tile is stamped.
+ */
+
+/** Actor id of the big (actor-based) block. */
+export const BIG_BLOCK_ACTOR_ID = 'BLCK';
+
+/** Stable smart-object id of the big block. */
+export const BIG_BLOCK_ID = 'big-block';
+
+/**
+ * `BLCK` variable bit 3 (`0x8`), set by every shipped block template. The
+ * catalog labels bits 2-3 "Unknown", but all three EFSAdvent templates set this
+ * bit, so it is pinned to match the game's own blocks.
+ */
+const BIG_BLOCK_TEMPLATE_FLAG = 0x8;
+
+/** `BLCK` Block Size (bits 0-1) value for a 2×2 block (the shipped default). */
+const BIG_BLOCK_SIZE_2X2 = 1;
+
+/**
+ * `BLCK` Block Size choices offered in the context menu.
+ *
+ * The catalog lists 1×1 as size 0, but no shipped block uses it and a 1×1 block
+ * is the plain tile-based `Block` object instead — so only the multi-tile sizes
+ * are offered here.
+ */
+const BIG_BLOCK_SIZES = ['2×2', '3×3', '4×4'] as const;
+
+/**
+ * Builds the Big Block (`BLCK`) definition from the actor catalog.
+ *
+ * The default variable matches the EFSAdvent "Movable 2x2 Block" template
+ * (`V:0,0,0,9` = 2×2 | {@link BIG_BLOCK_TEMPLATE_FLAG}).
+ *
+ * Only the **Block Size** menu is exposed, restricted to the multi-tile sizes.
+ * `BLCK`'s other catalog fields are deliberately hidden: `Unknown` (bits 2-3)
+ * and `Special` (bits 8-11) are engine plumbing, bit 3 is pinned by
+ * {@link BIG_BLOCK_TEMPLATE_FLAG}, and `Activation Variable` belongs to the
+ * room activation system.
+ *
+ * @param definition The `BLCK` catalog entry, when loaded. Supplies the
+ *   `Block Size` enum; without it the object still places a working `BLCK`
+ *   actor, it just has no context-menu fields.
+ */
+export function bigBlockDefinition(definition?: ActorDefinition): SmartObjectDefinition {
+  const sizeField = actorFieldMenus(definition, {
+    skipActivation: true,
+    only: ['Block Size'],
+  })[0];
+
+  return {
+    id: BIG_BLOCK_ID,
+    baking: 'actor',
+    name: 'Big Block',
+    section: 'Misc',
+    actorId: BIG_BLOCK_ACTOR_ID,
+    actorVariable: BIG_BLOCK_SIZE_2X2 | BIG_BLOCK_TEMPLATE_FLAG,
+    placement: {
+      fields: sizeField
+        ? [
+            {
+              ...sizeField,
+              // Drop the 1×1 entry: size 0 is the plain tile block, not this one.
+              choices: BIG_BLOCK_SIZES.map((label, index) => ({ value: index + 1, label })),
+            },
+          ]
+        : [],
+    },
+    // Actors bake no tiles — the game draws the block from its sprite.
+    set: [{ bottomLayerTiles: [], topLayerTiles: [] }],
+  };
+}
+
+/** The Big Block definition without catalog metadata (no menus). */
+export const BIG_BLOCK_DEFINITION: SmartObjectDefinition = bigBlockDefinition();
+
+/** Every Misc block object: the tile-based Block plus the actor Big Block. */
+export const BLOCK_DEFINITIONS: SmartObjectDefinition[] = [
+  BLOCK_DEFINITION,
+  BIG_BLOCK_DEFINITION,
+];

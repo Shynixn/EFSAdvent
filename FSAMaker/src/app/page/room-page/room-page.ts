@@ -90,7 +90,11 @@ import {
   floorSwitchDefinition,
 } from '../../entity/smartobject/switch.entity';
 import { migrateActorTemplates } from '../../entity/smartobject/actor-template-migration.entity';
-import { BLOCK_DEFINITION } from '../../entity/smartobject/block.entity';
+import {
+  BLOCK_DEFINITION,
+  BIG_BLOCK_ACTOR_ID,
+  bigBlockDefinition,
+} from '../../entity/smartobject/block.entity';
 import { TilesetTheme } from '../../entity/tileset.util';
 import { StageRenderer } from '../../service/render/stage-renderer';
 import { nextPaint } from '../../util/paint';
@@ -1267,6 +1271,7 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
         // catalog fields, so Block Size / Movement Direction / Colour would be
         // missing from the context menu).
         BLOCK_DEFINITION,
+        bigBlockDefinition(actors[BIG_BLOCK_ACTOR_ID]),
       ]);
       // Migrated EFSAdvent presets are draggable from the toolbox, so their ids
       // (and their catalog-derived context menus) must resolve here too.
