@@ -85,4 +85,3 @@ export const BLOCK_DEFINITION: SmartObjectDefinition = {
 
 /** Every Misc block object (just the one). */
 export const BLOCK_DEFINITIONS: SmartObjectDefinition[] = [BLOCK_DEFINITION];
-
