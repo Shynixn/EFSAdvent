@@ -46,6 +46,7 @@ import {
   FLOOR_SWITCH_DEFINITION,
   floorSwitchDefinition,
 } from '../../entity/smartobject/switch.entity';
+import { BLOCK_DEFINITION } from '../../entity/smartobject/block.entity';
 import { migrateActorTemplates } from '../../entity/smartobject/actor-template-migration.entity';
 import { EditorService } from '../../service/editor.service';
 import { ImageBuffer, TILE_SIZE } from '../../service/render/gba-tile-renderer';
@@ -202,8 +203,11 @@ export class ToolboxColumnComponent implements AfterViewInit {
   /** Whether the Other → Switches section is expanded. */
   readonly switchesOpen = signal(true);
 
-  /** Whether the Misc (actor template) section is expanded. */
+  /** Whether the Other → Misc section is expanded. */
   readonly miscOpen = signal(true);
+
+  /** Whether the Debug → Doors section is expanded. */
+  readonly doorsOpen = signal(true);
 
   /**
    * Toolbox tabs. Each tab groups related sections; every section starts
@@ -214,7 +218,7 @@ export class ToolboxColumnComponent implements AfterViewInit {
    * - **Items & NPC**: actor-baked smart objects that are picked up or talked to
    *   (collectibles, enemies and NPCs).
    * - **Other**: hand-authored smart objects that do not fit the catalog-driven
-   *   sections (currently the floor switch).
+   *   sections (currently the floor switch and block).
    * - **Debug**: everything that does NOT belong to a curated section — doors,
    *   and the remaining EFSAdvent actor presets that the actor catalog cannot
    *   describe (so they could not be migrated into a modern section).
@@ -740,11 +744,179 @@ export class ToolboxColumnComponent implements AfterViewInit {
         );
       }
     }
+
+    // Other → Misc — TILE blocks (the plain Block): draw the object's baked tile.
+    const miscTileCanvases = this.miscTileCanvases();
+    if (miscTileCanvases.length > 0) {
+      for (const ref of miscTileCanvases) {
+        const id = ref.nativeElement.dataset['miscTileId'];
+        const definition = id ? this.miscObjects.find((entry) => entry.id === id) : undefined;
+        const canvas = ref.nativeElement;
+        if (!definition) {
+          continue;
+        }
+        const bounds = smartObjectBounds(definition);
+        canvas.width = bounds.cols * TILE_SIZE;
+        canvas.height = bounds.rows * TILE_SIZE;
+        const buffer = renderSmartObjectPreview(definition, (target, px, py, tileId) =>
+          renderer.drawTilesetTile(target, px, py, tileId, this._gba),
+        );
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          continue;
+        }
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.putImageData(
+          new ImageData(new Uint8ClampedArray(buffer.pixels), buffer.width, buffer.height),
+          0,
+          0,
+        );
+      }
+    }
+
+    // Other → Misc — ACTOR blocks (the Color Block): render the actor sprite,
+    // falling back to the generated icon when the current stage lacks it.
+    const miscActorCanvases = this.miscActorCanvases();
+    if (miscActorCanvases.length > 0) {
+      try {
+        await renderer.prepareActors();
+      } catch {
+        // Sprite sheets may be missing for this stage; skip these thumbnails.
+      }
+      for (const ref of miscActorCanvases) {
+        const id = ref.nativeElement.dataset['miscActorId'];
+        const definition = id ? this.miscObjects.find((entry) => entry.id === id) : undefined;
+        const canvas = ref.nativeElement;
+        if (!definition) {
+          continue;
+        }
+        const preview = await renderer.renderActorPreviewWithAnchor(
+          definition.actorId ?? '',
+          definition.actorVariable ?? 0,
+          64,
+          64,
+          this._gba,
+        );
+        if (!preview) {
+          // The stage cannot draw this actor. Fall back to the object's own
+          // tiles (the Block stamps tile 33 for real), then any editor-only
+          // preview tiles, then the generated actor icon.
+          const fallbackTiles = [
+            ...(definition.set[0]?.bottomLayerTiles ?? []),
+            ...(definition.set[0]?.previewTiles ?? []),
+          ];
+          if (fallbackTiles.length > 0) {
+            await this.drawTilePreview(canvas, definition);
+          } else {
+            await this.drawIconFallback(canvas, definition.actorId ?? '');
+          }
+          continue;
+        }
+        const buffer = preview.buffer;
+        // Scenery UNDER the actor: the object's REAL tiles (the Block's tile 33)
+        // plus any editor-only preview tiles. Drawn first so the sprite sits on
+        // top, matching the canvas.
+        //
+        // `drawsOwnTiles === false` means the object HAS a sprite and its real
+        // tile is shown separately (the Block), so only the editor-only preview
+        // tiles are composited — otherwise the block would render twice.
+        const previewTiles = [
+          ...(definition.drawsOwnTiles === false
+            ? []
+            : (definition.set[0]?.bottomLayerTiles ?? [])),
+          ...(definition.set[0]?.previewTiles ?? []),
+        ];
+        let composed = buffer;
+        if (previewTiles.length > 0) {
+          composed = new ImageBuffer(buffer.width, buffer.height);
+          composed.fill(0, 0, 0, 0);
+          for (const offset of previewTiles) {
+            renderer.drawTilesetTile(
+              composed,
+              preview.anchorX + offset.dCol * TILE_SIZE,
+              preview.anchorY + offset.dRow * TILE_SIZE,
+              offset.tile,
+              this._gba,
+            );
+          }
+          for (let i = 0; i < buffer.pixels.length; i += 4) {
+            const alpha = buffer.pixels[i + 3];
+            if (alpha === 0) {
+              continue;
+            }
+            composed.pixels[i] = buffer.pixels[i];
+            composed.pixels[i + 1] = buffer.pixels[i + 1];
+            composed.pixels[i + 2] = buffer.pixels[i + 2];
+            composed.pixels[i + 3] = alpha;
+          }
+        }
+        canvas.width = composed.width;
+        canvas.height = composed.height;
+        const miscScale = Math.min(64 / composed.width, 64 / composed.height);
+        canvas.style.width = `${Math.round(composed.width * miscScale)}px`;
+        canvas.style.height = `${Math.round(composed.height * miscScale)}px`;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          continue;
+        }
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.putImageData(
+          new ImageData(new Uint8ClampedArray(composed.pixels), composed.width, composed.height),
+          0,
+          0,
+        );
+      }
+    }
   }
 
   /** Selects an actor-template tab. */
   selectSection(section: ActorTemplateSection): void {
     this.activeSection.set(section);
+  }
+
+  /**
+   * Renders a definition's editor-only preview tiles into a thumbnail canvas.
+   *
+   * Used when an actor-baked object cannot draw its sprite but declares
+   * `previewTiles` (the Block Color's tile 34), so the card still shows the
+   * tile the object stands for.
+   */
+  private async drawTilePreview(
+    canvas: HTMLCanvasElement,
+    definition: SmartObjectDefinition,
+  ): Promise<void> {
+    const renderer = this._renderer;
+    if (!renderer) {
+      return;
+    }
+    await renderer.prepareTileset();
+    const bounds = smartObjectBounds(definition);
+    canvas.width = bounds.cols * TILE_SIZE;
+    canvas.height = bounds.rows * TILE_SIZE;
+    const buffer = new ImageBuffer(canvas.width, canvas.height);
+    buffer.fill(0, 0, 0, 0);
+    for (const offset of [
+      ...(definition.set[0]?.bottomLayerTiles ?? []),
+      ...(definition.set[0]?.previewTiles ?? []),
+    ]) {
+      renderer.drawTilesetTile(
+        buffer,
+        (offset.dCol - bounds.minCol) * TILE_SIZE,
+        (offset.dRow - bounds.minRow) * TILE_SIZE,
+        offset.tile,
+        this._gba,
+      );
+    }
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      return;
+    }
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.putImageData(
+      new ImageData(new Uint8ClampedArray(buffer.pixels), buffer.width, buffer.height),
+      0,
+      0,
+    );
   }
 
   /**
@@ -850,9 +1022,14 @@ export class ToolboxColumnComponent implements AfterViewInit {
     this.switchesOpen.update((open) => !open);
   }
 
-  /** Toggles the Misc (actor template) section. */
+  /** Toggles the Other → Misc section. */
   toggleMisc(): void {
     this.miscOpen.update((open) => !open);
+  }
+
+  /** Toggles the Debug → Doors section. */
+  toggleDoors(): void {
+    this.doorsOpen.update((open) => !open);
   }
 
   /** Selects a ground (or deselects it when the same one is clicked again). */
@@ -930,12 +1107,19 @@ export class ToolboxColumnComponent implements AfterViewInit {
 
   /**
    * Other-tab smart objects: hand-authored definitions that the catalog-driven
-   * sections do not cover. Currently the floor switch.
+   * sections do not cover.
    *
    * Rebuilt from the actor catalog when it arrives so the switch's field menus
    * (`Switch Behavior`, trigger areas, …) come from FSALib.
    */
   switchObjects: SmartObjectDefinition[] = [FLOOR_SWITCH_DEFINITION];
+
+  /**
+   * Other → Misc smart objects: the movable Block (`BLCK`, with a `Block Size`
+   * menu) and the Block Color (`BCK2`, with `Movement Direction` + `Block
+   * Type`). Both are actor-baked and rebuilt from the catalog.
+   */
+  miscObjects: SmartObjectDefinition[] = [BLOCK_DEFINITION];
 
   /**
    * Rebuilds the item definitions from the actor catalog.
@@ -949,6 +1133,7 @@ export class ToolboxColumnComponent implements AfterViewInit {
     }
     this.itemObjects = [forceGemDefinition(actors[FORCE_GEM_ACTOR_ID]), ...itemDefinitions(actors)];
     this.switchObjects = [floorSwitchDefinition(actors[FLOOR_SWITCH_ACTOR_ID])];
+    this.miscObjects = [BLOCK_DEFINITION];
     // Migrate the legacy EFSAdvent presets into real smart objects (their
     // context menus come from the catalog). The raw presets stay visible under
     // "Non smart objects" in the Debug tab regardless.
@@ -967,6 +1152,14 @@ export class ToolboxColumnComponent implements AfterViewInit {
 
   /** The Other → Switches preview canvases. */
   private readonly switchCanvases = viewChildren<ElementRef<HTMLCanvasElement>>('switchPreview');
+
+  /** The Other → Misc TILE preview canvases (e.g. the plain Block). */
+  private readonly miscTileCanvases =
+    viewChildren<ElementRef<HTMLCanvasElement>>('miscTilePreview');
+
+  /** The Other → Misc ACTOR preview canvases (e.g. the Color Block). */
+  private readonly miscActorCanvases =
+    viewChildren<ElementRef<HTMLCanvasElement>>('miscActorPreview');
 
   /** Starts a native drag for an item actor object. */
   onItemDragStart(event: DragEvent, definition: SmartObjectDefinition): void {

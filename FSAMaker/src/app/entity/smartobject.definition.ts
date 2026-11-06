@@ -64,7 +64,15 @@ export interface SmartObjectVariant {
 
 /** Toolbox section a definition belongs to. */
 export type SmartObjectSection =
-  'Doors' | 'Decorations' | 'Enemies' | 'Items' | 'NPC' | 'Objects' | 'Special' | 'Switches';
+  | 'Doors'
+  | 'Decorations'
+  | 'Enemies'
+  | 'Items'
+  | 'Misc'
+  | 'NPC'
+  | 'Objects'
+  | 'Special'
+  | 'Switches';
 
 /**
  * A selectable sub-type of a definition (e.g. a door can be a plain door, a
@@ -143,6 +151,64 @@ export interface SmartObjectDefinition {
   actorVariable?: number;
   /** Whether the actor has no GBA-variant sprite (actor-baked objects only). */
   noGBASprite?: boolean;
+  /**
+   * Whether the canvas should ALSO draw this object's own tiles on top of the
+   * room layers (actor-baked objects only).
+   *
+   * Actor-baked objects normally bake no tiles, but some draw themselves with
+   * tiles (the floor switch: `SWTH` has no sprite, tile 18 is its graphics), so
+   * the canvas must draw those tiles itself — the room layer may not contain
+   * them after a reload. An object that has a REAL sprite AND stamps a real tile
+   * (the Block: `BLCK` + tile 33) must NOT set this, or the tile and the sprite
+   * would both render and the block would appear twice.
+   *
+   * Defaults to `true` (draw them), which keeps the switch working.
+   */
+  drawsOwnTiles?: boolean;
+  /**
+   * Extra half-tile offset applied to this object's actor when it is baked into
+   * the archive (actor-baked objects only).
+   *
+   * Actor coordinates are HALF-TILES, and their anchor is the top-left of the
+   * placement's tile. A sprite whose art is centred on its own origin (rather
+   * than top-left) therefore lands half a tile up/left of the tile it stands
+   * on — the "floating ghost" a placed block showed. Setting this to `+1` moves
+   * the actor to the tile centre, cancelling that offset.
+   *
+   * Applied on top of any per-placement {@link SmartObjectPlacement.halfTileDx}.
+   */
+  actorHalfTileOffset?: { dx: number; dy: number };
+  /**
+   * Optional PER-PLACEMENT override of {@link actorHalfTileOffset}.
+   *
+   * Needed when one smart object bakes different actors whose sprites are
+   * anchored differently: the Block bakes `BLCK` (no sprite offset, needs
+   * `+1/+1`) but `BCK2` when coloured (its catalog variants carry
+   * `xoffset/yoffset: 8`, so it already self-centres and needs `0/0`).
+   */
+  actorHalfTileOffsetFor?: (placement: { actorVariable?: number }) => {
+    dx: number;
+    dy: number;
+  };
+  /**
+   * Optional per-placement ACTOR choice for actor-baked objects.
+   *
+   * Most objects bake a fixed {@link actorId}. A few (the Block) encode
+   * *several* actors in one smart object and pick the actor from the
+   * placement's `Variable` — e.g. the plain block bakes `BLCK`, while the same
+   * object with a colour selected bakes `BCK2`. The host therefore never needs
+   * to know the mapping: {@link bakedActorId} asks the definition.
+   */
+  actorIdFor?: (placement: { actorVariable?: number }) => string;
+  /**
+   * Optional per-placement VARIABLE translation for actor-baked objects.
+   *
+   * The editor may store a placement's choices in a layout that differs from
+   * the chosen actor's real field layout (the Block keeps `Size` at bits 8-9 for
+   * both actors but `BLCK` expects it at bits 0-1). Returns the variable to
+   * actually write into the archive, given the placement.
+   */
+  actorVariableFor?: (placement: { actorVariable?: number }) => number;
 }
 
 /**

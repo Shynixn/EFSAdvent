@@ -1091,8 +1091,15 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
       };
       // Bottom layer, then the object's own top-layer tiles, then editor-only
       // scenery (which sits underneath the actor, not above it).
-      draw(variant.bottomLayerTiles);
-      draw(variant.topLayerTiles);
+      //
+      // `drawsOwnTiles === false` means the object's real tiles are ALREADY in
+      // the room layer AND the object has a sprite (the Block: `BLCK` + tile
+      // 33). Drawing them again would render the block twice, so only the
+      // editor-only preview tiles are drawn then.
+      if (definition.drawsOwnTiles !== false) {
+        draw(variant.bottomLayerTiles);
+        draw(variant.topLayerTiles);
+      }
       draw(variant.previewTiles ?? []);
     }
   }
@@ -3174,7 +3181,10 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
     );
     const dragStampsTiles =
       dragVariant.bottomLayerTiles.length > 0 || dragVariant.topLayerTiles.length > 0;
-    if (dragging.definition.baking === 'actor' && !dragStampsTiles) {
+    // An actor-baked object that ALSO has a sprite (the Block) is the true
+    // result: tile + actor. Draw both so the ghost matches what gets placed.
+    const dragDrawsActorSprite = dragging.definition.baking === 'actor';
+    if (dragDrawsActorSprite && (!dragStampsTiles || dragging.definition.drawsOwnTiles === false)) {
       // Build the exact actor record the drop would create and draw it through
       // the same renderer path — so the ghost lines up pixel-for-pixel with the
       // placed result (sprites are bottom-centre anchored and may use offsets).
@@ -3189,6 +3199,23 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
       });
       const scratch = new ImageBuffer(canvas.width, canvas.height);
       scratch.fill(0, 0, 0, 0);
+      // Draw the object's real tiles FIRST (when it stamps any) so the sprite
+      // sits on top, exactly like the placed result.
+      if (dragStampsTiles) {
+        const drawTile = (offsets: readonly SmartObjectTileOffset[]): void => {
+          for (const offset of offsets) {
+            renderer.drawTilesetTile(
+              scratch,
+              (dragging.anchorCol + offset.dCol) * TILE_SIZE,
+              (dragging.anchorRow + offset.dRow) * TILE_SIZE,
+              offset.tile,
+              this.gba,
+            );
+          }
+        };
+        drawTile(dragVariant.bottomLayerTiles);
+        drawTile(dragVariant.topLayerTiles);
+      }
       renderer.drawActorAt(scratch, actor, this.gba);
       const image = new ImageData(
         new Uint8ClampedArray(scratch.pixels),

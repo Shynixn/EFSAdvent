@@ -24,6 +24,7 @@ import { GOAL_DEFINITION } from './smartobject/goal.entity';
 import { FORCE_GEM_DEFINITION } from './smartobject/force-gem.entity';
 import { ITEM_DEFINITIONS } from './smartobject/items.entity';
 import { FLOOR_SWITCH_DEFINITION } from './smartobject/switch.entity';
+import { BLOCK_DEFINITION } from './smartobject/block.entity';
 import { withDoorLifecycle } from './contract/placeable-hooks.entity';
 import {
   SmartObjectScale,
@@ -135,6 +136,9 @@ registerActorSmartObjects([
   FORCE_GEM_DEFINITION,
   ...ITEM_DEFINITIONS,
   FLOOR_SWITCH_DEFINITION,
+  // Misc blocks live in their own entity module (not the static catalog), so
+  // they must be registered here for hover / move / delete / sub-type lookup.
+  BLOCK_DEFINITION,
 ]);
 
 // Install object-specific lifecycle behaviour (see `placeable-hooks.entity.ts`).
@@ -453,12 +457,25 @@ export function restampSmartObjectTiles(
  * itself is drawn bottom-centre anchored from there.
  */
 export function placementToActor(placement: SmartObjectPlacement): ActorData {
+  const definition = findSmartObjectDefinition(placement.id);
+  // A definition may translate the editor's own variable layout into the
+  // chosen actor's real layout (the Block stores size at bits 8-9, but `BLCK`
+  // reads it from bits 0-1).
+  const variable = definition?.actorVariableFor
+    ? definition.actorVariableFor(placement)
+    : (placement.actorVariable ?? 0);
+  // A definition may shift its actor to the tile CENTRE (a sprite whose art is
+  // centred on its own origin would otherwise float half a tile up/left). A
+  // per-placement override wins, because one object may bake actors whose
+  // sprites are anchored differently (`BLCK` vs `BCK2`).
+  const offset = definition?.actorHalfTileOffsetFor?.(placement) ??
+    definition?.actorHalfTileOffset ?? { dx: 0, dy: 0 };
   return {
     Id: bakedActorId(placement),
     Layer: placement.baseLayerId,
-    X: placement.anchorCol * 2 + (placement.halfTileDx ?? 0),
-    Y: placement.anchorRow * 2 + (placement.halfTileDy ?? 0),
-    Variable: placement.actorVariable ?? 0,
+    X: placement.anchorCol * 2 + offset.dx + (placement.halfTileDx ?? 0),
+    Y: placement.anchorRow * 2 + offset.dy + (placement.halfTileDy ?? 0),
+    Variable: variable,
   };
 }
 
@@ -474,7 +491,16 @@ export function placementToActor(placement: SmartObjectPlacement): ActorData {
  * template look like a "legacy" actor that was never recorded.
  */
 export function bakedActorId(placement: SmartObjectPlacement): string {
-  return findSmartObjectDefinition(placement.id)?.actorId ?? placement.id;
+  const definition = findSmartObjectDefinition(placement.id);
+  // A definition may encode MORE than one actor and choose per placement (the
+  // Block bakes `BLCK` normally and `BCK2` when a colour is selected).
+  if (definition?.actorIdFor) {
+    const chosen = definition.actorIdFor(placement);
+    if (chosen) {
+      return chosen;
+    }
+  }
+  return definition?.actorId ?? placement.id;
 }
 
 /** Actor id of the warp smart object. */
@@ -938,7 +964,14 @@ export function smartObjectBounds(
   cols: number;
 } {
   const variant = smartObjectVariant(definition, variantIndex, subTypeIndex, scale);
-  const all = [...variant.bottomLayerTiles, ...variant.topLayerTiles];
+  // Include editor-only preview tiles so an actor-baked object that bakes no
+  // tiles (but declares a preview tile, e.g. the Block Color) still has a
+  // sensible footprint instead of collapsing to 0x0.
+  const all = [
+    ...variant.bottomLayerTiles,
+    ...variant.topLayerTiles,
+    ...(variant.previewTiles ?? []),
+  ];
   let minRow = 0;
   let minCol = 0;
   let maxRow = 0;
