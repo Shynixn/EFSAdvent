@@ -24,7 +24,11 @@ import { GOAL_DEFINITION } from './smartobject/goal.entity';
 import { FORCE_GEM_DEFINITION } from './smartobject/force-gem.entity';
 import { ITEM_DEFINITIONS } from './smartobject/items.entity';
 import { FLOOR_SWITCH_DEFINITION } from './smartobject/switch.entity';
-import { BLOCK_DEFINITION, BIG_BLOCK_DEFINITION } from './smartobject/block.entity';
+import {
+  BLOCK_DEFINITION,
+  BIG_BLOCK_DEFINITION,
+  BLOCK_TRIGGER_DEFINITION,
+} from './smartobject/block.entity';
 import { withDoorLifecycle } from './contract/placeable-hooks.entity';
 import {
   SmartObjectScale,
@@ -140,6 +144,7 @@ registerActorSmartObjects([
   // they must be registered here for hover / move / delete / sub-type lookup.
   BLOCK_DEFINITION,
   BIG_BLOCK_DEFINITION,
+  BLOCK_TRIGGER_DEFINITION,
 ]);
 
 // Install object-specific lifecycle behaviour (see `placeable-hooks.entity.ts`).

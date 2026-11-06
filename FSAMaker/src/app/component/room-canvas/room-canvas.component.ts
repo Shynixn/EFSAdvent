@@ -1079,16 +1079,31 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
         placement.subTypeIndex ?? 0,
         placement.scale,
       );
-      const draw = (offsets: readonly SmartObjectTileOffset[]): void => {
+      const translucent = definition.translucentPreviewTiles === true;
+      /** Draws one tile, ghosted when the definition asks for a translucent hint. */
+      const drawOne = (
+        offsets: readonly SmartObjectTileOffset[],
+        ghost: boolean,
+      ): void => {
         for (const offset of offsets) {
           const x = (placement.anchorCol + offset.dCol) * TILE_SIZE;
           const y = (placement.anchorRow + offset.dRow) * TILE_SIZE;
           if (x < 0 || y < 0 || x >= buffer.width || y >= buffer.height) {
             continue;
           }
-          renderer.drawTilesetTile(buffer, x, y, offset.tile, this.gba);
+          if (!ghost) {
+            renderer.drawTilesetTile(buffer, x, y, offset.tile, this.gba);
+            continue;
+          }
+          // Editor-only hint: render the tile into a scratch buffer, then blend
+          // it at half opacity so the block reads as a marker, not real terrain.
+          const tile = new ImageBuffer(TILE_SIZE, TILE_SIZE);
+          tile.fill(0, 0, 0, 0);
+          renderer.drawTilesetTile(tile, 0, 0, offset.tile, this.gba);
+          buffer.blendFrom(tile, x, y, 0.5);
         }
       };
+      const draw = (offsets: readonly SmartObjectTileOffset[]): void => drawOne(offsets, false);
       // Bottom layer, then the object's own top-layer tiles, then editor-only
       // scenery (which sits underneath the actor, not above it).
       //
@@ -1100,7 +1115,7 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
         draw(variant.bottomLayerTiles);
         draw(variant.topLayerTiles);
       }
-      draw(variant.previewTiles ?? []);
+      drawOne(variant.previewTiles ?? [], translucent);
     }
   }
 
@@ -3181,9 +3196,21 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
     );
     const dragStampsTiles =
       dragVariant.bottomLayerTiles.length > 0 || dragVariant.topLayerTiles.length > 0;
+    const dragPreviewTiles = dragVariant.previewTiles ?? [];
     // An actor-baked object that ALSO has a sprite (the Block) is the true
     // result: tile + actor. Draw both so the ghost matches what gets placed.
-    const dragDrawsActorSprite = dragging.definition.baking === 'actor';
+    //
+    // Objects with NO drawable sprite (`PONT`'s Block Trigger bakes an invisible
+    // actor) must NOT take this branch — drawing them would paint nothing and
+    // hide their editor-only `previewTiles` hint.
+    const dragDrawsActorSprite =
+      dragging.definition.baking === 'actor' &&
+      (dragStampsTiles ||
+        renderer.canRenderActor(
+          dragging.definition.actorId ?? '',
+          dragging.source?.actorVariable ?? dragging.definition.actorVariable ?? 0,
+          this.gba,
+        ));
     if (dragDrawsActorSprite && (!dragStampsTiles || dragging.definition.drawsOwnTiles === false)) {
       // Build the exact actor record the drop would create and draw it through
       // the same renderer path — so the ghost lines up pixel-for-pixel with the
@@ -3216,6 +3243,18 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
         drawTile(dragVariant.bottomLayerTiles);
         drawTile(dragVariant.topLayerTiles);
       }
+      // Editor-only hint (never stamped), ghosted to match the placed look.
+      for (const offset of dragPreviewTiles) {
+        const tile = new ImageBuffer(TILE_SIZE, TILE_SIZE);
+        tile.fill(0, 0, 0, 0);
+        renderer.drawTilesetTile(tile, 0, 0, offset.tile, this.gba);
+        scratch.blendFrom(
+          tile,
+          (dragging.anchorCol + offset.dCol) * TILE_SIZE,
+          (dragging.anchorRow + offset.dRow) * TILE_SIZE,
+          0.5,
+        );
+      }
       renderer.drawActorAt(scratch, actor, this.gba);
       const image = new ImageData(
         new Uint8ClampedArray(scratch.pixels),
@@ -3245,6 +3284,29 @@ export class RoomCanvasComponent implements AfterViewInit, OnDestroy {
       dragging.subTypeIndex,
       dragging.scale,
     );
+    // `renderSmartObjectPreview` only draws the object's REAL tiles. An
+    // editor-only hint (`previewTiles`) — e.g. the Block Trigger, which bakes no
+    // tiles and has no sprite — would otherwise preview as nothing at all.
+    const previewVariant = smartObjectVariant(
+      dragging.definition,
+      dragging.variantIndex ?? 0,
+      dragging.subTypeIndex ?? 0,
+      dragging.scale,
+    );
+    const previewTiles = previewVariant.previewTiles ?? [];
+    if (previewTiles.length > 0) {
+      const tile = new ImageBuffer(TILE_SIZE, TILE_SIZE);
+      for (const offset of previewTiles) {
+        tile.fill(0, 0, 0, 0);
+        renderer.drawTilesetTile(tile, 0, 0, offset.tile, this.gba);
+        buffer.blendFrom(
+          tile,
+          (offset.dCol - bounds.minCol) * TILE_SIZE,
+          (offset.dRow - bounds.minRow) * TILE_SIZE,
+          0.5,
+        );
+      }
+    }
     const image = new ImageData(new Uint8ClampedArray(buffer.pixels), buffer.width, buffer.height);
     ctx.globalAlpha = 0.5;
     ctx.putImageData(image, originX, originY);

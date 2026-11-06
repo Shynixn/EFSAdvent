@@ -93,6 +93,8 @@ import { migrateActorTemplates } from '../../entity/smartobject/actor-template-m
 import {
   BLOCK_DEFINITION,
   BIG_BLOCK_ACTOR_ID,
+  BLOCK_TRIGGER_ACTOR_ID,
+  blockTriggerDefinition,
   bigBlockDefinition,
 } from '../../entity/smartobject/block.entity';
 import { TilesetTheme } from '../../entity/tileset.util';
@@ -1272,6 +1274,7 @@ export class RoomPage implements OnInit, OnDestroy, PendingChangesHost {
         // missing from the context menu).
         BLOCK_DEFINITION,
         bigBlockDefinition(actors[BIG_BLOCK_ACTOR_ID]),
+        blockTriggerDefinition(actors[BLOCK_TRIGGER_ACTOR_ID]),
       ]);
       // Migrated EFSAdvent presets are draggable from the toolbox, so their ids
       // (and their catalog-derived context menus) must resolve here too.

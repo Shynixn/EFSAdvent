@@ -396,8 +396,10 @@
         @if (miscOpen()) {
           <div class="space-y-2 border-t border-slate-800 px-3 py-3">
             <p class="text-[11px] text-slate-500">
-              Drag a block onto the room canvas. Right-click it to choose which block tile to use
-              (not movable, movable, coloured, or a locked direction).
+              Drag a block onto the room canvas. Right-click <strong>Block</strong> to choose which
+              block tile to use, <strong>Big Block</strong> to set its size, and
+              <strong>Block Trigger</strong> to link it to a target (<em>Activates</em>). The trigger
+              is invisible in-game — the ghosted block only marks where it sits.
             </p>
             <div class="flex flex-wrap gap-2">
               @for (item of miscObjects; track item.id) {

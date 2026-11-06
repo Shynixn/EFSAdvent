@@ -166,6 +166,15 @@ export interface SmartObjectDefinition {
    */
   drawsOwnTiles?: boolean;
   /**
+   * Whether this object's {@link SmartObjectVariant.previewTiles} should be
+   * drawn SEMI-TRANSPARENT on the canvas (actor-baked objects only).
+   *
+   * Use for editors-only hints marking something invisible in-game — the Block
+   * Trigger (`PONT`) bakes no tiles and has no sprite, so a ghosted block tile
+   * shows where the trigger sits without pretending the tile exists.
+   */
+  translucentPreviewTiles?: boolean;
+  /**
    * Extra half-tile offset applied to this object's actor when it is baked into
    * the archive (actor-baked objects only).
    *

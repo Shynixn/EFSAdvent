@@ -50,7 +50,10 @@ import {
   BLOCK_DEFINITION,
   BIG_BLOCK_ACTOR_ID,
   BIG_BLOCK_DEFINITION,
+  BLOCK_TRIGGER_ACTOR_ID,
+  BLOCK_TRIGGER_DEFINITION,
   bigBlockDefinition,
+  blockTriggerDefinition,
 } from '../../entity/smartobject/block.entity';
 import { migrateActorTemplates } from '../../entity/smartobject/actor-template-migration.entity';
 import { EditorService } from '../../service/editor.service';
@@ -900,18 +903,23 @@ export class ToolboxColumnComponent implements AfterViewInit {
     canvas.height = bounds.rows * TILE_SIZE;
     const buffer = new ImageBuffer(canvas.width, canvas.height);
     buffer.fill(0, 0, 0, 0);
-    for (const offset of [
-      ...(definition.set[0]?.bottomLayerTiles ?? []),
-      ...(definition.set[0]?.previewTiles ?? []),
-    ]) {
-      renderer.drawTilesetTile(
-        buffer,
-        (offset.dCol - bounds.minCol) * TILE_SIZE,
-        (offset.dRow - bounds.minRow) * TILE_SIZE,
-        offset.tile,
-        this._gba,
-      );
-    }
+    const translucent = definition.translucentPreviewTiles === true;
+    const drawTile = (offsets: readonly { dRow: number; dCol: number; tile: number }[], ghost: boolean) => {
+      for (const offset of offsets) {
+        const px = (offset.dCol - bounds.minCol) * TILE_SIZE;
+        const py = (offset.dRow - bounds.minRow) * TILE_SIZE;
+        if (!ghost) {
+          renderer.drawTilesetTile(buffer, px, py, offset.tile, this._gba);
+          continue;
+        }
+        const tile = new ImageBuffer(TILE_SIZE, TILE_SIZE);
+        tile.fill(0, 0, 0, 0);
+        renderer.drawTilesetTile(tile, 0, 0, offset.tile, this._gba);
+        buffer.blendFrom(tile, px, py, 0.5);
+      }
+    };
+    drawTile(definition.set[0]?.bottomLayerTiles ?? [], false);
+    drawTile(definition.set[0]?.previewTiles ?? [], translucent);
     const ctx = canvas.getContext('2d');
     if (!ctx) {
       return;
@@ -1124,7 +1132,11 @@ export class ToolboxColumnComponent implements AfterViewInit {
    * menu) and the Block Color (`BCK2`, with `Movement Direction` + `Block
    * Type`). Both are actor-baked and rebuilt from the catalog.
    */
-  miscObjects: SmartObjectDefinition[] = [BLOCK_DEFINITION, BIG_BLOCK_DEFINITION];
+  miscObjects: SmartObjectDefinition[] = [
+    BLOCK_DEFINITION,
+    BIG_BLOCK_DEFINITION,
+    BLOCK_TRIGGER_DEFINITION,
+  ];
 
   /**
    * Rebuilds the item definitions from the actor catalog.
@@ -1138,7 +1150,11 @@ export class ToolboxColumnComponent implements AfterViewInit {
     }
     this.itemObjects = [forceGemDefinition(actors[FORCE_GEM_ACTOR_ID]), ...itemDefinitions(actors)];
     this.switchObjects = [floorSwitchDefinition(actors[FLOOR_SWITCH_ACTOR_ID])];
-    this.miscObjects = [BLOCK_DEFINITION, bigBlockDefinition(actors[BIG_BLOCK_ACTOR_ID])];
+    this.miscObjects = [
+      BLOCK_DEFINITION,
+      bigBlockDefinition(actors[BIG_BLOCK_ACTOR_ID]),
+      blockTriggerDefinition(actors[BLOCK_TRIGGER_ACTOR_ID]),
+    ];
     // Migrate the legacy EFSAdvent presets into real smart objects (their
     // context menus come from the catalog). The raw presets stay visible under
     // "Non smart objects" in the Debug tab regardless.

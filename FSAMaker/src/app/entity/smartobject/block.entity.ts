@@ -23,6 +23,7 @@
  */
 
 import { ActorDefinition } from '../actor-definition.entity';
+import { ActivatableSmartObjectDefinition } from '../contract/activatable.entity';
 import { actorFieldMenus } from './actor-fields.entity';
 import { SmartObjectDefinition, SmartObjectSubType } from '../smartobject.definition';
 
@@ -189,5 +190,104 @@ export function bigBlockDefinition(definition?: ActorDefinition): SmartObjectDef
 /** The Big Block definition without catalog metadata (no menus). */
 export const BIG_BLOCK_DEFINITION: SmartObjectDefinition = bigBlockDefinition();
 
-/** Every Misc block object: the tile-based Block plus the actor Big Block. */
-export const BLOCK_DEFINITIONS: SmartObjectDefinition[] = [BLOCK_DEFINITION, BIG_BLOCK_DEFINITION];
+/**
+ * Block Trigger (`PONT`) smart object (Other → Misc).
+ * --------------------------------------------------
+ * An **invisible activator**: it bakes a `PONT` "Point Check" actor, which fires
+ * when the tile under it changes (the classic "push a block onto this spot"
+ * trigger). Use the right-click **Activates** action to link it to a target.
+ *
+ * `PONT` is a `TileObject` with no `rendering` block, so on its own it draws
+ * NOTHING — which is why the definition carries an editor-only
+ * {@link SmartObjectVariant.previewTiles} entry: a semi-transparent block hint
+ * that is drawn on the canvas but **never stamped** into the room.
+ *
+ * Catalog fields (`assets/actors/PONT.json`):
+ *
+ * | Bits  | Field            | Notes                                    |
+ * |-------|------------------|------------------------------------------|
+ * | 0-3   | Action Type      | what the trigger does (enum)             |
+ * | 27-31 | Enabled Variable | room-local variable the trigger sets     |
+ *
+ * The variable lives at bits **27-31**, so `setVariableBitOffset: 27` — the same
+ * non-standard location the floor switch uses. `PONT` never waits on a variable
+ * itself, so it is a source (`isTarget: false`).
+ */
+
+/** Actor id of the Point Check trigger. */
+export const BLOCK_TRIGGER_ACTOR_ID = 'PONT';
+
+/** Stable smart-object id of the block trigger. */
+export const BLOCK_TRIGGER_ID = 'block-trigger';
+
+/**
+ * Tileset id of the trigger's EDITOR-ONLY hint: the ordinary movable block
+ * (`tileproperties.json` #33). It is a `previewTiles` entry, so it is drawn on
+ * the canvas but never written to the room or the archive.
+ */
+export const BLOCK_TRIGGER_PREVIEW_TILE = 33;
+
+/**
+ * `PONT` `Action Type` (bits 0-3) value `3` — "Use Enable Variable".
+ *
+ * This is the only useful behaviour for a block trigger: when the tile changes,
+ * the trigger enables the room-local variable in its `Enabled Variable` bits
+ * (27-31), which is what an activation link consumes. Every other enum value
+ * fires a one-off effect (heart, force fairy, lucke hole, …), so the menu is
+ * dropped and the value pinned instead.
+ */
+const BLOCK_TRIGGER_ACTION_USE_ENABLE_VARIABLE = 3;
+
+/**
+ * Builds the Block Trigger (`PONT`) definition.
+ *
+ * `Action Type` is **not** exposed: it is always "Use Enable Variable" so the
+ * trigger participates in activation links. Only `Enabled Variable` matters, and
+ * that is owned by the activation system (`setVariableBitOffset: 27`).
+ *
+ * @param definition The `PONT` catalog entry. Unused today — the object exposes
+ *   no catalog-derived menus — but kept for symmetry with the other builders.
+ */
+export function blockTriggerDefinition(
+  definition?: ActorDefinition,
+): ActivatableSmartObjectDefinition {
+  void definition;
+  return {
+    id: BLOCK_TRIGGER_ID,
+    baking: 'actor',
+    name: 'Block Trigger',
+    section: 'Misc',
+    actorId: BLOCK_TRIGGER_ACTOR_ID,
+    // Action Type 3 = "Use Enable Variable"; the Enabled Variable bits (27-31)
+    // start at 0 and are filled in by the activation link.
+    actorVariable: BLOCK_TRIGGER_ACTION_USE_ENABLE_VARIABLE,
+    // The trigger SETS a variable (it is an activation SOURCE). `PONT` keeps the
+    // `Enabled Variable` at bits 27-31, not the usual 22-26.
+    activatable: { isTarget: false, setVariableBitOffset: 27 },
+    // No context-menu fields: Action Type is pinned above and the enabled
+    // variable belongs to the activation link.
+    placement: { fields: [] },
+    // Nothing is stamped: the block hint below is editor-only scenery that is
+    // drawn on the canvas but never written into the room layers.
+    set: [
+      {
+        bottomLayerTiles: [],
+        topLayerTiles: [],
+        previewTiles: [{ dRow: 0, dCol: 0, tile: BLOCK_TRIGGER_PREVIEW_TILE }],
+      },
+    ],
+    // Ghost the hint so it reads as a trigger marker, not real terrain.
+    translucentPreviewTiles: true,
+  };
+}
+
+/** The Block Trigger definition without catalog metadata (no menus). */
+export const BLOCK_TRIGGER_DEFINITION: ActivatableSmartObjectDefinition =
+  blockTriggerDefinition();
+
+/** Every Misc block object: plain Block, Big Block and Block Trigger. */
+export const BLOCK_DEFINITIONS: SmartObjectDefinition[] = [
+  BLOCK_DEFINITION,
+  BIG_BLOCK_DEFINITION,
+  BLOCK_TRIGGER_DEFINITION,
+];
